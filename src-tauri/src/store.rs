@@ -45,6 +45,8 @@ pub struct NewTrack {
 pub struct Analysis {
     pub duration_ms: i64,
     pub bpm: Option<f64>,
+    /// Detected beats per bar (3 or 4), if clear.
+    pub meter: Option<u8>,
     pub loudness_db: Option<f64>,
     pub audio_start_ms: Option<i64>,
     pub audio_end_ms: Option<i64>,
@@ -418,6 +420,7 @@ impl Store {
             versions: vec![Version {
                 id: new_id(),
                 name: "Original".into(),
+                display_name: None,
                 styles: vec![],
                 legacy_style: None,
                 settings: Overrides::default(),
@@ -511,15 +514,24 @@ impl Store {
                 t.bpm = *v;
                 t.bpm_source = v.map(|_| p.bpm_source.clone().unwrap_or_else(|| "user".into()));
             }
-            if let Some(v) = &p.energy { t.energy = *v; }
-            if let Some(v) = &p.rhythm { t.rhythm = *v; }
+            if let Some(v) = &p.beats_per_bar {
+                t.beats_per_bar = v.or(t.detected_meter);
+                t.meter_source = match v {
+                    Some(_) => Some("user".into()),
+                    None => t.detected_meter.map(|_| "detected".into()),
+                };
+            }
             if let Some(v) = &p.rating { t.rating = *v; }
-            if let Some(v) = &p.familiar { t.familiar = *v; }
             if let Some(v) = &p.gain_db { t.gain_db = *v; }
             if let Some(v) = &p.notes { t.notes = v.clone(); }
             if let Some(v) = &p.preferred_source { t.preferred_source = v.clone(); }
             Ok(())
         })
+    }
+
+    /// A BPM the DJ entered (or from tags), which analysis should use for the meter.
+    pub fn known_bpm(&self, id: &str) -> Option<f64> {
+        self.track(id).ok().filter(|t| t.rec.bpm_source.as_deref() != Some("detected")).and_then(|t| t.rec.bpm)
     }
 
     pub fn set_analysis(&self, id: &str, a: &Analysis) -> Result<()> {
@@ -529,6 +541,7 @@ impl Store {
         }
         self.with_track(&id, |t| {
             t.analyzed = true;
+            t.analysis_version = crate::analysis::VERSION;
             t.loudness_db = a.loudness_db.map(|l| (l * 10.0).round() / 10.0);
             t.audio_start_ms = a.audio_start_ms;
             t.audio_end_ms = a.audio_end_ms;
@@ -536,6 +549,11 @@ impl Store {
                 t.duration_ms = a.duration_ms;
             }
             t.detected_bpm = a.bpm;
+            t.detected_meter = a.meter;
+            if t.meter_source.as_deref() != Some("user") {
+                t.beats_per_bar = a.meter;
+                t.meter_source = a.meter.map(|_| "detected".into());
+            }
             // Never overwrite a BPM the DJ entered (or one from tags).
             if t.bpm.is_none() || t.bpm_source.as_deref() == Some("detected") {
                 t.bpm = a.bpm;
@@ -636,7 +654,10 @@ impl Store {
             .values()
             .filter(|t| {
                 let has_file = t.sources.iter().any(|s| s.kind == "file" && inner.by_hash.contains_key(&s.key));
-                has_file && (!t.analyzed || !self.local.join("waveforms").join(format!("{}.bin", t.id)).exists())
+                has_file
+                    && (!t.analyzed
+                        || t.analysis_version < crate::analysis::VERSION
+                        || !self.local.join("waveforms").join(format!("{}.bin", t.id)).exists())
             })
             .map(|t| t.id.clone())
             .collect()
@@ -744,6 +765,7 @@ impl Store {
         self.with_track(&tid, |t| {
             let v = t.versions.iter_mut().find(|v| v.id == id).ok_or_else(|| anyhow!("version not found"))?;
             if let Some(x) = &p.name { v.name = x.clone(); }
+            if let Some(x) = &p.display_name { v.display_name = x.clone().filter(|s| !s.trim().is_empty()); }
             if let Some(x) = &p.styles { v.styles = dedup(x); }
             if let Some(x) = &p.target_bpm { v.settings.target_bpm = *x; }
             if let Some(x) = &p.cue_in_ms { v.settings.cue_in_ms = *x; }
@@ -1358,6 +1380,7 @@ mod tests {
                 Version {
                     id: String::new(),
                     name: "Rotary @150".into(),
+                    display_name: None,
                     styles: vec!["rotary-waltz".into()],
                     legacy_style: None,
                     settings: Overrides { target_bpm: Some(150.0), ..Default::default() },

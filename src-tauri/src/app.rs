@@ -255,25 +255,14 @@ impl App {
         if let Some(lib) = self.store.style_library() {
             return lib;
         }
-        let profile = self.profile(&self.settings.read().active_profile_id);
-        let used = self.store.style_usage();
-        let mut styles: Vec<LibraryStyle> = profile
-            .styles
-            .iter()
-            .map(|s| LibraryStyle { key: s.key.clone(), name: s.name.clone(), short: s.short.clone(), color: s.color.clone(), note: String::new() })
+        // No default styles: only those your songs already carry.
+        let styles: Vec<LibraryStyle> = self
+            .store
+            .style_usage()
+            .into_keys()
+            .map(|key| LibraryStyle { name: crate::settings::prettify_key(&key), key, ..Default::default() })
             .collect();
-        for key in used.keys() {
-            if !styles.iter().any(|s| &s.key == key) {
-                styles.push(LibraryStyle {
-                    key: key.clone(),
-                    name: crate::settings::prettify_key(key),
-                    short: key.chars().take(3).collect::<String>().to_uppercase(),
-                    color: "#8e8e93".into(),
-                    note: String::new(),
-                });
-            }
-        }
-        let lib = StyleLibrary { styles, mappings: Default::default() };
+        let lib = StyleLibrary { styles, ..Default::default() };
         if let Err(e) = self.store.save_style_library(lib.clone()) {
             log::warn!("saving styles.json: {e:#}");
         }
@@ -500,7 +489,8 @@ impl App {
     /// Spotify songs aren't analysed on import (that would stream every
     /// song); a song without a waveform is analysed when first loaded.
     fn analyse_spotify_once(&self, id: &Id) {
-        if self.store.waveform(id).is_some() || !self.spotify_analysed.lock().insert(id.clone()) {
+        let current = self.store.track(id).is_ok_and(|t| t.rec.analysis_version >= crate::analysis::VERSION);
+        if (current && self.store.waveform(id).is_some()) || !self.spotify_analysed.lock().insert(id.clone()) {
             return;
         }
         self.queue_analysis(id.clone(), true);
@@ -635,7 +625,7 @@ impl App {
             .map(|s| s.key.clone())
             .ok_or_else(|| anyhow!("no playable source"))?;
         let (mono, sr) = self.spotify.decode_for_analysis(&uri)?;
-        let a = crate::analysis::analyze(&mono, sr);
+        let a = crate::analysis::analyze(&mono, sr, self.store.known_bpm(id));
         self.store.set_analysis(id, &a)?;
         Ok(())
     }

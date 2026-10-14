@@ -49,6 +49,10 @@ pub async fn track_get(app: S<'_>, id: Id) -> Res<Track> {
 pub async fn track_update(app: S<'_>, id: Id, patch: serde_json::Value) -> Res<Track> {
     let patch: TrackPatch = serde_json::from_value(patch).map_err(err)?;
     app.store.update_track(&id, &patch).map_err(ae)?;
+    // The meter is detected on the beat grid of the BPM; follow a corrected BPM.
+    if patch.bpm.is_some() && app.store.track(&id).map_err(ae)?.rec.meter_source.as_deref() != Some("user") {
+        app.queue_analysis(id.clone(), true);
+    }
     crate::app::emit(&app.handle, "library-changed", vec![id.clone()]);
     // The projector shows titles from tracks.
     app.emit_perform();
@@ -325,11 +329,16 @@ pub async fn crate_set_smart(app: S<'_>, id: Id, smart: Option<serde_json::Value
     Ok(())
 }
 
-/// Adds a dance style to versions (a version can have several).
+/// Adds a dance style to versions (a version can have several). Songs used
+/// only in setlists (e.g. from Spotify) join the library.
 #[tauri::command]
 pub async fn style_add(app: S<'_>, style: String, version_ids: Vec<Id>) -> Res<()> {
     for v in &version_ids {
         app.store.assign_style(v, &style).map_err(ae)?;
+        let (_, track_id) = app.store.version(v).map_err(ae)?;
+        if !app.store.track(&track_id).map_err(ae)?.rec.in_library {
+            app.store.set_in_library(&track_id, true).map_err(ae)?;
+        }
     }
     crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
     app.emit_perform();

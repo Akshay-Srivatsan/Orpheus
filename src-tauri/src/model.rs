@@ -35,8 +35,8 @@ fn is_true(b: &bool) -> bool {
     *b
 }
 
-fn is_false(b: &bool) -> bool {
-    !*b
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
 }
 
 fn is_zero(f: &f64) -> bool {
@@ -78,6 +78,10 @@ pub struct Overrides {
 pub struct Version {
     pub id: Id,
     pub name: String,
+    /// Shown to dancers instead of the style names, e.g. the name of a
+    /// particular line dance (a setlist entry's label overrides it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     /// Your dance styles this version can be danced as (in order).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub styles: Vec<String>,
@@ -88,6 +92,7 @@ pub struct Version {
     pub settings: Overrides,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub comment: String,
+    /// Your tags (keys into `styles.json`'s `tags`), e.g. "familiar".
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
 }
@@ -96,6 +101,8 @@ pub struct Version {
 #[serde(rename_all = "camelCase")]
 pub struct VersionPatch {
     pub name: Option<String>,
+    #[serde(default, with = "double_option")]
+    pub display_name: Option<Option<String>>,
     /// Replaces the version's styles.
     pub styles: Option<Vec<String>>,
     #[serde(default, with = "double_option")]
@@ -143,7 +150,16 @@ pub struct StyleMappingRule {
     pub to: String,
 }
 
-/// `styles.json` in the library folder: your styles, and for each club
+/// One of your tags: a label on versions that isn't a dance style.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct LibraryTag {
+    pub key: String,
+    pub name: String,
+    pub color: String,
+}
+
+/// `styles.json` in the library folder: your styles and tags, and for each club
 /// profile id the rules mapping them onto the club's styles. Without a
 /// matching rule, a club style with the same key or name is used.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -151,6 +167,8 @@ pub struct StyleMappingRule {
 pub struct StyleLibrary {
     pub styles: Vec<LibraryStyle>,
     pub mappings: std::collections::BTreeMap<String, Vec<StyleMappingRule>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<LibraryTag>,
 }
 
 /// A saved cue point (hot cue) on a track; shared by all its versions.
@@ -183,13 +201,16 @@ pub struct TrackRecord {
     /// BPM from the file's tags or Spotify metadata, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tag_bpm: Option<f64>,
-    /// 0–10 (Powers' DJ tips).
-    pub energy: Option<i64>,
-    /// 0–10 rhythmic intensity: how clearly audible the beat is.
-    pub rhythm: Option<i64>,
+    /// Beats per bar used for the song (3 = triple, e.g. waltzes; 4 = duple).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub beats_per_bar: Option<u8>,
+    /// `detected` or `user`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meter_source: Option<String>,
+    /// Last meter found by analysis.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detected_meter: Option<u8>,
     pub rating: Option<i64>,
-    #[serde(skip_serializing_if = "is_false")]
-    pub familiar: bool,
     #[serde(skip_serializing_if = "is_zero")]
     pub gain_db: f64,
     pub loudness_db: Option<f64>,
@@ -198,6 +219,10 @@ pub struct TrackRecord {
     #[serde(skip_serializing_if = "String::is_empty")]
     pub notes: String,
     pub analyzed: bool,
+    /// Version of the analysis that ran (see `analysis::VERSION`); older
+    /// results are redone in the background.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub analysis_version: u32,
     /// `file`, `spotify`, or absent (prefer files).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preferred_source: Option<String>,
@@ -243,13 +268,11 @@ pub struct TrackPatch {
     #[serde(default, with = "double_option")]
     pub bpm: Option<Option<f64>>,
     pub bpm_source: Option<String>,
+    /// Beats per bar set by the DJ (`null` = use the detected meter).
     #[serde(default, with = "double_option")]
-    pub energy: Option<Option<i64>>,
-    #[serde(default, with = "double_option")]
-    pub rhythm: Option<Option<i64>>,
+    pub beats_per_bar: Option<Option<u8>>,
     #[serde(default, with = "double_option")]
     pub rating: Option<Option<i64>>,
-    pub familiar: Option<bool>,
     pub gain_db: Option<f64>,
     pub notes: Option<String>,
     #[serde(default, with = "double_option")]

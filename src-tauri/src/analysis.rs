@@ -1,18 +1,31 @@
-//! Offline track analysis: BPM, colored waveform overview, loudness, silence.
+//! Offline track analysis: BPM, meter, colored waveform overview, loudness, silence.
 
 use crate::store::Analysis;
 use rustfft::{num_complex::Complex, FftPlanner};
+
+/// Bumped when analysis gains results (2: meter); older tracks are re-analysed.
+pub const VERSION: u32 = 2;
 
 /// Number of waveform bins stored per track; each bin is 4 bytes:
 /// peak, low-band, mid-band, high-band (all 0..=255).
 pub const WAVEFORM_BINS: usize = 1024;
 
-pub fn analyze(mono: &[f32], sr: u32) -> Analysis {
+/// `known_bpm`: a tempo the DJ set (or from tags); the meter is detected on
+/// that beat grid rather than the detected one.
+pub fn analyze(mono: &[f32], sr: u32, known_bpm: Option<f64>) -> Analysis {
     let duration_ms = (mono.len() as f64 / sr as f64 * 1000.0) as i64;
     let (start, end) = silence_bounds(mono, sr);
+    let detected = detect_bpm(mono, sr);
+    let meter = known_bpm.or(detected).and_then(|b| detect_meter(mono, sr, b));
+    // A detected tempo at 2/3 of a triple song's beat is corrected.
+    let bpm = match (known_bpm, meter) {
+        (None, Some(m)) => Some(m.bpm),
+        _ => detected,
+    };
     Analysis {
         duration_ms,
-        bpm: detect_bpm(mono, sr),
+        meter: meter.map(|m| m.beats_per_bar),
+        bpm,
         loudness_db: loudness(mono, sr),
         audio_start_ms: start,
         audio_end_ms: end,
@@ -123,6 +136,33 @@ const FRAME: usize = 1024;
 
 /// Onset-strength envelope (log spectral flux) at ANALYSIS_SR / HOP frames/s.
 fn onset_envelope(mono: &[f32], sr: u32) -> (Vec<f32>, f64) {
+    onset_envelope_with(mono, sr, &Envelope { max_hz: 5000.0, ..Envelope::BPM })
+}
+
+/// How an onset envelope is computed.
+struct Envelope {
+    min_hz: f64,
+    max_hz: f64,
+    /// Magnitude scale before log compression.
+    scale: f32,
+    /// Remove the trend with a centred (vs trailing) one-second mean.
+    centred: bool,
+}
+
+impl Envelope {
+    /// As used for BPM detection.
+    const BPM: Envelope = Envelope { min_hz: 0.0, max_hz: 5000.0, scale: 1.0, centred: false };
+    /// For meter detection: normalised spectrum (closer to linear before the
+    /// log), centred trend removal; matches the prototype it was tuned with.
+    const METER: Envelope = Envelope { min_hz: 30.0, max_hz: 5000.0, scale: 2.0 / FRAME as f32, centred: true };
+}
+
+/// Onset envelope of the spectrum below `max_hz` (e.g. the bass, for accents), for meter detection.
+fn onset_envelope_band(mono: &[f32], sr: u32, max_hz: f64) -> (Vec<f32>, f64) {
+    onset_envelope_with(mono, sr, &Envelope { max_hz, ..Envelope::METER })
+}
+
+fn onset_envelope_with(mono: &[f32], sr: u32, cfg: &Envelope) -> (Vec<f32>, f64) {
     let factor = ((sr as f64 / ANALYSIS_SR).round() as usize).max(1);
     let ds: Vec<f32> = mono.chunks(factor).map(|c| c.iter().sum::<f32>() / c.len() as f32).collect();
     let rate = sr as f64 / factor as f64;
@@ -135,8 +175,9 @@ fn onset_envelope(mono: &[f32], sr: u32) -> (Vec<f32>, f64) {
     let window: Vec<f32> = (0..FRAME)
         .map(|i| 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / FRAME as f32).cos())
         .collect();
-    let max_bin = ((5000.0 / rate) * FRAME as f64) as usize;
-    let max_bin = max_bin.clamp(16, FRAME / 2);
+    let max_bin = ((cfg.max_hz / rate) * FRAME as f64) as usize;
+    let max_bin = max_bin.clamp(4, FRAME / 2);
+    let min_bin = (((cfg.min_hz / rate) * FRAME as f64).ceil() as usize).max(1);
     let mut prev = vec![0.0f32; max_bin];
     let mut env = Vec::with_capacity(ds.len() / HOP);
     let mut buf = vec![Complex::new(0.0f32, 0.0); FRAME];
@@ -147,8 +188,8 @@ fn onset_envelope(mono: &[f32], sr: u32) -> (Vec<f32>, f64) {
         }
         fft.process(&mut buf);
         let mut flux = 0.0f32;
-        for k in 1..max_bin {
-            let mag = (1.0 + 100.0 * buf[k].norm()).ln();
+        for k in min_bin..max_bin {
+            let mag = (1.0 + 100.0 * cfg.scale * buf[k].norm()).ln();
             let d = mag - prev[k];
             if d > 0.0 {
                 flux += d;
@@ -161,6 +202,15 @@ fn onset_envelope(mono: &[f32], sr: u32) -> (Vec<f32>, f64) {
     // Remove slowly varying trend (local mean over ~1 s) and half-wave rectify.
     let w = fps as usize;
     let mut out = vec![0.0f32; env.len()];
+    if cfg.centred {
+        let prefix: Vec<f64> = std::iter::once(0.0).chain(env.iter().scan(0.0f64, |a, &x| { *a += x as f64; Some(*a) })).collect();
+        for i in 0..env.len() {
+            let (a, b) = (i.saturating_sub(w / 2), (i + w - w / 2).min(env.len()));
+            let mean = ((prefix[b] - prefix[a]) / w as f64) as f32;
+            out[i] = (env[i] - mean).max(0.0);
+        }
+        return (out, fps);
+    }
     let mut acc = 0.0f32;
     let mut q = std::collections::VecDeque::new();
     for i in 0..env.len() {
@@ -239,6 +289,179 @@ pub fn detect_bpm(mono: &[f32], sr: u32) -> Option<f64> {
     Some((result * 10.0).round() / 10.0)
 }
 
+/// Beat times (envelope frames) by dynamic programming (Ellis 2007): beats
+/// sit on strong onsets and are spaced close to `period` frames, so the beat
+/// grid can follow small tempo drifts.
+fn track_beats(env: &[f32], period: f64) -> Vec<usize> {
+    let n = env.len();
+    if n < (period * 8.0) as usize || period < 2.0 {
+        return vec![];
+    }
+    let mean = env.iter().sum::<f32>() / n as f32;
+    let std = (env.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / n as f32).sqrt().max(1e-9);
+    let local: Vec<f64> = env.iter().map(|&x| (x / std) as f64).collect();
+    // Strong preference for the given tempo.
+    const TIGHTNESS: f64 = 100.0;
+    let (lo, hi) = ((period * 0.5).round() as usize, (period * 2.0).round() as usize);
+    let mut score = local.clone();
+    let mut back = vec![usize::MAX; n];
+    for t in lo..n {
+        let mut best = (f64::MIN, usize::MAX);
+        for gap in lo..=hi.min(t) {
+            let tau = t - gap;
+            let penalty = TIGHTNESS * ((gap as f64 / period).ln()).powi(2);
+            let v = score[tau] - penalty;
+            if v > best.0 {
+                best = (v, tau);
+            }
+        }
+        if best.1 != usize::MAX && best.0 > 0.0 {
+            score[t] = local[t] + best.0;
+            back[t] = best.1;
+        }
+    }
+    // Start from the best-scoring frame within the last beat period.
+    let tail = n.saturating_sub(period.ceil() as usize);
+    let mut t = (tail..n).max_by(|&a, &b| score[a].total_cmp(&score[b])).unwrap_or(n - 1);
+    let mut beats = vec![t];
+    while back[t] != usize::MAX {
+        t = back[t];
+        beats.push(t);
+    }
+    beats.reverse();
+    beats
+}
+
+/// Strength of each beat: the envelope's peak near it.
+fn beat_strengths(env: &[f32], beats: &[usize], radius: usize) -> Vec<f64> {
+    beats
+        .iter()
+        .map(|&b| env[b.saturating_sub(radius)..(b + radius + 1).min(env.len())].iter().fold(0.0f32, |a, &x| a.max(x)) as f64)
+        .collect()
+}
+
+/// Normalized autocorrelation of a sequence at `lag` (mean removed).
+fn seq_autocorr(x: &[f64], lag: usize) -> f64 {
+    if x.len() <= lag * 4 {
+        return 0.0;
+    }
+    let m = x.iter().sum::<f64>() / x.len() as f64;
+    let var: f64 = x.iter().map(|v| (v - m).powi(2)).sum::<f64>() / x.len() as f64;
+    if var <= 1e-12 {
+        return 0.0;
+    }
+    let n = x.len() - lag;
+    (0..n).map(|i| (x[i] - m) * (x[i + lag] - m)).sum::<f64>() / n as f64 / var
+}
+
+/// Detected meter, and the beat tempo it implies.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Meter {
+    /// 3 (triple: waltzes, 6/8 counted in eighths) or 4 (duple: 2/4 and 4/4
+    /// count alike for dancing).
+    pub beats_per_bar: u8,
+    /// The beat tempo: `bpm`, or 1.5x it when the tempo was detected at 2/3 of
+    /// a triple song's beat (common in 6/8).
+    pub bpm: f64,
+}
+
+/// Clear evidence threshold for both measures below.
+const METER_MARGIN: f64 = 0.15;
+
+/// Meter of a song, or `None` when unclear. Two measures are combined:
+///
+/// - *Pulse grouping* (tempo-free): in the onset autocorrelation, find the
+///   fastest strong pulse and compare its periodicities at 3x/6x against
+///   2x/4x. Robust when the detected tempo is at the wrong level.
+/// - *Accent pattern* on a beat grid tracked at `bpm`: do bass and onset
+///   accents repeat every 3 (and 6) beats, or every 2 (and 4)?
+///
+/// The pulse grouping decides when clear; otherwise the accent pattern does.
+/// Tuned on a library of dance music (waltzes, 6/8 ballads, polkas, line
+/// dances); ambiguous songs are left unknown for the DJ to set.
+pub fn detect_meter(mono: &[f32], sr: u32, bpm: f64) -> Option<Meter> {
+    let (full, fps) = onset_envelope_band(mono, sr, 5000.0);
+    let (bass, _) = onset_envelope_band(mono, sr, 200.0);
+    let n = full.len().min(bass.len());
+    if n < (fps * 20.0) as usize {
+        return None;
+    }
+    let (full, bass) = (&full[..n], &bass[..n]);
+    let grouping = pulse_grouping(full, bass, fps);
+    let accent = accent_pattern(full, bass, fps, bpm);
+    log::debug!("meter at {bpm:.1} BPM: grouping {grouping:?}, accent {accent:?}");
+    let beats_per_bar = match (grouping, accent) {
+        (Some(g), _) if g >= METER_MARGIN => 3,
+        (Some(g), _) if g <= -METER_MARGIN => 4,
+        (_, Some(a)) if a.abs() >= METER_MARGIN => if a > 0.0 { 3 } else { 4 },
+        _ => return None,
+    };
+    let mut beat = bpm;
+    // Triple, but the detected grid looks duple: the tempo is probably 2/3 of the beat.
+    if beats_per_bar == 3 && accent.is_some_and(|a| a <= -METER_MARGIN) && bpm * 1.5 <= 220.0 {
+        if accent_pattern(full, bass, fps, bpm * 1.5).is_some_and(|a| a >= METER_MARGIN) {
+            beat = bpm * 1.5;
+        }
+    }
+    Some(Meter { beats_per_bar, bpm: (beat * 10.0).round() / 10.0 })
+}
+
+/// Tempo-free triple (+) vs duple (-) evidence from the onset autocorrelation.
+fn pulse_grouping(full: &[f32], bass: &[f32], fps: f64) -> Option<f64> {
+    let env: Vec<f32> = full.iter().zip(bass).map(|(a, b)| a + b).collect();
+    let mean = env.iter().sum::<f32>() / env.len() as f32;
+    let env: Vec<f32> = env.iter().map(|x| x - mean).collect();
+    let max_lag = (fps * 4.5) as usize;
+    let mut ac = autocorr(&env, max_lag);
+    let zero = env.iter().map(|x| x * x).sum::<f32>() / env.len() as f32;
+    if zero <= 0.0 {
+        return None;
+    }
+    ac.iter_mut().for_each(|v| *v /= zero);
+    let (lo, hi) = ((fps * 0.15) as usize, (fps * 0.5) as usize);
+    let peaks: Vec<usize> = (lo.max(1)..hi.min(ac.len() - 1)).filter(|&i| ac[i] > ac[i - 1] && ac[i] >= ac[i + 1]).collect();
+    let top = peaks.iter().map(|&p| ac[p]).fold(f32::MIN, f32::max);
+    if peaks.is_empty() || top <= 0.0 {
+        return None;
+    }
+    // The fastest strong pulse.
+    let tatum = *peaks.iter().find(|&&p| ac[p] >= 0.6 * top)? as f64;
+    let at = |m: f64| -> f64 {
+        let x = (tatum * m) as usize;
+        let w = ((tatum * 0.08) as usize).max(1);
+        if x + 1 >= ac.len() {
+            return 0.0;
+        }
+        ac[x.saturating_sub(w)..(x + w + 2).min(ac.len())].iter().fold(f32::MIN, |a, &b| a.max(b)) as f64
+    };
+    Some((at(3.0) + at(6.0)) / 2.0 - (at(2.0) + at(4.0)) / 2.0)
+}
+
+/// Triple (+) vs duple (-) accent evidence on a beat grid at `bpm`.
+fn accent_pattern(full: &[f32], bass: &[f32], fps: f64, bpm: f64) -> Option<f64> {
+    let period = fps * 60.0 / bpm;
+    let beats = track_beats(full, period);
+    if beats.len() < 32 {
+        return None;
+    }
+    let radius = (period * 0.15).round() as usize;
+    let mut score = 0.0;
+    for (env, weight) in [(bass, 0.6), (full, 0.4)] {
+        let s = beat_strengths(env, &beats, radius);
+        let r = |lag| seq_autocorr(&s, lag);
+        score += weight * ((r(3) + r(6)) / 2.0 - (r(2) + r(4)) / 2.0);
+    }
+    Some(score)
+}
+
+/// (pulse grouping, accent pattern) evidence, for developer tools.
+pub fn meter_evidence(mono: &[f32], sr: u32, bpm: f64) -> (Option<f64>, Option<f64>) {
+    let (full, fps) = onset_envelope_band(mono, sr, 5000.0);
+    let (bass, _) = onset_envelope_band(mono, sr, 200.0);
+    let n = full.len().min(bass.len());
+    (pulse_grouping(&full[..n], &bass[..n], fps), accent_pattern(&full[..n], &bass[..n], fps, bpm))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,6 +489,42 @@ mod tests {
             let got = detect_bpm(&audio, 44100).unwrap();
             let ok = [got, got * 2.0, got / 2.0].iter().any(|g| (g - bpm).abs() < 1.0);
             assert!(ok, "expected {bpm}, got {got}");
+        }
+    }
+
+    /// Clicks with a bass "oom" on the first beat of every bar of `beats`.
+    fn accented(bpm: f64, beats: usize, secs: f64, sr: u32) -> Vec<f32> {
+        let n = (secs * sr as f64) as usize;
+        let mut v = vec![0.0f32; n];
+        let period = 60.0 / bpm * sr as f64;
+        let mut k = 0;
+        loop {
+            let s = (k as f64 * period) as usize;
+            if s >= n {
+                break;
+            }
+            let down = k % beats == 0;
+            for i in 0..4000.min(n - s) {
+                let t = i as f32 / sr as f32;
+                // Hi click on every beat; a low thump on downbeats.
+                let mut x = (-(i as f32) / 80.0).exp() * (t * 3000.0 * std::f32::consts::TAU).sin() * 0.4;
+                if down {
+                    x += (-t / 0.08).exp() * (t * 60.0 * std::f32::consts::TAU).sin() * 0.9;
+                }
+                v[s + i] += x;
+            }
+            k += 1;
+        }
+        v
+    }
+
+    #[test]
+    fn detects_meter() {
+        let sr = 44100;
+        for &(bpm, beats, want) in &[(150.0, 3, 3), (110.0, 3, 3), (120.0, 4, 4), (128.0, 2, 4)] {
+            let audio = accented(bpm, beats, 60.0, sr);
+            let got = detect_meter(&audio, sr, bpm).map(|m| m.beats_per_bar);
+            assert_eq!(got, Some(want), "{bpm} BPM, {beats} beats per bar");
         }
     }
 
