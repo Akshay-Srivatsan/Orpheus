@@ -112,7 +112,7 @@
   .chip.on .n { color: var(--text-dim); }
   .chip.all.on { --c: var(--accent); }
   .chip.drop { outline: 2px solid var(--blue); outline-offset: 1px; }
-  .more { flex: none; width: auto; height: 22px; padding: 0 6px; font-size: var(--fs-sm); line-height: 20px; border-radius: 11px; color: var(--text-dim); }
+  .more { flex: none; width: auto; height: 22px; padding: 0 6px; font-size: var(--fs-sm); line-height: normal; border-radius: 11px; color: var(--text-dim); box-sizing: border-box; -webkit-appearance: none; appearance: none; padding-right: 18px; background: var(--bg-elev-2) url("data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 width=%2710%27 height=%276%27><path d=%27M1 1l4 4 4-4%27 stroke=%27%23999%27 fill=%27none%27/></svg>") no-repeat right 6px center; }
   .info { display: flex; align-items: center; gap: 12px; padding: 4px 12px; font-size: var(--fs-sm); border-bottom: 1px solid var(--border); background: var(--bg-elev); }
   .sname { font-weight: 600; }
   label { font-size: var(--fs-sm); }
