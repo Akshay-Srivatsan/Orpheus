@@ -77,7 +77,7 @@ During a set you can skip, reorder or insert songs at any time.
 
 The library folder holds tracks, versions, setlists, crates and club
 profiles as pretty-printed JSON, one file per object. Your dance styles and
-their club mappings are in `styles.json`. Play history and play counts are
+their club mappings (and announcement pronunciations) are in `styles.json`. Play history and play counts are
 derived from the setlists, so there is no separate log to merge. Keep the
 folder in **git** or a synced folder to share it between DJs. IDs are
 random, so concurrent edits don't collide. After a `git pull`, use
@@ -189,6 +189,12 @@ button under Play Next for the current session).
     Spanish, French, Italian, Brazilian Portuguese and Hindi. Downloading
     needs the internet; speaking doesn't. The model is loaded ahead of time
     and released after 15 minutes without announcements.
+  - **Pronunciation:** if the voice says a word wrong (a dance name, say),
+    add it under Settings → Auto Mode → Pronunciation with how to say it:
+    a respelling ("Schottische" → "shot-eesh") or phonemes between slashes
+    (`/ʃɑtˈiʃ/`, Kokoro's symbols; "phonemes" shows what the voice reads).
+    Matching is by whole word, ignoring case. The list is saved in the
+    library's `styles.json`, so it travels with your library.
 - **Per entry** (Info tab, "Auto mode", for an entry in a set):
   - the pause before it;
   - what is announced: a random sentence, your own text (`{dance}`

@@ -159,6 +159,8 @@ export const api = {
   ttsVoices: () => call<T.VoiceInfo[]>("tts_voices"),
   ttsRemove: () => call<void>("tts_remove"),
   ttsSay: (text: string) => call<void>("tts_say", { text }),
+  /** The phonemes the announcer would read (with your pronunciations). */
+  ttsPhonemes: (text: string) => call<string>("tts_phonemes", { text }),
   announceNext: () => call<void>("announce_next"),
   /** Tells the backend what an entry is called for dancers (club names are resolved here). */
   setDanceName: (entryId: T.Id, name: string) => call<void>("set_dance_name", { entryId, name }),

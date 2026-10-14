@@ -659,8 +659,9 @@ impl App {
         };
         let announcer = self.announcer.clone();
         let handle = self.handle.clone();
+        let prons = self.style_library().pronunciations;
         log::info!("announcement: {text}");
-        std::thread::spawn(move || match tts.synthesize(&cfg, &text) {
+        std::thread::spawn(move || match tts.synthesize(&cfg, &text, &prons) {
             Ok((samples, rate)) => {
                 announcer.play(&samples, rate, volume);
             }
@@ -735,8 +736,9 @@ impl App {
                     Some(text) => {
                         log::info!("announcement: {text}");
                         let (tts, cfg, slot) = (self.tts.clone(), self.settings.read().announce.tts_config(), clip.clone());
+                        let prons = self.style_library().pronunciations;
                         std::thread::spawn(move || {
-                            let r = tts.synthesize(&cfg, &text).map_err(|e| format!("{e:#}"));
+                            let r = tts.synthesize(&cfg, &text, &prons).map_err(|e| format!("{e:#}"));
                             *slot.lock() = Some(r);
                         });
                     }

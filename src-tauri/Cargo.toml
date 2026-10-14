@@ -58,6 +58,7 @@ base64 = "0.22"
 # features as stem-splitter-core's), misaki and espeak-ng (pure Rust) phonemes.
 ort = { version = "=2.0.0-rc.11", features = ["download-binaries"] }
 misaki-rs = { version = "0.6", default-features = false }
+regex = "1"
 espeak-ng = { version = "0.2", default-features = false, features = ["bundled-data-en", "bundled-data-es", "bundled-data-fr", "bundled-data-it", "bundled-data-pt", "bundled-data-hi"] }
 open = "5"
 

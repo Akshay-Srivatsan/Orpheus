@@ -187,6 +187,19 @@ pub struct StyleLibrary {
     pub mappings: std::collections::BTreeMap<String, Vec<StyleMappingRule>>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<LibraryTag>,
+    /// How announcements say words (dance names etc.).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub pronunciations: Vec<Pronunciation>,
+}
+
+/// An announcement pronunciation: `word` (or phrase, whole words, any case)
+/// is said as `say`: a respelling ("shot-eesh"), or phonemes between slashes
+/// (Kokoro's phoneme symbols).
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Pronunciation {
+    pub word: String,
+    pub say: String,
 }
 
 /// A saved cue point (hot cue) on a track; shared by all its versions.

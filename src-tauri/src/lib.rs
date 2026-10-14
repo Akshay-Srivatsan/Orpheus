@@ -92,6 +92,7 @@ pub fn run() {
             commands::tts_voices,
             commands::tts_remove,
             commands::tts_say,
+            commands::tts_phonemes,
             commands::announce_next,
             commands::set_dance_name,
             commands::tag_set,

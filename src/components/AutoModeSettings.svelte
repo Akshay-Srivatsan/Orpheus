@@ -4,7 +4,7 @@
   import { onMount } from "svelte";
   import { api } from "../lib/api";
   import { app, confirmAction } from "../lib/state.svelte";
-  import type { AnnounceSettings, Settings, VoiceInfo } from "../lib/types";
+  import type { AnnounceSettings, Pronunciation, Settings, StyleLibrary, VoiceInfo } from "../lib/types";
   import Icon from "./Icon.svelte";
 
   const s = $derived(app.settings!);
@@ -38,6 +38,30 @@
     const patterns = [...a.patterns];
     patterns[i] = text;
     setAnnounce({ patterns });
+  }
+
+  // ---------------------------------------------------------------- pronunciations (in styles.json)
+  const prons = $derived(app.styleLib?.pronunciations ?? []);
+  let newWord = $state("");
+  let shown = $state<Record<number, string>>({});
+
+  function saveProns(next: Pronunciation[]) {
+    const lib = app.styleLib;
+    if (!lib) return;
+    const { usage, tagUsage, ...rest } = $state.snapshot(lib);
+    const saved: StyleLibrary = { ...structuredClone(rest), pronunciations: next };
+    app.styleLib = { ...saved, usage, tagUsage };
+    app.run(api.saveStyles(saved));
+  }
+
+  function setPron(i: number, patch: Partial<Pronunciation>) {
+    shown = {};
+    saveProns(prons.map((p, j) => (j === i ? { ...p, ...patch } : p)));
+  }
+
+  async function showPhonemes(i: number) {
+    const p = await app.run(api.ttsPhonemes(prons[i].word));
+    if (p != null) shown = { ...shown, [i]: p };
   }
 
   function trySay() {
@@ -129,6 +153,38 @@
     <span class="faint small">Announcements are spoken by <a href="https://huggingface.co/hexgrad/Kokoro-82M" target="_blank" rel="noreferrer">Kokoro</a>, an open-source text-to-speech model that runs inside Orpheus on this computer. Downloading needs the internet once.</span>
   </span>
 
+  <span class="l">Pronunciation</span>
+  <span class="col">
+    <span class="faint small">
+      How announcements say words they get wrong, e.g. dance names. Write it the way it sounds (“shot-EESH”), or give
+      phonemes between slashes (<code>/ʃɑtˈiʃ/</code>); “phonemes” shows what the voice reads now. Saved with your library.
+    </span>
+    {#if prons.length}
+      <table class="prons">
+        <thead><tr><th>Word or phrase</th><th>Say as</th><th></th></tr></thead>
+        <tbody>
+          {#each prons as p, i (i)}
+            <tr>
+              <td><input type="text" value={p.word} onchange={(e) => setPron(i, { word: e.currentTarget.value.trim() })} /></td>
+              <td><input type="text" value={p.say} placeholder="e.g. shot-eesh" onchange={(e) => setPron(i, { say: e.currentTarget.value.trim() })} /></td>
+              <td class="nowrap">
+                <button class="plain small" disabled={tts?.state !== "ready" || !p.word} title="Say it with this pronunciation"
+                  onclick={() => app.run(api.ttsSay(p.word))}><Icon name="speaker" size={12} /></button>
+                <button class="plain small" disabled={tts?.state !== "ready" || !p.word} onclick={() => showPhonemes(i)}>phonemes</button>
+                <button class="plain icon danger" title="Remove" onclick={() => saveProns(prons.filter((_, j) => j !== i))}><Icon name="x" size={12} /></button>
+              </td>
+            </tr>
+            {#if shown[i]}<tr><td></td><td colspan="2" class="ph"><code>{shown[i]}</code></td></tr>{/if}
+          {/each}
+        </tbody>
+      </table>
+    {/if}
+    <form class="row" onsubmit={(e) => { e.preventDefault(); if (newWord.trim()) { saveProns([...prons, { word: newWord.trim(), say: "" }]); newWord = ""; } }}>
+      <input type="text" placeholder="Word or phrase" bind:value={newWord} />
+      <button type="submit" class="small" disabled={!newWord.trim()}><Icon name="plus" size={12} /> Add Pronunciation</button>
+    </form>
+  </span>
+
   <span class="l">Sound</span>
   <span class="col">
     <span class="row">Speed <input type="range" min="0.7" max="1.4" step="0.05" value={a.speed || 1}
@@ -158,5 +214,11 @@
   .err { color: var(--red); }
   .warn { color: var(--yellow); }
   .danger { color: var(--red); }
+  .prons { border-collapse: collapse; font-size: var(--fs-sm); }
+  .prons th { text-align: left; color: var(--text-faint); font-weight: 600; padding: 2px 4px; }
+  .prons td { padding: 2px 4px; }
+  .prons input { width: 200px; }
+  .nowrap { white-space: nowrap; }
+  .ph code { user-select: text; }
   code { font: var(--fs-sm) var(--font-mono); background: var(--bg); padding: 1px 5px; border-radius: 4px; }
 </style>

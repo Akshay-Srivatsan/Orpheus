@@ -11,6 +11,7 @@
 //! chosen voice (~0.5 MB) are downloaded on first use into the machine-local
 //! data folder. Installing needs an internet connection; speaking does not.
 
+use crate::model::Pronunciation;
 use anyhow::{anyhow, Context, Result};
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -115,7 +116,6 @@ struct Loaded {
     vocab: HashMap<char, i64>,
     /// Style vectors per voice: rows of 256 floats, one per input length.
     voices: HashMap<String, Vec<f32>>,
-    phonemizers: HashMap<Lang, Phonemizer>,
     last_used: Instant,
 }
 
@@ -128,6 +128,8 @@ pub struct Tts {
     state: Mutex<TtsState>,
     on_change: Mutex<Option<ChangeFn>>,
     loaded: Mutex<Option<Loaded>>,
+    /// Phonemizers by language (independent of the model).
+    phonemizers: Mutex<HashMap<Lang, Arc<Phonemizer>>>,
     /// Recent clips (text → samples), so a repeated announcement is instant.
     cache: Mutex<HashMap<String, Arc<Vec<f32>>>>,
 }
@@ -150,6 +152,7 @@ impl Tts {
             state: Mutex::new(TtsState::Missing),
             on_change: Mutex::new(None),
             loaded: Mutex::new(None),
+            phonemizers: Mutex::new(HashMap::new()),
             cache: Mutex::new(HashMap::new()),
         })
     }
@@ -287,7 +290,7 @@ impl Tts {
         }
         let tts = self.clone();
         std::thread::spawn(move || {
-            if let Err(e) = tts.synthesize(&cfg, "Ready.") {
+            if let Err(e) = tts.synthesize(&cfg, "Ready.", &[]) {
                 log::warn!("tts warm-up: {e:#}");
             }
         });
@@ -304,9 +307,9 @@ impl Tts {
 
     /// Speaks `text`: mono samples and their sample rate. Runs at low priority
     /// (call from a background thread).
-    pub fn synthesize(&self, cfg: &TtsConfig, text: &str) -> Result<(Arc<Vec<f32>>, u32)> {
+    pub fn synthesize(&self, cfg: &TtsConfig, text: &str, prons: &[Pronunciation]) -> Result<(Arc<Vec<f32>>, u32)> {
         let speed = if cfg.speed > 0.0 { cfg.speed } else { 1.0 };
-        let key = format!("{}|{}|{speed}|{text}", cfg.voice, cfg.model);
+        let key = format!("{}|{}|{speed}|{text}|{}", cfg.voice, cfg.model, prons_key(prons));
         if let Some(hit) = self.cache.lock().get(&key) {
             return Ok((hit.clone(), SAMPLE_RATE));
         }
@@ -317,23 +320,14 @@ impl Tts {
         // Synthesis is CPU-heavy: below the audio threads. ONNX Runtime's
         // worker threads are created from this thread and inherit it.
         crate::audio::priority::lower_current_thread();
+        let phonemes = self.phonemizer(lang)?.phonemize(&with_pronunciations(text, prons))?;
         let mut guard = self.loaded.lock();
-        if guard.as_ref().is_none_or(|l| l.model_file != cfg.model_file()) {
-            *guard = None;
-            *guard = Some(self.load(cfg)?);
-        }
-        let l = guard.as_mut().expect("loaded");
-        l.last_used = Instant::now();
+        let l = self.ready(&mut guard, cfg)?;
         if !l.voices.contains_key(&cfg.voice) {
             let raw = std::fs::read(self.voices_dir().join(format!("{}.bin", cfg.voice)))?;
             let styles = raw.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
             l.voices.insert(cfg.voice.clone(), styles);
         }
-        if !l.phonemizers.contains_key(&lang) {
-            let p = Phonemizer::new(lang, &self.dir.join("espeak-ng-data"))?;
-            l.phonemizers.insert(lang, p);
-        }
-        let phonemes = l.phonemizers[&lang].phonemize(text)?;
         let mut audio = vec![];
         for chunk in split_tokens(&phonemes, &l.vocab) {
             let n = chunk.len();
@@ -363,6 +357,36 @@ impl Tts {
         Ok((clip, SAMPLE_RATE))
     }
 
+    /// The phonemes Kokoro would read for `text` (to check pronunciations).
+    pub fn phonemes(&self, cfg: &TtsConfig, text: &str, prons: &[Pronunciation]) -> Result<String> {
+        let (lang, _) = voice_lang(&cfg.voice).ok_or_else(|| anyhow!("Unsupported Kokoro voice “{}”", cfg.voice))?;
+        self.phonemizer(lang)?.phonemize(&with_pronunciations(text, prons))
+    }
+
+    fn phonemizer(&self, lang: Lang) -> Result<Arc<Phonemizer>> {
+        let mut map = self.phonemizers.lock();
+        if let Some(p) = map.get(&lang) {
+            return Ok(p.clone());
+        }
+        let p = Arc::new(Phonemizer::new(lang, &self.dir.join("espeak-ng-data"))?);
+        map.insert(lang, p.clone());
+        Ok(p)
+    }
+
+    /// The loaded model (loading it if needed).
+    fn ready<'a>(&self, guard: &'a mut Option<Loaded>, cfg: &TtsConfig) -> Result<&'a mut Loaded> {
+        if !self.installed(cfg) {
+            return Err(anyhow!("The announcer voice isn't installed (Settings → Auto Mode)"));
+        }
+        if guard.as_ref().is_none_or(|l| l.model_file != cfg.model_file()) {
+            *guard = None;
+            *guard = Some(self.load(cfg)?);
+        }
+        let l = guard.as_mut().expect("loaded");
+        l.last_used = Instant::now();
+        Ok(l)
+    }
+
     fn load(&self, cfg: &TtsConfig) -> Result<Loaded> {
         let started = Instant::now();
         let tok: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(self.dir.join("tokenizer.json"))?)?;
@@ -382,10 +406,62 @@ impl Tts {
             session,
             vocab,
             voices: HashMap::new(),
-            phonemizers: HashMap::new(),
             last_used: Instant::now(),
         })
     }
+}
+
+/// A piece of text after applying pronunciations.
+#[derive(Debug, PartialEq)]
+enum Piece {
+    Text(String),
+    /// Phonemes for this word (from a `/…/` pronunciation).
+    Phonemes { word: String, phonemes: String },
+}
+
+/// Text with pronunciations applied: respellings replace the word in the
+/// text; phoneme pronunciations become separate pieces. Whole words, any
+/// case; longer entries win over shorter ones.
+fn with_pronunciations(text: &str, prons: &[Pronunciation]) -> Vec<Piece> {
+    let mut prons: Vec<&Pronunciation> = prons.iter().filter(|p| !p.word.trim().is_empty() && !p.say.trim().is_empty()).collect();
+    prons.sort_by_key(|p| std::cmp::Reverse(p.word.trim().chars().count()));
+    let mut pieces = vec![Piece::Text(text.to_string())];
+    for p in prons {
+        let Ok(re) = regex::Regex::new(&format!(r"(?i)\b{}\b", regex::escape(p.word.trim()))) else { continue };
+        let say = p.say.trim();
+        let phonemes = say.strip_prefix('/').and_then(|s| s.strip_suffix('/'));
+        let mut next = vec![];
+        for piece in pieces {
+            let Piece::Text(t) = piece else {
+                next.push(piece);
+                continue;
+            };
+            let mut last = 0;
+            for m in re.find_iter(&t) {
+                next.push(Piece::Text(t[last..m.start()].to_string()));
+                match phonemes {
+                    Some(ph) => next.push(Piece::Phonemes { word: m.as_str().to_string(), phonemes: ph.trim().to_string() }),
+                    None => next.push(Piece::Text(say.to_string())),
+                }
+                last = m.end();
+            }
+            next.push(Piece::Text(t[last..].to_string()));
+        }
+        // Merge neighbouring text pieces (a respelling stays in its sentence).
+        pieces = vec![];
+        for piece in next {
+            match (pieces.last_mut(), piece) {
+                (Some(Piece::Text(a)), Piece::Text(b)) => a.push_str(&b),
+                (_, Piece::Text(b)) if b.is_empty() => {}
+                (_, piece) => pieces.push(piece),
+            }
+        }
+    }
+    pieces
+}
+
+fn prons_key(prons: &[Pronunciation]) -> String {
+    prons.iter().map(|p| format!("{}={}", p.word, p.say)).collect::<Vec<_>>().join(";")
 }
 
 /// Phoneme token ids in chunks Kokoro accepts, split at pauses where possible.
@@ -431,13 +507,32 @@ impl Phonemizer {
         })
     }
 
-    fn phonemize(&self, text: &str) -> Result<String> {
+    fn phonemize(&self, pieces: &[Piece]) -> Result<String> {
         match self {
             Phonemizer::English(g2p, gb) => {
-                let (p, _) = g2p.g2p(text).map_err(|e| anyhow!("phonemizing: {e}"))?;
+                // misaki's own markup keeps the words in their sentence: `[word](/phonemes/)`.
+                let text: String = pieces
+                    .iter()
+                    .map(|p| match p {
+                        Piece::Text(t) => t.clone(),
+                        Piece::Phonemes { word, phonemes } => format!("[{}](/{}/)", word.replace(['[', ']'], ""), phonemes),
+                    })
+                    .collect();
+                let (p, _) = g2p.g2p(&text).map_err(|e| anyhow!("phonemizing: {e}"))?;
                 Ok(normalize_english(&p, *gb))
             }
-            Phonemizer::Espeak(tr) => Ok(tr.lock().text_to_ipa(text)?.replace('\u{200d}', "")),
+            Phonemizer::Espeak(tr) => {
+                let tr = tr.lock();
+                let mut out = vec![];
+                for p in pieces {
+                    match p {
+                        Piece::Text(t) if !t.trim().is_empty() => out.push(tr.text_to_ipa(t)?.replace('\u{200d}', "")),
+                        Piece::Text(_) => {}
+                        Piece::Phonemes { phonemes, .. } => out.push(phonemes.clone()),
+                    }
+                }
+                Ok(out.join(" "))
+            }
         }
     }
 }
@@ -493,6 +588,38 @@ mod tests {
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].len(), 401);
         assert!(chunks.iter().all(|c| c.len() <= MAX_TOKENS));
+    }
+
+    #[test]
+    fn pronunciations_apply_to_whole_words() {
+        let prons = vec![
+            Pronunciation { word: "Schottische".into(), say: "shot-eesh".into() },
+            Pronunciation { word: "hambo".into(), say: "/hˈɑmbO/".into() },
+            Pronunciation { word: "Cha Cha".into(), say: "chah chah".into() },
+        ];
+        let pieces = with_pronunciations("A schottische, a Hambo and a cha cha (not Hambone).", &prons);
+        assert_eq!(
+            pieces,
+            vec![
+                Piece::Text("A shot-eesh, a ".into()),
+                Piece::Phonemes { word: "Hambo".into(), phonemes: "hˈɑmbO".into() },
+                Piece::Text(" and a chah chah (not Hambone).".into()),
+            ]
+        );
+        assert_eq!(with_pronunciations("Waltz", &[]), vec![Piece::Text("Waltz".into())]);
+    }
+
+    #[test]
+    fn phoneme_overrides_reach_the_phonemes() {
+        let dir = std::env::temp_dir().join(format!("orpheus-tts-test-{}", std::process::id()));
+        let p = Phonemizer::new(Lang::EnUs, &dir).unwrap();
+        let prons = vec![Pronunciation { word: "hambo".into(), say: "/hˈɑmbO/".into() }];
+        let out = p.phonemize(&with_pronunciations("The next dance is a Hambo.", &prons)).unwrap();
+        assert!(out.contains("hˈɑmbO"), "{out}");
+        assert!(out.contains("dˈæns"), "{out}");
+        let plain = p.phonemize(&with_pronunciations("Rotary Waltz", &[])).unwrap();
+        assert!(!plain.contains('\u{200d}') && !plain.is_empty(), "{plain}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

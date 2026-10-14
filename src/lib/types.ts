@@ -197,6 +197,13 @@ export interface StyleLibrary {
   styles: LibraryStyle[];
   mappings: Record<string, StyleMappingRule[]>;
   tags?: LibraryTag[];
+  /** How announcements say words: a respelling, or phonemes between slashes. */
+  pronunciations?: Pronunciation[];
+}
+
+export interface Pronunciation {
+  word: string;
+  say: string;
 }
 
 export interface StylesInfo extends StyleLibrary {

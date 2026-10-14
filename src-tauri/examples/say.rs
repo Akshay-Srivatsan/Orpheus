@@ -13,7 +13,7 @@ fn main() -> anyhow::Result<()> {
     let text = a[4..].join(" ");
     for round in 0..2 {
         let t = std::time::Instant::now();
-        let (samples, rate) = tts.synthesize(&cfg, &format!("{text}{}", if round == 1 { " Thank you." } else { "" }))?;
+        let (samples, rate) = tts.synthesize(&cfg, &format!("{text}{}", if round == 1 { " Thank you." } else { "" }), &[])?;
         println!("round {round}: {:.2} s of audio in {:.2} s", samples.len() as f64 / rate as f64, t.elapsed().as_secs_f64());
         if round == 0 {
             let spec = hound::WavSpec { channels: 1, sample_rate: rate, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };

@@ -603,6 +603,17 @@ pub async fn tts_say(app: S<'_>, text: String) -> Res<()> {
     Ok(())
 }
 
+/// The phonemes the announcer would read for `text` (with your pronunciations).
+#[tauri::command]
+pub async fn tts_phonemes(app: S<'_>, text: String) -> Res<String> {
+    let a = app.inner().clone();
+    blocking(move || {
+        let cfg = a.settings.read().announce.tts_config();
+        a.tts.phonemes(&cfg, &text, &a.style_library().pronunciations)
+    })
+    .await
+}
+
 /// Announces the next dance now.
 #[tauri::command]
 pub async fn announce_next(app: S<'_>) -> Res<()> {
