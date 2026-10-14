@@ -1,0 +1,99 @@
+/* Orpheus theme: dark DJ-software look (Serato / djay) using Apple's
+   dark-mode system colours and type scale. */
+:root {
+  color-scheme: dark;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", system-ui, "Helvetica Neue", sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --bg: #0d0e10;
+  --bg-elev: #15161a;
+  --bg-elev-2: #1c1d22;
+  --bg-elev-3: #25272d;
+  --bg-hover: #2a2c33;
+  --bg-selected: #2b3a55;
+  --border: #2a2c32;
+  --border-strong: #3a3d45;
+  --text: #ececef;
+  --text-dim: #a1a3aa;
+  --text-faint: #6b6e76;
+
+  /* Apple system colours (dark appearance). */
+  --blue: #0a84ff;
+  --green: #30d158;
+  --orange: #ff9f0a;
+  --red: #ff453a;
+  --yellow: #ffd60a;
+  --purple: #bf5af2;
+  --teal: #64d2ff;
+
+  --accent: #8b7cf6;
+  --main: var(--orange);      /* main deck: on air */
+  --preview: var(--blue);     /* preview deck: headphones only */
+  --ok: var(--green);
+  --warn: var(--yellow);
+  --err: var(--red);
+
+  --radius: 8px;
+  --radius-sm: 5px;
+  --shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs: 13px;
+  --fs-md: 15px;
+  --fs-lg: 20px;
+  --fs-xl: 28px;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: var(--fs)/1.35 var(--font); -webkit-font-smoothing: antialiased; }
+body { overflow: hidden; user-select: none; -webkit-user-select: none; cursor: default; }
+input, textarea, select, button { font: inherit; color: inherit; }
+input, textarea { user-select: text; -webkit-user-select: text; }
+.num { font-variant-numeric: tabular-nums; }
+.dim { color: var(--text-dim); }
+.faint { color: var(--text-faint); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #3a3c43; border-radius: 10px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* Controls (HIG-style: quiet by default, clear focus rings). */
+button, .btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 26px; padding: 0 10px; border-radius: var(--radius-sm);
+  background: var(--bg-elev-3); border: 1px solid var(--border-strong); color: var(--text);
+  font-size: var(--fs); cursor: pointer; white-space: nowrap;
+}
+button:hover:not(:disabled) { background: var(--bg-hover); }
+button:active:not(:disabled) { filter: brightness(1.2); }
+button:disabled { opacity: 0.4; cursor: default; }
+button.primary { background: var(--accent); border-color: transparent; color: white; font-weight: 600; }
+button.danger { color: var(--red); }
+button.plain { background: transparent; border-color: transparent; }
+button.plain:hover:not(:disabled) { background: var(--bg-hover); }
+button.icon { width: 26px; padding: 0; }
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+
+input[type="text"], input[type="search"], input[type="number"], input:not([type]), textarea, select {
+  height: 26px; padding: 0 8px; border-radius: var(--radius-sm);
+  background: var(--bg); border: 1px solid var(--border-strong); color: var(--text);
+}
+textarea { height: auto; padding: 6px 8px; resize: vertical; }
+input[type="number"] { width: 72px; }
+input[type="range"] { accent-color: var(--accent); }
+input[type="checkbox"] { accent-color: var(--accent); }
+label { display: inline-flex; align-items: center; gap: 6px; }
+
+.segmented { display: inline-flex; background: var(--bg); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 1px; }
+.segmented button { height: 22px; border: none; background: transparent; border-radius: 4px; color: var(--text-dim); }
+.segmented button.on { background: var(--bg-elev-3); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.4); }
+
+.badge {
+  display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 6px; border-radius: 9px;
+  font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.02em; white-space: nowrap;
+  background: color-mix(in srgb, var(--c, #888) 22%, transparent); color: color-mix(in srgb, var(--c, #888) 85%, white);
+  border: 1px solid color-mix(in srgb, var(--c, #888) 40%, transparent);
+}
+.section-title { font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); }
+.panel { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); }
+.empty { color: var(--text-faint); text-align: center; padding: 24px; }

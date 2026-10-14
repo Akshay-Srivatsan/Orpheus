@@ -1,0 +1,1049 @@
+//! Persistence as plain files.
+//!
+//! The *library directory* is meant to be version-controlled or synced
+//! (git, Dropbox, Syncthing...). Everything in it is pretty-printed JSON with
+//! stable field order, one object per file, so diffs and merges stay small:
+//!
+//! ```text
+//! <library>/
+//!   tracks/<id>.json      a recording: metadata, analysis, sources, versions
+//!   setlists/<id>.json    a setlist and its entries
+//!   crates/<id>.json      a hand-picked collection of versions
+//!   profiles/<id>.json    custom / modified club profiles
+//!   history/<yyyy-mm>.jsonl  append-only play log
+//! ```
+//!
+//! Machine-specific state lives in the app data directory instead: the file
+//! index (paths differ per machine; files are matched to tracks by content
+//! hash), waveform caches, settings and the Spotify login.
+//!
+//! All writes go to a temporary file which is then renamed over the target, so
+//! a crash never leaves a half-written file.
+
+use crate::model::*;
+use anyhow::{anyhow, Context, Result};
+use parking_lot::RwLock;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap};
+use std::fs;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, Default)]
+pub struct NewTrack {
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub genre: String,
+    pub duration_ms: i64,
+    pub bpm: Option<f64>,
+    pub bpm_source: Option<String>,
+    pub artwork_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Analysis {
+    pub duration_ms: i64,
+    pub bpm: Option<f64>,
+    pub loudness_db: Option<f64>,
+    pub audio_start_ms: Option<i64>,
+    pub audio_end_ms: Option<i64>,
+    pub waveform: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileEntry {
+    pub hash: String,
+    pub size: i64,
+    pub mtime: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root: Option<String>,
+}
+
+/// Machine-local map of file paths to content hashes.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+struct FileIndex {
+    version: u32,
+    files: BTreeMap<String, FileEntry>,
+}
+
+#[derive(Default)]
+struct Inner {
+    tracks: HashMap<Id, TrackRecord>,
+    version_owner: HashMap<Id, Id>,
+    source_owner: HashMap<SourceRef, Id>,
+    alias: HashMap<Id, Id>,
+    setlists: HashMap<Id, Setlist>,
+    entry_owner: HashMap<Id, Id>,
+    crates: HashMap<Id, Crate>,
+    profiles: BTreeMap<String, serde_json::Value>,
+    history: Vec<HistoryItem>,
+    play_stats: HashMap<Id, (i64, i64)>,
+    index: FileIndex,
+    by_hash: HashMap<String, Vec<String>>,
+    load_errors: Vec<String>,
+}
+
+pub struct Store {
+    lib: RwLock<PathBuf>,
+    local: PathBuf,
+    inner: RwLock<Inner>,
+}
+
+/// Writes `bytes` to `path` atomically (temp file + rename).
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    let dir = path.parent().ok_or_else(|| anyhow!("bad path {}", path.display()))?;
+    fs::create_dir_all(dir)?;
+    let tmp = dir.join(format!(
+        ".{}.tmp-{}",
+        path.file_name().and_then(|n| n.to_str()).unwrap_or("file"),
+        std::process::id()
+    ));
+    {
+        let mut f = fs::File::create(&tmp).with_context(|| format!("writing {}", tmp.display()))?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+    }
+    fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))?;
+    Ok(())
+}
+
+pub fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    let mut s = serde_json::to_string_pretty(value)?;
+    s.push('\n');
+    write_atomic(path, s.as_bytes())
+}
+
+fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
+    let s = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    serde_json::from_str(&s).with_context(|| format!("parsing {}", path.display()))
+}
+
+fn json_files(dir: &Path) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = fs::read_dir(dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
+                .filter(|p| !p.file_name().and_then(|n| n.to_str()).unwrap_or("").starts_with('.'))
+                .collect()
+        })
+        .unwrap_or_default();
+    v.sort();
+    v
+}
+
+impl Inner {
+    fn reindex_track(&mut self, t: &TrackRecord) {
+        for v in &t.versions {
+            self.version_owner.insert(v.id.clone(), t.id.clone());
+        }
+        for s in &t.sources {
+            self.source_owner.insert(s.clone(), t.id.clone());
+        }
+        for a in &t.aliases {
+            self.alias.insert(a.clone(), t.id.clone());
+        }
+    }
+
+    fn reindex_setlist(&mut self, s: &Setlist) {
+        for e in &s.entries {
+            self.entry_owner.insert(e.id.clone(), s.id.clone());
+        }
+    }
+
+    fn rebuild_hash_index(&mut self) {
+        self.by_hash.clear();
+        for (p, f) in &self.index.files {
+            self.by_hash.entry(f.hash.clone()).or_default().push(p.clone());
+        }
+    }
+
+    fn canonical(&self, track_id: &str) -> Id {
+        self.alias.get(track_id).cloned().unwrap_or_else(|| track_id.to_string())
+    }
+
+    fn add_play(&mut self, h: &HistoryItem) {
+        let id = self.canonical(&h.track_id);
+        let e = self.play_stats.entry(id).or_insert((0, 0));
+        e.0 += 1;
+        e.1 = e.1.max(h.played_at);
+    }
+
+    fn to_track(&self, rec: &TrackRecord) -> Track {
+        let mut files = vec![];
+        for s in rec.sources.iter().filter(|s| s.kind == "file") {
+            if let Some(paths) = self.by_hash.get(&s.key) {
+                files.extend(paths.iter().cloned());
+            }
+        }
+        files.sort();
+        let has_spotify = rec.sources.iter().any(|s| s.kind == "spotify");
+        let (count, last) = self.play_stats.get(&rec.id).copied().unwrap_or((0, 0));
+        Track {
+            missing: files.is_empty() && !has_spotify,
+            files,
+            play_count: count,
+            last_played_at: (last > 0).then_some(last),
+            rec: rec.clone(),
+        }
+    }
+}
+
+impl Store {
+    pub fn open(library_dir: &Path, local_dir: &Path) -> Result<Self> {
+        let store = Self {
+            lib: RwLock::new(library_dir.to_path_buf()),
+            local: local_dir.to_path_buf(),
+            inner: RwLock::new(Inner::default()),
+        };
+        store.reload(library_dir)?;
+        Ok(store)
+    }
+
+    pub fn library_dir(&self) -> PathBuf {
+        self.lib.read().clone()
+    }
+
+    pub fn load_errors(&self) -> Vec<String> {
+        self.inner.read().load_errors.clone()
+    }
+
+    /// (Re)loads everything from disk, e.g. after `git pull` or switching libraries.
+    pub fn reload(&self, library_dir: &Path) -> Result<()> {
+        for d in ["tracks", "setlists", "crates", "profiles", "history"] {
+            fs::create_dir_all(library_dir.join(d))
+                .with_context(|| format!("creating {}", library_dir.join(d).display()))?;
+        }
+        fs::create_dir_all(self.local.join("waveforms"))?;
+        // Make the library pleasant to keep in git.
+        let gi = library_dir.join(".gitignore");
+        if !gi.exists() {
+            let _ = fs::write(&gi, ".*.tmp-*\n");
+        }
+        let ga = library_dir.join(".gitattributes");
+        if !ga.exists() {
+            // History logs are append-only: concurrent additions merge by union.
+            let _ = fs::write(&ga, "history/*.jsonl merge=union\n");
+        }
+        let mut inner = Inner::default();
+        let mut errors = vec![];
+        for p in json_files(&library_dir.join("tracks")) {
+            match read_json::<TrackRecord>(&p) {
+                Ok(t) if !t.id.is_empty() => {
+                    inner.reindex_track(&t);
+                    inner.tracks.insert(t.id.clone(), t);
+                }
+                Ok(_) => errors.push(format!("{}: missing id", p.display())),
+                Err(e) => errors.push(format!("{e:#}")),
+            }
+        }
+        for p in json_files(&library_dir.join("setlists")) {
+            match read_json::<Setlist>(&p) {
+                Ok(s) if !s.id.is_empty() => {
+                    inner.reindex_setlist(&s);
+                    inner.setlists.insert(s.id.clone(), s);
+                }
+                Ok(_) => errors.push(format!("{}: missing id", p.display())),
+                Err(e) => errors.push(format!("{e:#}")),
+            }
+        }
+        for p in json_files(&library_dir.join("crates")) {
+            match read_json::<Crate>(&p) {
+                Ok(c) if !c.id.is_empty() => {
+                    inner.crates.insert(c.id.clone(), c);
+                }
+                Ok(_) => errors.push(format!("{}: missing id", p.display())),
+                Err(e) => errors.push(format!("{e:#}")),
+            }
+        }
+        for p in json_files(&library_dir.join("profiles")) {
+            match read_json::<serde_json::Value>(&p) {
+                Ok(v) => match v["id"].as_str() {
+                    Some(id) => {
+                        inner.profiles.insert(id.to_string(), v);
+                    }
+                    None => errors.push(format!("{}: missing id", p.display())),
+                },
+                Err(e) => errors.push(format!("{e:#}")),
+            }
+        }
+        if let Ok(rd) = fs::read_dir(library_dir.join("history")) {
+            let mut paths: Vec<PathBuf> = rd.filter_map(|e| e.ok()).map(|e| e.path()).collect();
+            paths.sort();
+            for p in paths.into_iter().filter(|p| p.extension().and_then(|e| e.to_str()) == Some("jsonl")) {
+                let text = fs::read_to_string(&p).unwrap_or_default();
+                for (n, line) in text.lines().enumerate().filter(|(_, l)| !l.trim().is_empty()) {
+                    match serde_json::from_str::<HistoryItem>(line) {
+                        Ok(h) => inner.history.push(h),
+                        Err(e) => errors.push(format!("{}:{}: {e}", p.display(), n + 1)),
+                    }
+                }
+            }
+        }
+        inner.history.sort_by_key(|h| h.played_at);
+        for h in inner.history.clone() {
+            inner.add_play(&h);
+        }
+        let index_path = self.local.join("file-index.json");
+        if index_path.exists() {
+            match read_json::<FileIndex>(&index_path) {
+                Ok(ix) => inner.index = ix,
+                Err(e) => errors.push(format!("{e:#} (the file index will be rebuilt by the next scan)")),
+            }
+        }
+        inner.rebuild_hash_index();
+        for e in &errors {
+            log::warn!("library: {e}");
+        }
+        inner.load_errors = errors;
+        *self.inner.write() = inner;
+        *self.lib.write() = library_dir.to_path_buf();
+        Ok(())
+    }
+
+    fn lib_path(&self, kind: &str, id: &str) -> PathBuf {
+        self.lib.read().join(kind).join(format!("{id}.json"))
+    }
+
+    fn save_track(&self, t: &TrackRecord) -> Result<()> {
+        write_json(&self.lib_path("tracks", &t.id), t)
+    }
+
+    fn save_setlist(&self, s: &Setlist) -> Result<()> {
+        write_json(&self.lib_path("setlists", &s.id), s)
+    }
+
+    fn save_crate(&self, c: &Crate) -> Result<()> {
+        write_json(&self.lib_path("crates", &c.id), c)
+    }
+
+    pub fn save_index(&self) -> Result<()> {
+        let ix = self.inner.read().index.clone();
+        write_json(&self.local.join("file-index.json"), &ix)
+    }
+
+    /// Mutates a track and writes its file.
+    fn with_track<R>(&self, id: &str, f: impl FnOnce(&mut TrackRecord) -> Result<R>) -> Result<R> {
+        let mut inner = self.inner.write();
+        let id = inner.canonical(id);
+        let t = inner.tracks.get_mut(&id).ok_or_else(|| anyhow!("track {id} not found"))?;
+        let r = f(t)?;
+        let t = t.clone();
+        inner.reindex_track(&t);
+        drop(inner);
+        self.save_track(&t)?;
+        Ok(r)
+    }
+
+    fn with_setlist<R>(&self, id: &str, f: impl FnOnce(&mut Setlist) -> Result<R>) -> Result<R> {
+        let mut inner = self.inner.write();
+        let s = inner.setlists.get_mut(id).ok_or_else(|| anyhow!("setlist {id} not found"))?;
+        let r = f(s)?;
+        s.updated_at = now_ms();
+        let s = s.clone();
+        inner.reindex_setlist(&s);
+        drop(inner);
+        self.save_setlist(&s)?;
+        Ok(r)
+    }
+
+    fn with_crate<R>(&self, id: &str, f: impl FnOnce(&mut Crate) -> R) -> Result<R> {
+        let mut inner = self.inner.write();
+        let c = inner.crates.get_mut(id).ok_or_else(|| anyhow!("crate {id} not found"))?;
+        let r = f(c);
+        let c = c.clone();
+        drop(inner);
+        self.save_crate(&c)?;
+        Ok(r)
+    }
+
+    // ---------------------------------------------------------------- tracks
+
+    pub fn all_tracks(&self) -> Vec<Track> {
+        let inner = self.inner.read();
+        let mut v: Vec<Track> = inner.tracks.values().map(|t| inner.to_track(t)).collect();
+        v.sort_by(|a, b| (&a.rec.artist, &a.rec.title).cmp(&(&b.rec.artist, &b.rec.title)));
+        v
+    }
+
+    pub fn track(&self, id: &str) -> Result<Track> {
+        let inner = self.inner.read();
+        let id = inner.canonical(id);
+        inner.tracks.get(&id).map(|t| inner.to_track(t)).ok_or_else(|| anyhow!("track {id} not found"))
+    }
+
+    /// Creates a track with one source and a default version.
+    pub fn insert_track(&self, t: &NewTrack, source: SourceRef) -> Result<Id> {
+        if let Some(existing) = self.track_for_source(&source) {
+            return Ok(existing);
+        }
+        let rec = TrackRecord {
+            id: new_id(),
+            title: t.title.clone(),
+            artist: t.artist.clone(),
+            album: t.album.clone(),
+            genre: t.genre.clone(),
+            duration_ms: t.duration_ms,
+            bpm: t.bpm,
+            bpm_source: t.bpm_source.clone(),
+            artwork_url: t.artwork_url.clone(),
+            added_at: now_ms(),
+            sources: vec![source],
+            versions: vec![Version {
+                id: new_id(),
+                name: "Original".into(),
+                style: None,
+                settings: Overrides::default(),
+                comment: String::new(),
+                tags: vec![],
+            }],
+            ..Default::default()
+        };
+        self.save_track(&rec)?;
+        let mut inner = self.inner.write();
+        inner.reindex_track(&rec);
+        let id = rec.id.clone();
+        inner.tracks.insert(id.clone(), rec);
+        Ok(id)
+    }
+
+    pub fn track_for_source(&self, s: &SourceRef) -> Option<Id> {
+        self.inner.read().source_owner.get(s).cloned()
+    }
+
+    pub fn add_source(&self, track_id: &str, s: SourceRef) -> Result<()> {
+        if let Some(owner) = self.track_for_source(&s) {
+            if owner != track_id {
+                return Err(anyhow!("that source already belongs to another track (merge the tracks instead)"));
+            }
+            return Ok(());
+        }
+        self.with_track(track_id, |t| {
+            t.sources.push(s);
+            Ok(())
+        })
+    }
+
+    pub fn remove_source(&self, track_id: &str, s: &SourceRef) -> Result<()> {
+        self.with_track(track_id, |t| {
+            if t.sources.len() <= 1 {
+                return Err(anyhow!("a track needs at least one source"));
+            }
+            t.sources.retain(|x| x != s);
+            Ok(())
+        })?;
+        self.inner.write().source_owner.remove(s);
+        Ok(())
+    }
+
+    /// Moves the sources and versions of `others` into `keep` and deletes them.
+    /// Setlists and crates keep working because version ids don't change.
+    pub fn merge_tracks(&self, keep: &str, others: &[Id]) -> Result<()> {
+        let mut moved = vec![];
+        {
+            let inner = self.inner.read();
+            for o in others.iter().filter(|o| o.as_str() != keep) {
+                if let Some(t) = inner.tracks.get(o) {
+                    moved.push(t.clone());
+                }
+            }
+        }
+        self.with_track(keep, |k| {
+            for o in &moved {
+                for s in &o.sources {
+                    if !k.sources.contains(s) {
+                        k.sources.push(s.clone());
+                    }
+                }
+                k.versions.extend(o.versions.iter().cloned());
+                k.aliases.push(o.id.clone());
+                k.aliases.extend(o.aliases.iter().cloned());
+                if k.notes.is_empty() {
+                    k.notes = o.notes.clone();
+                }
+            }
+            Ok(())
+        })?;
+        let lib = self.library_dir();
+        let mut inner = self.inner.write();
+        for o in &moved {
+            inner.tracks.remove(&o.id);
+            let _ = fs::remove_file(lib.join("tracks").join(format!("{}.json", o.id)));
+            let _ = fs::remove_file(self.local.join("waveforms").join(format!("{}.bin", o.id)));
+        }
+        // Recompute play counts with the new aliases.
+        inner.play_stats.clear();
+        for h in inner.history.clone() {
+            inner.add_play(&h);
+        }
+        Ok(())
+    }
+
+    pub fn update_track(&self, id: &str, p: &TrackPatch) -> Result<()> {
+        self.with_track(id, |t| {
+            if let Some(v) = &p.title { t.title = v.clone(); }
+            if let Some(v) = &p.artist { t.artist = v.clone(); }
+            if let Some(v) = &p.album { t.album = v.clone(); }
+            if let Some(v) = &p.genre { t.genre = v.clone(); }
+            if let Some(v) = &p.bpm {
+                t.bpm = *v;
+                t.bpm_source = v.map(|_| p.bpm_source.clone().unwrap_or_else(|| "user".into()));
+            }
+            if let Some(v) = &p.energy { t.energy = *v; }
+            if let Some(v) = &p.rhythm { t.rhythm = *v; }
+            if let Some(v) = &p.rating { t.rating = *v; }
+            if let Some(v) = &p.familiar { t.familiar = *v; }
+            if let Some(v) = &p.gain_db { t.gain_db = *v; }
+            if let Some(v) = &p.notes { t.notes = v.clone(); }
+            if let Some(v) = &p.preferred_source { t.preferred_source = v.clone(); }
+            Ok(())
+        })
+    }
+
+    pub fn set_analysis(&self, id: &str, a: &Analysis) -> Result<()> {
+        let id = self.inner.read().canonical(id);
+        if !a.waveform.is_empty() {
+            write_atomic(&self.local.join("waveforms").join(format!("{id}.bin")), &a.waveform)?;
+        }
+        self.with_track(&id, |t| {
+            t.analyzed = true;
+            t.loudness_db = a.loudness_db.map(|l| (l * 10.0).round() / 10.0);
+            t.audio_start_ms = a.audio_start_ms;
+            t.audio_end_ms = a.audio_end_ms;
+            if a.duration_ms > 0 {
+                t.duration_ms = a.duration_ms;
+            }
+            // Never overwrite a BPM the DJ entered (or one from tags).
+            if t.bpm.is_none() || t.bpm_source.as_deref() == Some("detected") {
+                t.bpm = a.bpm;
+                t.bpm_source = a.bpm.map(|_| "detected".into());
+            }
+            Ok(())
+        })
+    }
+
+    pub fn waveform(&self, id: &str) -> Option<Vec<u8>> {
+        let id = self.inner.read().canonical(id);
+        fs::read(self.local.join("waveforms").join(format!("{id}.bin"))).ok()
+    }
+
+    /// Tracks with a file on this machine but no analysis (or no cached waveform).
+    pub fn needs_analysis(&self) -> Vec<Id> {
+        let inner = self.inner.read();
+        inner
+            .tracks
+            .values()
+            .filter(|t| {
+                let has_file = t.sources.iter().any(|s| s.kind == "file" && inner.by_hash.contains_key(&s.key));
+                has_file && (!t.analyzed || !self.local.join("waveforms").join(format!("{}.bin", t.id)).exists())
+            })
+            .map(|t| t.id.clone())
+            .collect()
+    }
+
+    pub fn delete_tracks(&self, ids: &[Id]) -> Result<()> {
+        let lib = self.library_dir();
+        let mut changed_setlists = vec![];
+        let mut changed_crates = vec![];
+        {
+            let mut inner = self.inner.write();
+            for id in ids {
+                let Some(t) = inner.tracks.remove(id) else { continue };
+                let vids: Vec<Id> = t.versions.iter().map(|v| v.id.clone()).collect();
+                for s in &t.sources {
+                    inner.source_owner.remove(s);
+                }
+                for v in &vids {
+                    inner.version_owner.remove(v);
+                }
+                for s in inner.setlists.values_mut() {
+                    let mut hit = false;
+                    for e in s.entries.iter_mut() {
+                        if e.version_id.as_ref().map(|v| vids.contains(v)).unwrap_or(false) {
+                            e.version_id = None;
+                            hit = true;
+                        }
+                    }
+                    if hit {
+                        changed_setlists.push(s.clone());
+                    }
+                }
+                for c in inner.crates.values_mut() {
+                    let before = c.version_ids.len();
+                    c.version_ids.retain(|v| !vids.contains(v));
+                    if c.version_ids.len() != before {
+                        changed_crates.push(c.clone());
+                    }
+                }
+                let _ = fs::remove_file(lib.join("tracks").join(format!("{id}.json")));
+                let _ = fs::remove_file(self.local.join("waveforms").join(format!("{id}.bin")));
+            }
+        }
+        for s in changed_setlists {
+            self.save_setlist(&s)?;
+        }
+        for c in changed_crates {
+            self.save_crate(&c)?;
+        }
+        Ok(())
+    }
+
+    pub fn mark_played(&self, h: HistoryItem) -> Result<()> {
+        let month = {
+            let secs = h.played_at / 1000;
+            let days = secs.div_euclid(86400);
+            let (y, m, _) = civil_from_days(days);
+            format!("{y:04}-{m:02}")
+        };
+        let path = self.library_dir().join("history").join(format!("{month}.jsonl"));
+        let mut f = fs::OpenOptions::new().create(true).append(true).open(&path)?;
+        writeln!(f, "{}", serde_json::to_string(&h)?)?;
+        let mut inner = self.inner.write();
+        inner.add_play(&h);
+        inner.history.push(h);
+        Ok(())
+    }
+
+    pub fn history(&self, limit: usize) -> Vec<HistoryItem> {
+        self.inner.read().history.iter().rev().take(limit).cloned().collect()
+    }
+
+    // ---------------------------------------------------------------- versions
+
+    /// A version and the id of the track that owns it.
+    pub fn version(&self, id: &str) -> Result<(Version, Id)> {
+        let inner = self.inner.read();
+        let tid = inner.version_owner.get(id).ok_or_else(|| anyhow!("version {id} not found"))?;
+        let t = inner.tracks.get(tid).ok_or_else(|| anyhow!("track {tid} not found"))?;
+        let v = t.versions.iter().find(|v| v.id == id).ok_or_else(|| anyhow!("version {id} not found"))?;
+        Ok((v.clone(), tid.clone()))
+    }
+
+    pub fn version_create(&self, track_id: &str, mut v: Version) -> Result<Version> {
+        v.id = new_id();
+        let out = v.clone();
+        self.with_track(track_id, |t| {
+            t.versions.push(v);
+            Ok(())
+        })?;
+        Ok(out)
+    }
+
+    pub fn version_update(&self, id: &str, p: &VersionPatch) -> Result<Version> {
+        let (_, tid) = self.version(id)?;
+        self.with_track(&tid, |t| {
+            let v = t.versions.iter_mut().find(|v| v.id == id).ok_or_else(|| anyhow!("version not found"))?;
+            if let Some(x) = &p.name { v.name = x.clone(); }
+            if let Some(x) = &p.style { v.style = x.clone(); }
+            if let Some(x) = &p.target_bpm { v.settings.target_bpm = *x; }
+            if let Some(x) = &p.cue_in_ms { v.settings.cue_in_ms = *x; }
+            if let Some(x) = &p.cue_out_ms { v.settings.cue_out_ms = *x; }
+            if let Some(x) = &p.fade_out_ms { v.settings.fade_out_ms = *x; }
+            if let Some(x) = &p.gain_db { v.settings.gain_db = *x; }
+            if let Some(x) = &p.stems { v.settings.stems = x.clone(); }
+            if let Some(x) = &p.comment { v.comment = x.clone(); }
+            if let Some(x) = &p.tags { v.tags = x.clone(); }
+            Ok(v.clone())
+        })
+    }
+
+    pub fn version_delete(&self, id: &str) -> Result<()> {
+        let (_, tid) = self.version(id)?;
+        let used: usize = self
+            .inner
+            .read()
+            .setlists
+            .values()
+            .map(|s| s.entries.iter().filter(|e| e.version_id.as_deref() == Some(id)).count())
+            .sum();
+        if used > 0 {
+            return Err(anyhow!("this version is used in {used} setlist entr{}", if used == 1 { "y" } else { "ies" }));
+        }
+        self.with_track(&tid, |t| {
+            if t.versions.len() <= 1 {
+                return Err(anyhow!("a track needs at least one version"));
+            }
+            t.versions.retain(|v| v.id != id);
+            Ok(())
+        })?;
+        let mut inner = self.inner.write();
+        inner.version_owner.remove(id);
+        let mut changed = vec![];
+        for c in inner.crates.values_mut() {
+            if c.version_ids.iter().any(|v| v == id) {
+                c.version_ids.retain(|v| v != id);
+                changed.push(c.clone());
+            }
+        }
+        drop(inner);
+        for c in changed {
+            self.save_crate(&c)?;
+        }
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------- file index
+
+    pub fn file_info(&self, path: &str) -> Option<FileEntry> {
+        self.inner.read().index.files.get(path).cloned()
+    }
+
+    pub fn upsert_file(&self, path: &str, e: FileEntry) {
+        let mut inner = self.inner.write();
+        let mut e = e;
+        if e.root.is_none() {
+            e.root = inner.index.files.get(path).and_then(|old| old.root.clone());
+        }
+        inner.index.files.insert(path.to_string(), e);
+        inner.rebuild_hash_index();
+    }
+
+    pub fn all_file_paths(&self) -> Vec<String> {
+        self.inner.read().index.files.keys().cloned().collect()
+    }
+
+    pub fn remove_file(&self, path: &str) {
+        let mut inner = self.inner.write();
+        inner.index.files.remove(path);
+        inner.rebuild_hash_index();
+    }
+
+    pub fn track_file_paths(&self, track_id: &str) -> Vec<String> {
+        self.track(track_id).map(|t| t.files).unwrap_or_default()
+    }
+
+    // ---------------------------------------------------------------- crates
+
+    pub fn crates(&self) -> Vec<Crate> {
+        let mut v: Vec<Crate> = self.inner.read().crates.values().cloned().collect();
+        v.sort_by(|a, b| (a.position, &a.name).cmp(&(b.position, &b.name)));
+        v
+    }
+
+    pub fn crate_create(&self, name: &str) -> Result<Id> {
+        let pos = self.inner.read().crates.values().map(|c| c.position).max().unwrap_or(0) + 1;
+        let c = Crate { id: new_id(), name: name.into(), position: pos, version_ids: vec![] };
+        self.save_crate(&c)?;
+        let id = c.id.clone();
+        self.inner.write().crates.insert(id.clone(), c);
+        Ok(id)
+    }
+
+    pub fn crate_rename(&self, id: &str, name: &str) -> Result<()> {
+        self.with_crate(id, |c| c.name = name.into())
+    }
+
+    pub fn crate_delete(&self, id: &str) -> Result<()> {
+        self.inner.write().crates.remove(id);
+        let _ = fs::remove_file(self.lib_path("crates", id));
+        Ok(())
+    }
+
+    pub fn crate_add(&self, id: &str, version_ids: &[Id]) -> Result<()> {
+        self.with_crate(id, |c| {
+            for v in version_ids {
+                if !c.version_ids.contains(v) {
+                    c.version_ids.push(v.clone());
+                }
+            }
+        })
+    }
+
+    pub fn crate_remove(&self, id: &str, version_ids: &[Id]) -> Result<()> {
+        self.with_crate(id, |c| c.version_ids.retain(|v| !version_ids.contains(v)))
+    }
+
+    // ---------------------------------------------------------------- setlists
+
+    pub fn setlists(&self) -> Vec<SetlistSummary> {
+        let mut v: Vec<SetlistSummary> = self.inner.read().setlists.values().map(SetlistSummary::from).collect();
+        v.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        v
+    }
+
+    pub fn setlist(&self, id: &str) -> Result<Setlist> {
+        self.inner.read().setlists.get(id).cloned().ok_or_else(|| anyhow!("setlist {id} not found"))
+    }
+
+    pub fn setlist_create(&self, name: &str, mode: &str, profile_id: &str, lesson: Option<String>, date: Option<String>) -> Result<Id> {
+        let now = now_ms();
+        let s = Setlist {
+            id: new_id(),
+            name: name.into(),
+            event_date: date,
+            profile_id: profile_id.into(),
+            lesson_style: lesson,
+            mode: mode.into(),
+            created_at: now,
+            updated_at: now,
+            ..Default::default()
+        };
+        self.save_setlist(&s)?;
+        let id = s.id.clone();
+        self.inner.write().setlists.insert(id.clone(), s);
+        Ok(id)
+    }
+
+    pub fn setlist_update(&self, id: &str, p: &SetlistPatch) -> Result<()> {
+        self.with_setlist(id, |s| {
+            if let Some(v) = &p.name { s.name = v.clone(); }
+            if let Some(v) = &p.event_date { s.event_date = v.clone(); }
+            if let Some(v) = &p.profile_id { s.profile_id = v.clone(); }
+            if let Some(v) = &p.lesson_style { s.lesson_style = v.clone(); }
+            if let Some(v) = &p.notes { s.notes = v.clone(); }
+            if let Some(v) = &p.mode { s.mode = v.clone(); }
+            Ok(())
+        })
+    }
+
+    pub fn setlist_delete(&self, id: &str) -> Result<()> {
+        self.inner.write().setlists.remove(id);
+        let _ = fs::remove_file(self.lib_path("setlists", id));
+        Ok(())
+    }
+
+    pub fn setlist_duplicate(&self, id: &str, name: &str) -> Result<Id> {
+        let mut s = self.setlist(id)?;
+        let now = now_ms();
+        s.id = new_id();
+        s.name = name.into();
+        s.created_at = now;
+        s.updated_at = now;
+        for e in s.entries.iter_mut() {
+            e.id = new_id();
+            e.status = "pending".into();
+            e.played_at = None;
+        }
+        self.save_setlist(&s)?;
+        let nid = s.id.clone();
+        let mut inner = self.inner.write();
+        inner.reindex_setlist(&s);
+        inner.setlists.insert(nid.clone(), s);
+        Ok(nid)
+    }
+
+    pub fn entries(&self, setlist_id: &str) -> Vec<SetlistEntry> {
+        self.inner.read().setlists.get(setlist_id).map(|s| s.entries.clone()).unwrap_or_default()
+    }
+
+    /// An entry and the id of its setlist.
+    pub fn entry(&self, id: &str) -> Result<(SetlistEntry, Id)> {
+        let inner = self.inner.read();
+        let sid = inner.entry_owner.get(id).ok_or_else(|| anyhow!("setlist entry {id} not found"))?;
+        let e = inner
+            .setlists
+            .get(sid)
+            .and_then(|s| s.entries.iter().find(|e| e.id == id))
+            .ok_or_else(|| anyhow!("setlist entry {id} not found"))?;
+        Ok((e.clone(), sid.clone()))
+    }
+
+    /// Inserts entries before index `position`; `None` appends.
+    pub fn entries_insert(&self, setlist_id: &str, position: Option<usize>, new: &[NewEntry]) -> Result<Vec<Id>> {
+        self.with_setlist(setlist_id, |s| {
+            let at = position.unwrap_or(s.entries.len()).min(s.entries.len());
+            let items: Vec<SetlistEntry> = new
+                .iter()
+                .map(|n| SetlistEntry {
+                    id: new_id(),
+                    version_id: n.version_id.clone(),
+                    style: n.style.clone(),
+                    overrides: n.overrides.clone(),
+                    note: n.note.clone(),
+                    tags: n.tags.clone(),
+                    ..Default::default()
+                })
+                .collect();
+            let ids = items.iter().map(|e| e.id.clone()).collect();
+            s.entries.splice(at..at, items);
+            Ok(ids)
+        })
+    }
+
+    pub fn entry_update(&self, id: &str, p: &EntryPatch) -> Result<SetlistEntry> {
+        let (_, sid) = self.entry(id)?;
+        self.with_setlist(&sid, |s| {
+            let e = s.entries.iter_mut().find(|e| e.id == id).ok_or_else(|| anyhow!("entry not found"))?;
+            if let Some(v) = &p.version_id { e.version_id = v.clone(); }
+            if let Some(v) = &p.style { e.style = v.clone(); }
+            if let Some(v) = &p.overrides { e.overrides = v.clone(); }
+            if let Some(v) = &p.note { e.note = v.clone(); }
+            if let Some(v) = &p.tags { e.tags = v.clone(); }
+            if let Some(v) = &p.status {
+                e.status = v.clone();
+                if v == "pending" {
+                    e.played_at = None;
+                }
+            }
+            Ok(e.clone())
+        })
+    }
+
+    pub fn entry_set_playing(&self, id: &str) -> Result<()> {
+        let (_, sid) = self.entry(id)?;
+        self.with_setlist(&sid, |s| {
+            if let Some(e) = s.entries.iter_mut().find(|e| e.id == id) {
+                e.status = "playing".into();
+                e.played_at = Some(now_ms());
+            }
+            Ok(())
+        })
+    }
+
+    pub fn entries_delete(&self, setlist_id: &str, ids: &[Id]) -> Result<()> {
+        self.with_setlist(setlist_id, |s| {
+            s.entries.retain(|e| !ids.contains(&e.id));
+            Ok(())
+        })?;
+        let mut inner = self.inner.write();
+        for id in ids {
+            inner.entry_owner.remove(id);
+        }
+        Ok(())
+    }
+
+    pub fn entries_reorder(&self, setlist_id: &str, ordered: &[Id]) -> Result<()> {
+        self.with_setlist(setlist_id, |s| {
+            let mut out: Vec<SetlistEntry> = vec![];
+            for id in ordered {
+                if let Some(pos) = s.entries.iter().position(|e| &e.id == id) {
+                    out.push(s.entries.remove(pos));
+                }
+            }
+            // Entries the caller didn't mention keep their relative order at the end.
+            out.append(&mut s.entries);
+            s.entries = out;
+            Ok(())
+        })
+    }
+
+    pub fn reset_setlist_status(&self, setlist_id: &str) -> Result<()> {
+        self.with_setlist(setlist_id, |s| {
+            for e in s.entries.iter_mut() {
+                e.status = "pending".into();
+                e.played_at = None;
+            }
+            Ok(())
+        })
+    }
+
+    // ---------------------------------------------------------------- profiles
+
+    pub fn profiles(&self) -> Vec<serde_json::Value> {
+        self.inner.read().profiles.values().cloned().collect()
+    }
+
+    pub fn profile_save(&self, value: serde_json::Value) -> Result<()> {
+        let id = value["id"].as_str().filter(|s| !s.is_empty()).ok_or_else(|| anyhow!("profile needs an id"))?;
+        if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            return Err(anyhow!("profile ids may only contain letters, digits, - and _"));
+        }
+        write_json(&self.lib_path("profiles", id), &value)?;
+        self.inner.write().profiles.insert(id.to_string(), value);
+        Ok(())
+    }
+
+    pub fn profile_delete(&self, id: &str) -> Result<()> {
+        self.inner.write().profiles.remove(id);
+        let _ = fs::remove_file(self.lib_path("profiles", id));
+        Ok(())
+    }
+}
+
+/// Days since 1970-01-01 → (year, month, day). (Howard Hinnant's algorithm.)
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z.rem_euclid(146097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dirs() -> (PathBuf, PathBuf) {
+        let base = std::env::temp_dir().join(format!("orpheus-test-{}", new_id()));
+        (base.join("lib"), base.join("local"))
+    }
+
+    #[test]
+    fn dates() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        assert_eq!(civil_from_days(20374), (2025, 10, 13));
+    }
+
+    #[test]
+    fn roundtrip_through_files() {
+        let (lib, local) = temp_dirs();
+        let store = Store::open(&lib, &local).unwrap();
+        let tid = store
+            .insert_track(&NewTrack { title: "Song".into(), ..Default::default() }, SourceRef { kind: "file".into(), key: "h1".into() })
+            .unwrap();
+        assert!(store.track(&tid).unwrap().missing);
+        store.upsert_file("/music/a.flac", FileEntry { hash: "h1".into(), size: 1, mtime: 2, root: None });
+        assert_eq!(store.track(&tid).unwrap().files, vec!["/music/a.flac".to_string()]);
+        store.save_index().unwrap();
+
+        let v = store
+            .version_create(
+                &tid,
+                Version {
+                    id: String::new(),
+                    name: "Rotary @150".into(),
+                    style: Some("rotary-waltz".into()),
+                    settings: Overrides { target_bpm: Some(150.0), ..Default::default() },
+                    comment: String::new(),
+                    tags: vec![],
+                },
+            )
+            .unwrap();
+        let sid = store.setlist_create("Social", "preset", "dancebreak", None, None).unwrap();
+        let mk = |n: &str| NewEntry { note: n.into(), ..Default::default() };
+        store.entries_insert(&sid, None, &[mk("a"), mk("b"), mk("c")]).unwrap();
+        let ids = store.entries_insert(&sid, Some(1), &[NewEntry { version_id: Some(v.id.clone()), ..Default::default() }]).unwrap();
+        let notes: Vec<_> = store.entries(&sid).into_iter().map(|e| e.note).collect();
+        assert_eq!(notes, ["a", "", "b", "c"]);
+        store.entry_update(&ids[0], &EntryPatch { overrides: Some(Overrides { target_bpm: Some(148.0), ..Default::default() }), ..Default::default() }).unwrap();
+        store
+            .mark_played(HistoryItem { played_at: now_ms(), track_id: tid.clone(), version_id: Some(v.id.clone()), style: None, bpm: None, setlist_id: None })
+            .unwrap();
+
+        // Everything survives a reload from disk.
+        let store2 = Store::open(&lib, &local).unwrap();
+        assert!(store2.load_errors().is_empty(), "{:?}", store2.load_errors());
+        let t = store2.track(&tid).unwrap();
+        assert_eq!(t.rec.versions.len(), 2);
+        assert_eq!(t.play_count, 1);
+        assert_eq!(t.files.len(), 1);
+        let (e, _) = store2.entry(&ids[0]).unwrap();
+        assert_eq!(e.overrides.target_bpm, Some(148.0));
+        assert_eq!(store2.version(&v.id).unwrap().1, tid);
+
+        // Merging keeps version ids (and so setlist references) intact.
+        let sp = store2
+            .insert_track(&NewTrack { title: "Song".into(), ..Default::default() }, SourceRef { kind: "spotify".into(), key: "spotify:track:x".into() })
+            .unwrap();
+        store2.merge_tracks(&tid, &[sp.clone()]).unwrap();
+        let t = store2.track(&tid).unwrap();
+        assert_eq!(t.rec.sources.len(), 2);
+        assert_eq!(t.rec.versions.len(), 3);
+        assert_eq!(store2.track(&sp).unwrap().rec.id, tid, "old id resolves via alias");
+
+        // A hand-edited, broken file is reported instead of failing the load.
+        fs::write(lib.join("tracks").join("broken.json"), "{ not json").unwrap();
+        let store3 = Store::open(&lib, &local).unwrap();
+        assert_eq!(store3.load_errors().len(), 1);
+        assert_eq!(store3.all_tracks().len(), 1);
+        let _ = fs::remove_dir_all(lib.parent().unwrap());
+    }
+}

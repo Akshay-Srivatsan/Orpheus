@@ -1,0 +1,519 @@
+{
+ "id": "powers",
+ "name": "Social Dance (Powers' DJ tips)",
+ "builtin": true,
+ "description": "General social dance defaults from Richard Powers' DJ tips (socialdance.stanford.edu/Syllabi/DJtips.htm): sweet-spot tempos \u00b110%, ~3-minute songs, ~10 s pauses, sensible pacing.",
+ "setMinutes": 180,
+ "gap": {
+  "targetSeconds": 10,
+  "minSeconds": 5,
+  "maxSeconds": 60
+ },
+ "autoAdvance": false,
+ "fadeOutSeconds": 6,
+ "tempo": {
+  "maxSpeedupPct": 10,
+  "maxSlowdownPct": 8
+ },
+ "lessonCategories": [
+  {
+   "id": "waltz",
+   "name": "Waltz lesson"
+  },
+  {
+   "id": "swing",
+   "name": "Swing lesson"
+  },
+  {
+   "id": "other",
+   "name": "Other lesson"
+  }
+ ],
+ "groups": [
+  {
+   "id": "waltz",
+   "name": "Waltzes"
+  },
+  {
+   "id": "swing",
+   "name": "Swing"
+  },
+  {
+   "id": "latin",
+   "name": "Latin"
+  },
+  {
+   "id": "ballroom",
+   "name": "Ballroom"
+  },
+  {
+   "id": "other",
+   "name": "Other"
+  }
+ ],
+ "styles": [
+  {
+   "key": "waltz",
+   "name": "Waltz",
+   "short": "WLZ",
+   "color": "#f472b6",
+   "group": "waltz",
+   "sweet": [
+    144,
+    144
+   ],
+   "extended": [
+    138,
+    160
+   ],
+   "beatsPerBar": 3,
+   "lessonCategory": "waltz",
+   "energy": "medium"
+  },
+  {
+   "key": "viennese-waltz",
+   "name": "Fast Viennese Waltz",
+   "short": "VW",
+   "color": "#fb7185",
+   "group": "waltz",
+   "sweet": [
+    168,
+    168
+   ],
+   "extended": [
+    160,
+    190
+   ],
+   "beatsPerBar": 3,
+   "lessonCategory": "waltz",
+   "energy": "fast"
+  },
+  {
+   "key": "cross-step-waltz",
+   "name": "Cross-Step Waltz",
+   "short": "CSW",
+   "color": "#a78bfa",
+   "group": "waltz",
+   "sweet": [
+    115,
+    115
+   ],
+   "extended": [
+    108,
+    120
+   ],
+   "beatsPerBar": 3,
+   "lessonCategory": "waltz",
+   "energy": "medium"
+  },
+  {
+   "key": "slow-waltz",
+   "name": "Slow Waltz",
+   "short": "SW",
+   "color": "#c4b5fd",
+   "group": "waltz",
+   "sweet": [
+    88,
+    88
+   ],
+   "extended": [
+    80,
+    100
+   ],
+   "beatsPerBar": 3,
+   "lessonCategory": "waltz",
+   "energy": "slow"
+  },
+  {
+   "key": "lindy-hop",
+   "name": "Lindy Hop / Triple Swing",
+   "short": "LH",
+   "color": "#fbbf24",
+   "group": "swing",
+   "sweet": [
+    150,
+    150
+   ],
+   "extended": [
+    116,
+    164
+   ],
+   "beatsPerBar": 4,
+   "lessonCategory": "swing",
+   "energy": "fast"
+  },
+  {
+   "key": "east-coast-swing",
+   "name": "Fast East Coast Swing",
+   "short": "ECS",
+   "color": "#fcd34d",
+   "group": "swing",
+   "sweet": [
+    184,
+    184
+   ],
+   "extended": [
+    160,
+    200
+   ],
+   "beatsPerBar": 4,
+   "lessonCategory": "swing",
+   "energy": "fast"
+  },
+  {
+   "key": "west-coast-swing",
+   "name": "West Coast Swing",
+   "short": "WCS",
+   "color": "#34d399",
+   "group": "swing",
+   "sweet": [
+    110,
+    110
+   ],
+   "extended": [
+    100,
+    120
+   ],
+   "beatsPerBar": 4,
+   "lessonCategory": "swing",
+   "energy": "medium"
+  },
+  {
+   "key": "street-swing",
+   "name": "Street Swing (Bugg)",
+   "short": "BUGG",
+   "color": "#a3e635",
+   "group": "swing",
+   "sweet": [
+    130,
+    130
+   ],
+   "extended": [
+    110,
+    150
+   ],
+   "beatsPerBar": 4,
+   "lessonCategory": "swing",
+   "energy": "medium"
+  },
+  {
+   "key": "hustle",
+   "name": "Hustle",
+   "short": "HUS",
+   "color": "#e879f9",
+   "group": "other",
+   "sweet": [
+    118,
+    118
+   ],
+   "extended": [
+    110,
+    125
+   ],
+   "beatsPerBar": 4,
+   "lessonCategory": "other",
+   "energy": "medium"
+  },
+  {
+   "key": "night-club-two-step",
+   "name": "Club Two-Step",
+   "short": "NC2S",
+   "color": "#c084fc",
+   "group": "other",
+   "sweet": [
+    82,
+    82
+   ],
+   "extended": [
+    76,
+    88
+   ],
+   "beatsPerBar": 4,
+   "lessonCategory": "other",
+   "energy": "slow"
+  },
+  {
+   "key": "cha-cha",
+   "name": "Cha Cha",
+   "short": "CHA",
+   "color": "#fdba74",
+   "group": "latin",
+   "sweet": [
+    118,
+    118
+   ],
+   "extended": [
+    112,
+    126
+   ],
+   "beatsPerBar": 4,
+   "lessonCategory": "other",
+   "energy": "medium"
+  },
+  {
+   "key": "salsa",
+   "name": "Salsa",
+   "short": "SAL",
+   "color": "#f97316",
+   "group": "latin",
+   "sweet": [
+    94,
+    94
+   ],
+   "extended": [
+    86,
+    100
+   ],
+   "beatsPerBar": 4,
+   "lessonCategory": "other",
+   "energy": "fast"
+  },
+  {
+   "key": "merengue",
+   "name": "Merengue",
+   "short": "MER",
+   "color": "#ea580c",
+   "group": "latin",
+   "sweet": [
+    120,
+    120
+   ],
+   "extended": [
+    112,
+    138
+   ],
+   "beatsPerBar": 4,
+   "lessonCategory": "other",
+   "energy": "fast"
+  },
+  {
+   "key": "rumba",
+   "name": "Rumba",
+   "short": "RUM",
+   "color": "#fda4af",
+   "group": "latin",
+   "sweet": [
+    68,
+    68
+   ],
+   "extended": [
+    58,
+    75
+   ],
+   "beatsPerBar": 4,
+   "lessonCategory": "other",
+   "energy": "slow"
+  },
+  {
+   "key": "tango",
+   "name": "Social Tango",
+   "short": "TAN",
+   "color": "#ef4444",
+   "group": "other",
+   "sweet": [
+    66,
+    66
+   ],
+   "extended": [
+    60,
+    74
+   ],
+   "beatsPerBar": 4,
+   "lessonCategory": "other",
+   "energy": "slow"
+  },
+  {
+   "key": "argentine-tango",
+   "name": "Tango Argentino",
+   "short": "TA",
+   "color": "#dc2626",
+   "group": "other",
+   "sweet": [
+    62,
+    62
+   ],
+   "extended": null,
+   "beatsPerBar": 4,
+   "lessonCategory": "other",
+   "energy": "slow",
+   "note": "Wide acceptable range."
+  },
+  {
+   "key": "polka",
+   "name": "Polka",
+   "short": "PK",
+   "color": "#facc15",
+   "group": "other",
+   "sweet": [
+    114,
+    114
+   ],
+   "extended": [
+    104,
+    124
+   ],
+   "beatsPerBar": 4,
+   "lessonCategory": "other",
+   "energy": "fast"
+  },
+  {
+   "key": "one-step",
+   "name": "One-Step",
+   "short": "1S",
+   "color": "#fde68a",
+   "group": "other",
+   "sweet": [
+    118,
+    118
+   ],
+   "extended": [
+    108,
+    132
+   ],
+   "beatsPerBar": 4,
+   "lessonCategory": "other",
+   "energy": "fast"
+  },
+  {
+   "key": "foxtrot",
+   "name": "Slow Foxtrot",
+   "short": "FOX",
+   "color": "#94a3b8",
+   "group": "ballroom",
+   "sweet": [
+    128,
+    128
+   ],
+   "extended": [
+    120,
+    152
+   ],
+   "beatsPerBar": 4,
+   "lessonCategory": "other",
+   "energy": "slow"
+  },
+  {
+   "key": "fast-foxtrot",
+   "name": "Faster Foxtrot (Magic Step)",
+   "short": "FFX",
+   "color": "#cbd5e1",
+   "group": "ballroom",
+   "sweet": [
+    156,
+    156
+   ],
+   "extended": [
+    136,
+    184
+   ],
+   "beatsPerBar": 4,
+   "lessonCategory": "other",
+   "energy": "medium"
+  },
+  {
+   "key": "quickstep",
+   "name": "Quickstep",
+   "short": "QS",
+   "color": "#7dd3fc",
+   "group": "ballroom",
+   "sweet": [
+    200,
+    200
+   ],
+   "extended": [
+    180,
+    220
+   ],
+   "beatsPerBar": 4,
+   "lessonCategory": "other",
+   "energy": "fast"
+  },
+  {
+   "key": "mixer",
+   "name": "Mixer",
+   "short": "MIX",
+   "color": "#4ade80",
+   "group": "other",
+   "sweet": null,
+   "extended": null,
+   "beatsPerBar": 4,
+   "lessonCategory": "other",
+   "energy": "medium"
+  },
+  {
+   "key": "line-dance",
+   "name": "Line Dance",
+   "short": "LINE",
+   "color": "#2dd4bf",
+   "group": "other",
+   "sweet": null,
+   "extended": null,
+   "beatsPerBar": 4,
+   "lessonCategory": "other",
+   "energy": "medium"
+  }
+ ],
+ "tags": [
+  {
+   "id": "last",
+   "name": "Last dance",
+   "color": "#fca5a5",
+   "announce": true
+  },
+  {
+   "id": "request",
+   "name": "Request",
+   "color": "#bae6fd",
+   "announce": false
+  },
+  {
+   "id": "teach",
+   "name": "Teach first",
+   "color": "#86efac",
+   "announce": true
+  }
+ ],
+ "announcements": [
+  "No street shoes on the dance floor, please."
+ ],
+ "rules": [
+  {
+   "type": "maxDuration",
+   "seconds": 210,
+   "from": 1,
+   "severity": "warning",
+   "label": "Aim for ~3-minute songs (flag over 3:30)"
+  },
+  {
+   "type": "tempoRange",
+   "range": "extended",
+   "severity": "warning",
+   "label": "Tempo within \u00b110% of the sweet spot"
+  },
+  {
+   "type": "noConsecutiveSame",
+   "tempoPct": 5,
+   "severity": "warning",
+   "label": "No two consecutive songs of the same dance at the same tempo"
+  },
+  {
+   "type": "maxConsecutive",
+   "energy": "fast",
+   "count": 2,
+   "severity": "warning",
+   "label": "No more than 2 very fast songs in a row"
+  },
+  {
+   "type": "maxConsecutive",
+   "energy": "slow",
+   "count": 3,
+   "severity": "warning",
+   "label": "No more than 3 slow songs in a row"
+  },
+  {
+   "type": "noRepeat",
+   "severity": "warning",
+   "label": "No song played twice"
+  }
+ ]
+}

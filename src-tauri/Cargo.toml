@@ -1,0 +1,55 @@
+[package]
+name = "orpheus"
+version = "0.1.0"
+description = "Social dance DJ software"
+edition = "2021"
+
+[lib]
+name = "orpheus_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+log = "0.4"
+env_logger = "0.11"
+parking_lot = "0.12"
+crossbeam-channel = "0.5"
+symphonia = { version = "0.5", features = ["all"] }
+cpal = "0.18"
+signalsmith-stretch = "0.1"
+rtrb = "0.4"
+midir = "0.11"
+blake3 = "1"
+lofty = "0.25"
+walkdir = "2"
+dirs = "6"
+uuid = { version = "1", features = ["v4"] }
+librespot-core = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-playback = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-metadata = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-oauth = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+futures-util = "0.3"
+rayon = "1"
+rustfft = "6"
+base64 = "0.22"
+open = "5"
+
+# Keep audio DSP and analysis fast in debug builds.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"

@@ -1,0 +1,146 @@
+// Typed wrappers around the backend's Tauri commands.
+
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type * as T from "./types";
+
+const call = <R>(cmd: string, args?: Record<string, unknown>) => invoke<R>(cmd, args);
+
+export const api = {
+  // library
+  tracks: () => call<T.Track[]>("library_tracks"),
+  track: (id: T.Id) => call<T.Track>("track_get", { id }),
+  updateTrack: (id: T.Id, patch: T.TrackPatch) => call<T.Track>("track_update", { id, patch }),
+  deleteTracks: (ids: T.Id[]) => call<void>("tracks_delete", { ids }),
+  waveform: (id: T.Id) => call<number[]>("track_waveform", { id }),
+  analyze: (ids: T.Id[]) => call<void>("track_analyze", { ids }),
+  rescan: () => call<void>("library_rescan"),
+  reloadLibrary: () => call<string[]>("library_reload"),
+  libraryInfo: () => call<T.LibraryInfo>("library_info"),
+  importPaths: (paths: string[]) => call<void>("library_import", { paths }),
+  scanProgress: () => call<T.ScanProgress>("scan_progress"),
+  history: (limit: number) => call<T.HistoryItem[]>("history", { limit }),
+
+  // sources & versions
+  linkSpotify: (trackId: T.Id, uri: string) => call<T.Track>("source_link_spotify", { trackId, uri }),
+  removeSource: (trackId: T.Id, source: T.SourceRef) => call<T.Track>("source_remove", { trackId, source }),
+  mergeTracks: (keep: T.Id, others: T.Id[]) => call<T.Track>("tracks_merge", { keep, others }),
+  createVersion: (trackId: T.Id, version: T.VersionPatch) => call<T.Version>("version_create", { trackId, version }),
+  updateVersion: (id: T.Id, patch: T.VersionPatch) => call<T.Version>("version_update", { id, patch }),
+  deleteVersion: (id: T.Id) => call<void>("version_delete", { id }),
+
+  // crates
+  crates: () => call<T.Crate[]>("crates_list"),
+  createCrate: (name: string) => call<T.Id>("crate_create", { name }),
+  renameCrate: (id: T.Id, name: string) => call<void>("crate_rename", { id, name }),
+  deleteCrate: (id: T.Id) => call<void>("crate_delete", { id }),
+  addToCrate: (id: T.Id, versionIds: T.Id[]) => call<void>("crate_add", { id, versionIds }),
+  removeFromCrate: (id: T.Id, versionIds: T.Id[]) => call<void>("crate_remove", { id, versionIds }),
+
+  // setlists
+  setlists: () => call<T.SetlistSummary[]>("setlists_list"),
+  setlist: (id: T.Id) => call<T.Setlist>("setlist_get", { id }),
+  createSetlist: (a: { name: string; mode: T.SetlistMode; profileId: string; lessonStyle?: string | null; eventDate?: string | null }) =>
+    call<T.Setlist>("setlist_create", {
+      name: a.name,
+      mode: a.mode,
+      profileId: a.profileId,
+      lessonStyle: a.lessonStyle ?? null,
+      eventDate: a.eventDate ?? null,
+    }),
+  updateSetlist: (id: T.Id, patch: Partial<Omit<T.SetlistSummary, "id" | "entryCount">>) => call<T.Setlist>("setlist_update", { id, patch }),
+  deleteSetlist: (id: T.Id) => call<void>("setlist_delete", { id }),
+  duplicateSetlist: (id: T.Id, name: string) => call<T.Setlist>("setlist_duplicate", { id, name }),
+  resetSetlist: (id: T.Id) => call<void>("setlist_reset", { id }),
+  insertEntries: (setlistId: T.Id, entries: T.NewEntry[], position?: number | null) =>
+    call<T.Id[]>("entries_insert", { setlistId, position: position ?? null, entries }),
+  updateEntry: (id: T.Id, patch: T.EntryPatch) => call<T.SetlistEntry>("entry_update", { id, patch }),
+  deleteEntries: (setlistId: T.Id, ids: T.Id[]) => call<void>("entries_delete", { setlistId, ids }),
+  reorderEntries: (setlistId: T.Id, ids: T.Id[]) => call<void>("entries_reorder", { setlistId, ids }),
+  writeTextFile: (path: string, contents: string) => call<void>("write_text_file", { path, contents }),
+  readTextFile: (path: string) => call<string>("read_text_file", { path }),
+
+  // profiles & settings
+  profiles: () => call<T.Profile[]>("profiles_list"),
+  saveProfile: (profile: T.Profile) => call<void>("profile_save", { profile }),
+  deleteProfile: (id: string) => call<void>("profile_delete", { id }),
+  settings: () => call<T.Settings>("settings_get"),
+  saveSettings: (settings: T.Settings) => call<void>("settings_set", { settings }),
+
+  // audio
+  audioDevices: () => call<T.AudioDevice[]>("audio_devices"),
+  audioStatus: () => call<T.OutputStatus>("audio_status"),
+  audioReopen: () => call<T.OutputStatus>("audio_reopen"),
+  audioTest: (deck: 0 | 1) => call<void>("audio_test", { deck }),
+  deckStates: () => call<[T.DeckState, T.DeckState]>("deck_states"),
+  previewLoad: (versionId: T.Id, opts: { entryId?: T.Id | null; play?: boolean } = {}) =>
+    call<void>("preview_load", { versionId, entryId: opts.entryId ?? null, play: opts.play ?? true }),
+  deckAction: (deck: 0 | 1, action: "play" | "pause" | "toggle" | "fadeOut" | "cancelFade" | "stop" | "unload") =>
+    call<void>("deck_action", { deck, action }),
+  deckSeek: (deck: 0 | 1, ms: number) => call<void>("deck_seek", { deck, ms: Math.round(ms) }),
+  deckSet: (deck: 0 | 1, o: { tempo?: number; trimDb?: number; pfl?: boolean; fadeAtMs?: number | null }) =>
+    call<void>("deck_set", {
+      deck,
+      tempo: o.tempo ?? null,
+      trimDb: o.trimDb ?? null,
+      pfl: o.pfl ?? null,
+      fadeAtMs: o.fadeAtMs ?? null,
+      clearFadeAt: "fadeAtMs" in o && o.fadeAtMs === null,
+    }),
+  setLevels: (o: { master?: number; cue?: number }) => call<void>("levels_set", { master: o.master ?? null, cue: o.cue ?? null }),
+
+  // performance
+  performOpen: (setlistId: T.Id | null) => call<T.PerformState>("perform_open", { setlistId }),
+  performState: () => call<T.PerformState>("perform_state"),
+  playNext: () => call<"armed" | "fading" | "queued" | "started">("perform_play_next"),
+  playEntry: (entryId: T.Id) => call<string>("perform_play_entry", { entryId }),
+  skipNext: () => call<void>("perform_skip_next"),
+  setAutoAdvance: (value: boolean | null) => call<void>("perform_set_auto_advance", { value }),
+  cancelPending: () => call<void>("perform_cancel_pending"),
+  projectorMessage: (message: string | null) => call<void>("projector_message", { message }),
+  projectorState: () => call<T.ProjectorPayload>("projector_state"),
+  monitors: () => call<T.MonitorInfo[]>("monitors_list"),
+  projectorOpen: (monitor: number | null, fullscreen: boolean) => call<void>("projector_open", { monitor, fullscreen }),
+  projectorClose: () => call<void>("projector_close"),
+
+  // Spotify
+  spotifyStatus: () => call<T.SpotifyStatus>("spotify_status"),
+  spotifyLogin: () => call<T.SpotifyStatus>("spotify_login"),
+  spotifyConnectCached: () => call<T.SpotifyStatus>("spotify_connect_cached"),
+  spotifyLogout: () => call<void>("spotify_logout"),
+  spotifySearch: (query: string) => call<T.SpotifyTrack[]>("spotify_search", { query }),
+  spotifyPlaylists: () => call<T.SpotifyPlaylist[]>("spotify_playlists"),
+  spotifyPlaylistTracks: (uri: string) => call<T.SpotifyTrack[]>("spotify_playlist_tracks", { uri }),
+  spotifyResolve: (input: string) => call<T.SpotifyTrack[]>("spotify_resolve", { input }),
+  spotifyImport: (tracks: T.SpotifyTrack[]) => call<T.Id[]>("spotify_import", { tracks }),
+
+  // MIDI
+  midiInfo: () => call<T.MidiInfo>("midi_info"),
+  midiLearn: () => call<{ status: number; data1: number; kind: "button" | "absolute" } | null>("midi_learn"),
+  midiLearnCancel: () => call<void>("midi_learn_cancel"),
+  midiAction: (action: string, value?: number, delta?: number) =>
+    call<void>("midi_action", { action, value: value ?? null, delta: delta ?? null }),
+};
+
+export interface Events {
+  "deck-state": [T.DeckState, T.DeckState];
+  levels: T.Levels;
+  "perform-state": T.PerformState;
+  projector: T.ProjectorPayload;
+  "library-changed": T.Id[];
+  "setlist-changed": T.Id;
+  "setlists-changed": null;
+  "crates-changed": null;
+  "profiles-changed": null;
+  "settings-changed": T.Settings;
+  "scan-progress": T.ScanProgress;
+  "spotify-status": T.SpotifyStatus;
+  "output-status": T.OutputStatus;
+  "midi-ui": { action: string; delta?: number };
+  toast: string;
+  imported: T.Id[];
+}
+
+export function on<K extends keyof Events>(event: K, cb: (payload: Events[K]) => void): Promise<UnlistenFn> {
+  return listen<Events[K]>(event, (e) => cb(e.payload));
+}

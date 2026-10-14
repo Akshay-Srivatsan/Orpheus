@@ -1,0 +1,682 @@
+//! A deck: one loaded track, its worker thread, and its output taps.
+
+use super::source::Source;
+use super::{db_to_gain, AtomicF64, Tap};
+use anyhow::Result;
+use crossbeam_channel::{unbounded, Receiver, RecvTimeoutError, Sender};
+use parking_lot::Mutex;
+use serde::Serialize;
+use signalsmith_stretch::Stretch;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+
+pub type SourceOpener = Box<dyn FnOnce() -> Result<Box<dyn Source>> + Send>;
+
+pub struct LoadRequest {
+    pub track_id: Option<String>,
+    pub version_id: Option<String>,
+    pub entry_id: Option<String>,
+    pub open: SourceOpener,
+    pub start_secs: f64,
+    /// Stop reading here (cue-out / trimmed silence).
+    pub end_secs: Option<f64>,
+    /// Start an automatic fade-out here.
+    pub fade_at_secs: Option<f64>,
+    pub fade_secs: f64,
+    pub tempo: f64,
+    pub gain_db: f64,
+    pub play: bool,
+}
+
+enum Cmd {
+    Load(LoadRequest),
+    Seek(f64),
+    FadeOut(f64),
+    CancelFade,
+    SetFadeAt(Option<f64>),
+    Unload,
+    Reconfigure,
+}
+
+#[derive(Debug, Clone)]
+pub enum DeckEvent {
+    Loaded { deck: usize, track_id: Option<String> },
+    /// Playback reached the end (or a fade-out completed).
+    Ended { deck: usize, track_id: Option<String>, entry_id: Option<String> },
+    Error { deck: usize, track_id: Option<String>, message: String },
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DeckSnapshot {
+    pub deck: usize,
+    /// `empty`, `loading`, `paused`, `playing`, `ended`, `error`.
+    pub status: String,
+    pub track_id: Option<String>,
+    pub version_id: Option<String>,
+    pub entry_id: Option<String>,
+    pub position_ms: i64,
+    pub duration_ms: i64,
+    pub start_ms: i64,
+    pub end_ms: Option<i64>,
+    pub fade_at_ms: Option<i64>,
+    pub fading: bool,
+    pub tempo: f64,
+    pub keylock: bool,
+    pub gain_db: f64,
+    pub trim_db: f64,
+    pub pfl: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Default)]
+struct Info {
+    status: String,
+    track_id: Option<String>,
+    version_id: Option<String>,
+    entry_id: Option<String>,
+    duration: f64,
+    start: f64,
+    end: Option<f64>,
+    fade_at: Option<f64>,
+    fading: bool,
+    error: Option<String>,
+}
+
+pub struct DeckShared {
+    pub index: usize,
+    pub playing: Arc<AtomicBool>,
+    info: Mutex<Info>,
+    position: AtomicF64,
+    pub tempo: AtomicF64,
+    pub keylock: AtomicBool,
+    pub trim_db: AtomicF64,
+    pub track_gain_db: AtomicF64,
+    pub pfl: AtomicBool,
+    /// Engine output rate (Hz).
+    pub rate: Arc<AtomicU32>,
+    pub buffer_ms: Arc<AtomicU32>,
+    pub master_tap: Arc<Tap>,
+    pub cue_tap: Arc<Tap>,
+    load_gen: AtomicU64,
+}
+
+pub struct Deck {
+    pub shared: Arc<DeckShared>,
+    tx: Sender<Cmd>,
+}
+
+impl Deck {
+    pub fn new(index: usize, rate: Arc<AtomicU32>, buffer_ms: Arc<AtomicU32>, events: Sender<DeckEvent>) -> Self {
+        let playing = Arc::new(AtomicBool::new(false));
+        // Main deck: clock = master tap; its cue tap carries PFL (off by default).
+        // Preview deck: clock = cue tap; its master tap is never connected.
+        let shared = Arc::new(DeckShared {
+            index,
+            playing: playing.clone(),
+            info: Mutex::new(Info { status: "empty".into(), ..Default::default() }),
+            position: AtomicF64::new(0.0),
+            tempo: AtomicF64::new(1.0),
+            keylock: AtomicBool::new(true),
+            trim_db: AtomicF64::new(0.0),
+            track_gain_db: AtomicF64::new(0.0),
+            pfl: AtomicBool::new(index == 1),
+            rate,
+            buffer_ms,
+            master_tap: Tap::new(playing.clone(), 1.0),
+            cue_tap: Tap::new(playing, if index == 1 { 1.0 } else { 0.0 }),
+            load_gen: AtomicU64::new(0),
+        });
+        let (tx, rx) = unbounded();
+        let sh = shared.clone();
+        std::thread::Builder::new()
+            .name(format!("deck-{index}"))
+            .spawn(move || Worker::new(sh, rx, events).run())
+            .expect("spawn deck thread");
+        Self { shared, tx }
+    }
+
+    pub fn load(&self, req: LoadRequest) {
+        self.shared.playing.store(false, Ordering::SeqCst);
+        self.shared.load_gen.fetch_add(1, Ordering::SeqCst);
+        {
+            let mut i = self.shared.info.lock();
+            i.status = "loading".into();
+            i.track_id = req.track_id.clone();
+            i.version_id = req.version_id.clone();
+            i.entry_id = req.entry_id.clone();
+            i.error = None;
+            i.fading = false;
+        }
+        let _ = self.tx.send(Cmd::Load(req));
+    }
+
+    pub fn play(&self) -> bool {
+        let mut i = self.shared.info.lock();
+        match i.status.as_str() {
+            "paused" => {
+                i.status = "playing".into();
+                self.shared.playing.store(true, Ordering::SeqCst);
+                true
+            }
+            "playing" => true,
+            _ => false,
+        }
+    }
+
+    pub fn pause(&self) {
+        let mut i = self.shared.info.lock();
+        if i.status == "playing" {
+            i.status = "paused".into();
+        }
+        self.shared.playing.store(false, Ordering::SeqCst);
+    }
+
+    pub fn toggle(&self) {
+        if self.status() == "playing" {
+            self.pause()
+        } else {
+            self.play();
+        }
+    }
+
+    pub fn status(&self) -> String {
+        self.shared.info.lock().status.clone()
+    }
+
+    pub fn track_id(&self) -> Option<String> {
+        self.shared.info.lock().track_id.clone()
+    }
+
+    pub fn version_id(&self) -> Option<String> {
+        self.shared.info.lock().version_id.clone()
+    }
+
+    pub fn entry_id(&self) -> Option<String> {
+        self.shared.info.lock().entry_id.clone()
+    }
+
+    pub fn set_entry_id(&self, id: Option<String>) {
+        self.shared.info.lock().entry_id = id;
+    }
+
+    pub fn is_fading(&self) -> bool {
+        self.shared.info.lock().fading
+    }
+
+    pub fn seek(&self, secs: f64) {
+        let _ = self.tx.send(Cmd::Seek(secs));
+    }
+
+    pub fn fade_out(&self, secs: f64) {
+        let _ = self.tx.send(Cmd::FadeOut(secs));
+    }
+
+    pub fn cancel_fade(&self) {
+        let _ = self.tx.send(Cmd::CancelFade);
+    }
+
+    pub fn set_fade_at(&self, secs: Option<f64>) {
+        let _ = self.tx.send(Cmd::SetFadeAt(secs));
+    }
+
+    pub fn unload(&self) {
+        self.shared.playing.store(false, Ordering::SeqCst);
+        let _ = self.tx.send(Cmd::Unload);
+    }
+
+    pub fn reconfigure(&self) {
+        let _ = self.tx.send(Cmd::Reconfigure);
+    }
+
+    pub fn set_tempo(&self, ratio: f64) {
+        self.shared.tempo.set(ratio.clamp(0.5, 2.0));
+    }
+
+    pub fn tempo(&self) -> f64 {
+        self.shared.tempo.get()
+    }
+
+    pub fn set_keylock(&self, on: bool) {
+        self.shared.keylock.store(on, Ordering::Relaxed);
+    }
+
+    pub fn set_trim_db(&self, db: f64) {
+        self.shared.trim_db.set(db.clamp(-24.0, 12.0));
+    }
+
+    pub fn set_pfl(&self, on: bool) {
+        self.shared.pfl.store(on, Ordering::Relaxed);
+        if self.shared.index == 0 {
+            self.shared.cue_tap.gain.set(if on { 1.0 } else { 0.0 });
+        }
+    }
+
+    pub fn position_secs(&self) -> f64 {
+        self.shared.position.get()
+    }
+
+    pub fn snapshot(&self) -> DeckSnapshot {
+        let i = self.shared.info.lock();
+        let s = &self.shared;
+        DeckSnapshot {
+            deck: s.index,
+            status: i.status.clone(),
+            track_id: i.track_id.clone(),
+            version_id: i.version_id.clone(),
+            entry_id: i.entry_id.clone(),
+            position_ms: (s.position.get() * 1000.0) as i64,
+            duration_ms: (i.duration * 1000.0) as i64,
+            start_ms: (i.start * 1000.0) as i64,
+            end_ms: i.end.map(|e| (e * 1000.0) as i64),
+            fade_at_ms: i.fade_at.map(|e| (e * 1000.0) as i64),
+            fading: i.fading,
+            tempo: s.tempo.get(),
+            keylock: s.keylock.load(Ordering::Relaxed),
+            gain_db: s.track_gain_db.get(),
+            trim_db: s.trim_db.get(),
+            pfl: s.pfl.load(Ordering::Relaxed),
+            error: i.error.clone(),
+        }
+    }
+}
+
+const BLOCK: usize = 512;
+
+/// Transparent below 0.9; smoothly limits peaks (time-stretching and gain can
+/// push samples past full scale) instead of hard clipping.
+#[inline]
+fn soft_clip(x: f32) -> f32 {
+    const K: f32 = 0.9;
+    let a = x.abs();
+    if a <= K {
+        x
+    } else {
+        x.signum() * (K + (1.0 - K) * ((a - K) / (1.0 - K)).tanh())
+    }
+}
+
+struct Worker {
+    sh: Arc<DeckShared>,
+    rx: Receiver<Cmd>,
+    events: Sender<DeckEvent>,
+    src: Option<Box<dyn Source>>,
+    src_rate: u32,
+    stretch: Option<Stretch>,
+    transpose: f32,
+    /// (producer, is_clock)
+    prods: Vec<(rtrb::Producer<f32>, bool)>,
+    clock_capacity: usize,
+    inbuf: Vec<f32>,
+    outbuf: Vec<f32>,
+    out_acc: f64,
+    eof: bool,
+    tail_flushed: bool,
+    ended_sent: bool,
+    end: Option<f64>,
+    fade_at: Option<f64>,
+    fade_secs: f64,
+    fade_step: Option<f32>,
+    fade_gain: f32,
+    /// Source position of the next frame to enter the stretcher.
+    written_pos: f64,
+    track_id: Option<String>,
+    gen: u64,
+}
+
+impl Worker {
+    fn new(sh: Arc<DeckShared>, rx: Receiver<Cmd>, events: Sender<DeckEvent>) -> Self {
+        Self {
+            sh,
+            rx,
+            events,
+            src: None,
+            src_rate: 44100,
+            stretch: None,
+            transpose: 0.0,
+            prods: vec![],
+            clock_capacity: 0,
+            inbuf: Vec::with_capacity(BLOCK * 4),
+            outbuf: vec![],
+            out_acc: 0.0,
+            eof: false,
+            tail_flushed: false,
+            ended_sent: false,
+            end: None,
+            fade_at: None,
+            fade_secs: 5.0,
+            fade_step: None,
+            fade_gain: 1.0,
+            written_pos: 0.0,
+            track_id: None,
+            gen: 0,
+        }
+    }
+
+    fn active(&self) -> bool {
+        self.src.is_some() && !(self.eof && self.tail_flushed && self.ended_sent)
+    }
+
+    fn run(mut self) {
+        loop {
+            let timeout = if self.active() { Duration::from_millis(0) } else { Duration::from_millis(50) };
+            match self.rx.recv_timeout(timeout) {
+                Ok(cmd) => self.handle(cmd),
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return,
+            }
+            while let Ok(cmd) = self.rx.try_recv() {
+                self.handle(cmd);
+            }
+            if self.src.is_some() {
+                let produced = if self.eof && self.tail_flushed { false } else { self.produce() };
+                self.update_position();
+                self.check_end();
+                if !produced {
+                    std::thread::sleep(Duration::from_millis(3));
+                }
+            }
+        }
+    }
+
+    fn make_rings(&mut self) {
+        let rate = self.sh.rate.load(Ordering::Relaxed);
+        let ms = self.sh.buffer_ms.load(Ordering::Relaxed).clamp(20, 500);
+        let frames = ((rate as u64 * ms as u64 / 1000) as usize).max(4096);
+        self.prods.clear();
+        let taps: Vec<(Arc<Tap>, bool)> = if self.sh.index == 0 {
+            vec![(self.sh.master_tap.clone(), true), (self.sh.cue_tap.clone(), false)]
+        } else {
+            vec![(self.sh.cue_tap.clone(), true)]
+        };
+        for (tap, clock) in taps {
+            let (p, c) = rtrb::RingBuffer::<f32>::new(frames * 2);
+            tap.rate.store(rate, Ordering::Relaxed);
+            *tap.ring.lock() = Some(super::TapRing::new(c));
+            self.prods.push((p, clock));
+        }
+        self.clock_capacity = frames * 2;
+    }
+
+    fn clear_rings(&mut self) {
+        self.prods.clear();
+        *self.sh.master_tap.ring.lock() = None;
+        *self.sh.cue_tap.ring.lock() = None;
+    }
+
+    fn handle(&mut self, cmd: Cmd) {
+        match cmd {
+            Cmd::Load(req) => self.load(req),
+            Cmd::Seek(secs) => {
+                if self.src.is_some() {
+                    self.seek(secs);
+                }
+            }
+            Cmd::FadeOut(secs) => {
+                if self.src.is_some() && self.fade_step.is_none() && !self.eof {
+                    let rate = self.sh.rate.load(Ordering::Relaxed) as f64;
+                    self.fade_step = Some((1.0 / (secs.max(0.05) * rate)) as f32);
+                    self.sh.info.lock().fading = true;
+                }
+            }
+            Cmd::CancelFade => {
+                self.fade_step = None;
+                self.fade_gain = 1.0;
+                self.sh.info.lock().fading = false;
+            }
+            Cmd::SetFadeAt(at) => {
+                self.fade_at = at;
+                self.sh.info.lock().fade_at = at;
+            }
+            Cmd::Unload => {
+                self.src = None;
+                self.stretch = None;
+                self.clear_rings();
+                self.track_id = None;
+                let mut i = self.sh.info.lock();
+                *i = Info { status: "empty".into(), ..Default::default() };
+                self.sh.position.set(0.0);
+            }
+            Cmd::Reconfigure => {
+                if self.src.is_some() {
+                    let pos = self.sh.position.get();
+                    self.seek(pos);
+                } else {
+                    self.clear_rings();
+                }
+            }
+        }
+    }
+
+    fn load(&mut self, req: LoadRequest) {
+        self.gen = self.sh.load_gen.load(Ordering::SeqCst);
+        self.src = None;
+        self.clear_rings();
+        self.track_id = req.track_id.clone();
+        let opened = (req.open)();
+        // A newer load was requested while this one was opening.
+        if self.sh.load_gen.load(Ordering::SeqCst) != self.gen {
+            return;
+        }
+        let mut src = match opened {
+            Ok(s) => s,
+            Err(e) => {
+                let msg = format!("{e:#}");
+                log::error!("deck {} load failed: {msg}", self.sh.index);
+                {
+                    let mut i = self.sh.info.lock();
+                    i.status = "error".into();
+                    i.error = Some(msg.clone());
+                }
+                let _ = self.events.send(DeckEvent::Error { deck: self.sh.index, track_id: req.track_id.clone(), message: msg });
+                return;
+            }
+        };
+        if req.start_secs > 0.0 {
+            if let Err(e) = src.seek(req.start_secs) {
+                log::warn!("initial seek failed: {e:#}");
+            }
+        }
+        self.src_rate = src.sample_rate();
+        self.stretch = Some(Stretch::preset_default(2, self.src_rate));
+        self.transpose = 0.0;
+        self.written_pos = src.position_secs();
+        let duration = src.duration_secs().unwrap_or(0.0);
+        self.src = Some(src);
+        self.end = req.end_secs.filter(|e| *e > req.start_secs);
+        self.fade_at = req.fade_at_secs;
+        self.fade_secs = req.fade_secs;
+        self.reset_stream_state();
+        self.sh.tempo.set(req.tempo.clamp(0.5, 2.0));
+        self.sh.track_gain_db.set(req.gain_db);
+        self.sh.position.set(self.written_pos);
+        self.make_rings();
+        {
+            let mut i = self.sh.info.lock();
+            i.duration = duration;
+            i.start = req.start_secs;
+            i.end = self.end;
+            i.fade_at = self.fade_at;
+            i.fading = false;
+            i.error = None;
+            i.status = if req.play { "playing" } else { "paused" }.into();
+        }
+        self.sh.playing.store(req.play, Ordering::SeqCst);
+        let _ = self.events.send(DeckEvent::Loaded { deck: self.sh.index, track_id: req.track_id.clone() });
+    }
+
+    fn reset_stream_state(&mut self) {
+        self.inbuf.clear();
+        self.out_acc = 0.0;
+        self.eof = false;
+        self.tail_flushed = false;
+        self.ended_sent = false;
+        self.fade_step = None;
+        self.fade_gain = 1.0;
+        if let Some(s) = self.stretch.as_mut() {
+            s.reset();
+        }
+    }
+
+    fn seek(&mut self, secs: f64) {
+        let Some(src) = self.src.as_mut() else { return };
+        let max = self.end.or(src.duration_secs()).unwrap_or(f64::MAX);
+        let secs = secs.clamp(0.0, (max - 0.05).max(0.0));
+        if let Err(e) = src.seek(secs) {
+            log::warn!("seek failed: {e:#}");
+        }
+        self.written_pos = src.position_secs();
+        self.reset_stream_state();
+        self.make_rings();
+        self.sh.position.set(self.written_pos);
+        let mut i = self.sh.info.lock();
+        i.fading = false;
+        if i.status == "ended" {
+            i.status = "paused".into();
+        }
+    }
+
+    fn clock_free_frames(&self) -> usize {
+        self.prods.iter().find(|(_, c)| *c).map(|(p, _)| p.slots() / 2).unwrap_or(0)
+    }
+
+    fn clock_buffered_frames(&self) -> usize {
+        self.prods
+            .iter()
+            .find(|(_, c)| *c)
+            .map(|(p, _)| (self.clock_capacity - p.slots()) / 2)
+            .unwrap_or(0)
+    }
+
+    /// Produces one block of output. Returns false if there was no room.
+    fn produce(&mut self) -> bool {
+        let out_rate = self.sh.rate.load(Ordering::Relaxed) as f64;
+        let tempo = self.sh.tempo.get();
+        let keylock = self.sh.keylock.load(Ordering::Relaxed);
+        let ratio = (out_rate / self.src_rate as f64) / tempo;
+        let expected_out = (BLOCK as f64 * ratio).ceil() as usize + 2;
+        if self.clock_free_frames() < expected_out {
+            return false;
+        }
+        // Fill the input block.
+        while self.inbuf.len() < BLOCK * 2 && !self.eof {
+            let src = self.src.as_mut().unwrap();
+            match src.read(&mut self.inbuf) {
+                Ok(true) => {}
+                Ok(false) => self.eof = true,
+                Err(e) => {
+                    log::warn!("deck {} read error: {e:#}", self.sh.index);
+                    self.eof = true;
+                }
+            }
+        }
+        let mut n = (self.inbuf.len() / 2).min(BLOCK);
+        if let Some(end) = self.end {
+            let remaining = ((end - self.written_pos) * self.src_rate as f64).max(0.0) as usize;
+            if remaining < n {
+                n = remaining;
+                self.eof = true;
+                self.inbuf.truncate(n * 2);
+            }
+        }
+        let stretch = self.stretch.as_mut().unwrap();
+        let transpose = if keylock {
+            (self.src_rate as f64 / out_rate) as f32
+        } else {
+            (self.src_rate as f64 / out_rate * tempo) as f32
+        };
+        if (transpose - self.transpose).abs() > 1e-6 {
+            stretch.set_transpose_factor(transpose, None);
+            self.transpose = transpose;
+        }
+        if n == 0 {
+            if self.eof && !self.tail_flushed {
+                let lat = stretch.output_latency();
+                self.outbuf.resize(lat * 2, 0.0);
+                stretch.flush(&mut self.outbuf);
+                self.tail_flushed = true;
+                let mut out = std::mem::take(&mut self.outbuf);
+                self.finish_block(&mut out);
+                self.outbuf = out;
+            }
+            return true;
+        }
+        self.out_acc += n as f64 * ratio;
+        let out_n = self.out_acc.floor() as usize;
+        self.out_acc -= out_n as f64;
+        self.outbuf.resize(out_n * 2, 0.0);
+        stretch.process(&self.inbuf[..n * 2], &mut self.outbuf);
+        self.inbuf.drain(..n * 2);
+        self.written_pos += n as f64 / self.src_rate as f64;
+
+        if let (Some(at), None) = (self.fade_at, self.fade_step) {
+            if self.written_pos >= at {
+                self.fade_step = Some((1.0 / (self.fade_secs.max(0.05) * out_rate)) as f32);
+                self.sh.info.lock().fading = true;
+            }
+        }
+        let mut out = std::mem::take(&mut self.outbuf);
+        self.finish_block(&mut out);
+        self.outbuf = out;
+        true
+    }
+
+    /// Applies gain/fade and writes to the rings.
+    fn finish_block(&mut self, out: &mut [f32]) {
+        let g = db_to_gain(self.sh.track_gain_db.get() + self.sh.trim_db.get());
+        let mut fade_done = false;
+        for fr in out.chunks_exact_mut(2) {
+            if let Some(step) = self.fade_step {
+                self.fade_gain = (self.fade_gain - step).max(0.0);
+                if self.fade_gain <= 0.0 {
+                    fade_done = true;
+                }
+            }
+            // Equal-power-ish curve for the fade.
+            let fg = self.fade_gain * self.fade_gain;
+            fr[0] = soft_clip(fr[0] * g * fg);
+            fr[1] = soft_clip(fr[1] * g * fg);
+        }
+        for (p, clock) in self.prods.iter_mut() {
+            let n = if *clock { out.len() } else { (p.slots() / 2 * 2).min(out.len()) };
+            for &s in &out[..n] {
+                if p.push(s).is_err() {
+                    break;
+                }
+            }
+        }
+        if fade_done {
+            self.eof = true;
+            self.tail_flushed = true;
+        }
+    }
+
+    fn update_position(&mut self) {
+        let out_rate = self.sh.rate.load(Ordering::Relaxed) as f64;
+        let tempo = self.sh.tempo.get();
+        let buffered = self.clock_buffered_frames() as f64 / out_rate * tempo;
+        let latency = self
+            .stretch
+            .as_ref()
+            .map(|s| (s.input_latency() + s.output_latency()) as f64 / self.src_rate as f64)
+            .unwrap_or(0.0);
+        let start = self.sh.info.lock().start;
+        let pos = (self.written_pos - buffered - latency).max(start.min(self.written_pos));
+        self.sh.position.set(pos);
+    }
+
+    fn check_end(&mut self) {
+        if self.eof && self.tail_flushed && !self.ended_sent && self.clock_buffered_frames() == 0 {
+            self.ended_sent = true;
+            self.sh.playing.store(false, Ordering::SeqCst);
+            let entry_id = {
+                let mut i = self.sh.info.lock();
+                i.status = "ended".into();
+                i.fading = false;
+                i.entry_id.clone()
+            };
+            let _ = self.events.send(DeckEvent::Ended { deck: self.sh.index, track_id: self.track_id.clone(), entry_id });
+        }
+    }
+}
