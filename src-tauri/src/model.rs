@@ -35,6 +35,10 @@ fn is_true(b: &bool) -> bool {
     *b
 }
 
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 fn is_zero_u32(v: &u32) -> bool {
     *v == 0
 }
@@ -336,6 +340,9 @@ pub struct SetlistEntry {
     pub note: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// Auto mode stops before this entry: the DJ starts it with Play Next.
+    #[serde(skip_serializing_if = "is_false")]
+    pub hold: bool,
     /// `pending`, `playing`, `played`, `skipped`.
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -353,6 +360,7 @@ impl Default for SetlistEntry {
             overrides: Overrides::default(),
             note: String::new(),
             tags: vec![],
+            hold: false,
             status: "pending".into(),
             played_at: None,
         }
@@ -448,6 +456,7 @@ pub struct EntryPatch {
     /// Replaces all overrides.
     pub overrides: Option<Overrides>,
     pub note: Option<String>,
+    pub hold: Option<bool>,
     pub tags: Option<Vec<String>>,
     pub status: Option<String>,
 }

@@ -14,6 +14,7 @@ pub mod perform;
 pub mod settings;
 pub mod spotify;
 pub mod stems;
+pub mod tts;
 
 use std::sync::Arc;
 use tauri::{Manager, RunEvent};
@@ -86,6 +87,13 @@ pub fn run() {
             commands::styles_save,
             commands::styles_rekey,
             commands::tags_rekey,
+            commands::tts_status,
+            commands::tts_install,
+            commands::tts_voices,
+            commands::tts_remove,
+            commands::tts_say,
+            commands::announce_next,
+            commands::set_dance_name,
             commands::tag_set,
             commands::profiles_list,
             commands::profile_save,

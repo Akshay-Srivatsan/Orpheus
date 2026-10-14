@@ -87,6 +87,56 @@ impl Default for MidiSettings {
     }
 }
 
+/// Spoken announcements of the next dance in auto mode (`tts.rs`). Off by default.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AnnounceSettings {
+    pub enabled: bool,
+    /// Sentences picked at random (never the same twice in a row); `{dance}`
+    /// is replaced by what the projector shows for the next song.
+    pub patterns: Vec<String>,
+    /// Pause after a song ends, before the announcement.
+    pub pause_before_secs: f64,
+    /// Pause after the announcement, before the next song starts.
+    pub pause_after_secs: f64,
+    /// Piper voice (key in Piper's voice catalogue).
+    pub voice: String,
+    /// Speech rate (Piper's length scale: >1 slower).
+    pub length_scale: f64,
+    /// Linear gain of announcements.
+    pub volume: f64,
+    /// Optional: an existing Piper executable / voice model instead of the downloaded ones.
+    pub piper_path: String,
+    pub voice_path: String,
+}
+
+impl Default for AnnounceSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            patterns: vec!["The next dance is a {dance}.".into(), "Please find a partner for a {dance}.".into()],
+            pause_before_secs: 3.0,
+            pause_after_secs: 4.0,
+            voice: "en_US-lessac-medium".into(),
+            length_scale: 1.0,
+            volume: 0.8,
+            piper_path: String::new(),
+            voice_path: String::new(),
+        }
+    }
+}
+
+impl AnnounceSettings {
+    pub fn tts_config(&self) -> crate::tts::TtsConfig {
+        crate::tts::TtsConfig {
+            voice: self.voice.clone(),
+            piper_path: self.piper_path.clone(),
+            voice_path: self.voice_path.clone(),
+            length_scale: self.length_scale,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
 pub struct SpotifySettings {
@@ -136,6 +186,7 @@ pub struct Settings {
     pub projector: ProjectorSettings,
     pub midi: MidiSettings,
     pub spotify: SpotifySettings,
+    pub announce: AnnounceSettings,
 }
 
 impl Default for Settings {
@@ -162,6 +213,7 @@ impl Default for Settings {
             projector: ProjectorSettings::default(),
             midi: MidiSettings::default(),
             spotify: SpotifySettings { client_id: String::new(), auto_connect: true },
+            announce: AnnounceSettings::default(),
         }
     }
 }

@@ -1041,6 +1041,7 @@ impl Store {
             if let Some(v) = &p.overrides { e.overrides = v.clone(); }
             if let Some(v) = &p.note { e.note = v.clone(); }
             if let Some(v) = &p.tags { e.tags = v.clone(); }
+            if let Some(v) = p.hold { e.hold = v; }
             if let Some(v) = &p.status {
                 e.status = v.clone();
                 if v == "pending" {

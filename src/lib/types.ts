@@ -134,12 +134,14 @@ export interface SetlistEntry {
   overrides?: Overrides;
   note?: string;
   tags?: string[];
+  /** Auto mode stops before this entry: start it with Play Next. */
+  hold?: boolean;
   status: EntryStatus;
   playedAt?: number | null;
 }
 
 export type NewEntry = Partial<Pick<SetlistEntry, "versionId" | "styles" | "label" | "overrides" | "note" | "tags">>;
-export type EntryPatch = Partial<Pick<SetlistEntry, "versionId" | "styles" | "label" | "overrides" | "note" | "tags" | "status">>;
+export type EntryPatch = Partial<Pick<SetlistEntry, "versionId" | "styles" | "label" | "overrides" | "note" | "tags" | "status" | "hold">>;
 
 /** A song played in a setlist (history is derived from setlists). */
 export interface HistoryItem {
@@ -318,6 +320,39 @@ export interface Settings {
   /** mappingId "" = pick automatically from the connected controller. */
   midi: { enabled: boolean; mappingId: string; customMappings: MidiMapping[] };
   spotify: { clientId: string; autoConnect: boolean };
+  announce: AnnounceSettings;
+}
+
+/** Spoken announcements of the next dance in auto mode. */
+export interface AnnounceSettings {
+  enabled: boolean;
+  /** `{dance}` is replaced by the next dance's name. */
+  patterns: string[];
+  pauseBeforeSecs: number;
+  pauseAfterSecs: number;
+  /** Piper voice key, e.g. "en_US-lessac-medium". */
+  voice: string;
+  /** Piper length scale: >1 slower. */
+  lengthScale: number;
+  volume: number;
+  piperPath: string;
+  voicePath: string;
+}
+
+export type TtsState =
+  | { state: "missing" }
+  | { state: "installing"; done: number; total: number; what: string }
+  | { state: "ready" }
+  | { state: "error"; message: string };
+
+export type TtsStatus = TtsState & { voice: string; installedVoices: string[]; dir: string };
+
+export interface VoiceInfo {
+  key: string;
+  name: string;
+  language: string;
+  quality: string;
+  sizeBytes: number;
 }
 
 // ---------------------------------------------------------------- live state
@@ -370,6 +405,8 @@ export interface PerformState {
   gapSeconds: number;
   autoAdvance: boolean;
   autoAdvanceAt: number | null;
+  /** Auto mode: in the pause, speaking the announcement, or held before the next entry. */
+  autoPhase: "waiting" | "announcing" | "held" | null;
   /** Play Next was pressed during a song; it starts when the fade completes. */
   pendingNext: boolean;
   /** Play Next pressed once while playing: press again to confirm. */

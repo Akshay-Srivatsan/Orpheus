@@ -1,0 +1,160 @@
+<script lang="ts">
+  // Settings → Auto Mode: starting songs automatically, and spoken
+  // announcements of the next dance (Piper text-to-speech). All off by default.
+  import { onMount } from "svelte";
+  import { api } from "../lib/api";
+  import { app, confirmAction } from "../lib/state.svelte";
+  import type { AnnounceSettings, Settings, VoiceInfo } from "../lib/types";
+  import Icon from "./Icon.svelte";
+
+  const s = $derived(app.settings!);
+  const a = $derived(s.announce);
+  const tts = $derived(app.tts);
+  let voices = $state<VoiceInfo[] | null>(null);
+  let voicesError = $state<string | null>(null);
+  let language = $state("");
+  let sample = $state("");
+
+  onMount(() => {
+    api.ttsVoices()
+      .then((v) => {
+        voices = v;
+        language = v.find((x) => x.key === a.voice)?.language ?? "";
+      })
+      .catch((e) => (voicesError = String(e)));
+  });
+
+  const languages = $derived([...new Set((voices ?? []).map((v) => v.language))]);
+  const shownVoices = $derived((voices ?? []).filter((v) => !language || v.language === language));
+  const installing = $derived(tts?.state === "installing" ? tts : null);
+
+  function setAnnounce(patch: Partial<AnnounceSettings>) {
+    app.saveSettings({ announce: { ...$state.snapshot(a), ...patch } } as Partial<Settings>);
+  }
+
+  function setPattern(i: number, text: string) {
+    const patterns = [...a.patterns];
+    patterns[i] = text;
+    setAnnounce({ patterns });
+  }
+
+  function trySay() {
+    const text = sample.trim() || (a.patterns.find((p) => p.trim()) ?? "The next dance is a {dance}.").replace("{dance}", "Rotary Waltz");
+    app.run(api.ttsSay(text));
+  }
+
+  function mb(bytes: number) {
+    return `${(bytes / 1e6).toFixed(0)} MB`;
+  }
+</script>
+
+<h2>Auto Mode</h2>
+<p class="dim">
+  Auto mode starts the next song by itself after the pause between songs, and can announce the next dance first:
+  the song ends, a pause, the announcement, another pause, then the next song. Mark songs in a setlist with
+  <b>Auto Mode Stops Before This Song</b> (right-click) to start those yourself with Play Next. Everything here is off unless you turn it on.
+</p>
+
+<div class="form">
+  <span class="l">Next song</span>
+  <span class="col">
+    <label><input type="radio" name="adv" checked={!(s.autoAdvance ?? app.profile?.autoAdvance)} onchange={() => app.saveSettings({ autoAdvance: false })} /> Manual: start each song with Play Next</label>
+    <label><input type="radio" name="adv" checked={!!(s.autoAdvance ?? app.profile?.autoAdvance)} onchange={() => app.saveSettings({ autoAdvance: true })} /> Automatic (auto mode)</label>
+    <span class="faint small">The <b>Auto</b> button under Play Next switches it for the current session.</span>
+  </span>
+
+  <span class="l">Announcements</span>
+  <span class="col">
+    <label><input type="checkbox" checked={a.enabled} onchange={(e) => setAnnounce({ enabled: e.currentTarget.checked })} /> Announce the next dance before starting it</label>
+    {#if !a.enabled}<span class="faint small">Without announcements, auto mode waits for the “pause between songs” (Settings → General).</span>{/if}
+  </span>
+
+  <span class="l">Timing</span>
+  <span class="col">
+    <span>Pause <input type="number" min="0" step="0.5" value={a.pauseBeforeSecs} onchange={(e) => setAnnounce({ pauseBeforeSecs: +e.currentTarget.value })} /> s,
+      announcement, pause <input type="number" min="0" step="0.5" value={a.pauseAfterSecs} onchange={(e) => setAnnounce({ pauseAfterSecs: +e.currentTarget.value })} /> s, next song</span>
+  </span>
+
+  <span class="l">What to say</span>
+  <span class="col">
+    <span class="faint small">One is picked at random each time (not the same twice in a row). <code>{"{dance}"}</code> becomes the next dance, as the projector names it.</span>
+    {#each a.patterns as p, i (i)}
+      <span class="row">
+        <input type="text" class="pattern" value={p} onchange={(e) => setPattern(i, e.currentTarget.value)} />
+        <button class="plain icon danger" title="Remove" onclick={() => setAnnounce({ patterns: a.patterns.filter((_, j) => j !== i) })}><Icon name="x" size={12} /></button>
+      </span>
+    {/each}
+    <button class="small" onclick={() => setAnnounce({ patterns: [...a.patterns, "Next up: {dance}."] })}><Icon name="plus" size={12} /> Add Sentence</button>
+  </span>
+
+  <span class="l">Voice</span>
+  <span class="col">
+    {#if voices}
+      <span class="row">
+        <select bind:value={language}>
+          <option value="">All languages</option>
+          {#each languages as l}<option value={l}>{l}</option>{/each}
+        </select>
+        <select value={a.voice} onchange={(e) => setAnnounce({ voice: e.currentTarget.value })}>
+          {#if !shownVoices.some((v) => v.key === a.voice)}<option value={a.voice}>{a.voice}</option>{/if}
+          {#each shownVoices as v}
+            <option value={v.key}>{v.name} ({v.quality}){tts?.installedVoices.includes(v.key) ? " ✓" : ` · ${mb(v.sizeBytes)}`}</option>
+          {/each}
+        </select>
+      </span>
+    {:else if voicesError}
+      <span class="warn small">Couldn't load Piper's voice list ({voicesError}). Voice: {a.voice}</span>
+    {:else}
+      <span class="faint small">Loading voices…</span>
+    {/if}
+    <span class="row">
+      {#if installing}
+        <span class="num small">Downloading {installing.what}… {installing.total ? `${Math.round((installing.done / installing.total) * 100)}%` : mb(installing.done)}</span>
+      {:else if tts?.state === "ready"}
+        <span class="ok small"><Icon name="check" size={12} /> Ready</span>
+        <button class="small" onclick={() => confirmAction("Delete Piper and the downloaded voices from this computer?").then((ok) => { if (ok) app.run(api.ttsRemove()); })}>Remove…</button>
+      {:else}
+        <button class="primary small" onclick={() => app.run(api.ttsInstall())}>Download Piper and This Voice</button>
+        {#if tts?.state === "error"}<span class="err small">{tts.message}</span>{/if}
+      {/if}
+    </span>
+    <span class="faint small">Announcements are spoken by <a href="https://github.com/rhasspy/piper" target="_blank" rel="noreferrer">Piper</a>, an open-source text-to-speech engine that runs on this computer. Downloading needs the internet once.</span>
+  </span>
+
+  <span class="l">Sound</span>
+  <span class="col">
+    <span class="row">Speed <input type="range" min="0.7" max="1.4" step="0.05" value={2 - (a.lengthScale || 1)}
+      onchange={(e) => setAnnounce({ lengthScale: Math.round((2 - +e.currentTarget.value) * 100) / 100 })} />
+      Volume <input type="range" min="0" max="1.5" step="0.05" value={a.volume} onchange={(e) => setAnnounce({ volume: +e.currentTarget.value })} />
+      <span class="num faint">{Math.round(a.volume * 100)}%</span></span>
+    <span class="row">
+      <input type="text" class="pattern" placeholder="Try a sentence…" bind:value={sample} />
+      <button class="small" disabled={tts?.state !== "ready"} onclick={trySay}><Icon name="speaker" size={12} /> Say It</button>
+    </span>
+    <span class="faint small">Announcements play in the room and in your headphones.</span>
+  </span>
+
+  <span class="l">Advanced</span>
+  <span class="col">
+    <span class="faint small">Use a Piper you already have instead of the download (paths on this computer):</span>
+    <input type="text" class="pattern" placeholder="Piper program" value={a.piperPath} onchange={(e) => setAnnounce({ piperPath: e.currentTarget.value.trim() })} />
+    <input type="text" class="pattern" placeholder="Voice model (.onnx, with its .onnx.json next to it)" value={a.voicePath} onchange={(e) => setAnnounce({ voicePath: e.currentTarget.value.trim() })} />
+  </span>
+</div>
+
+<style>
+  h2 { margin: 0 0 8px; font: 600 var(--fs-lg) var(--font-display); }
+  p { margin: 0 0 14px; max-width: 720px; }
+  .form { display: grid; grid-template-columns: 170px 1fr; gap: 14px 14px; align-items: start; }
+  .l { color: var(--text-dim); text-align: right; padding-top: 4px; }
+  .col { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  input[type="number"] { width: 60px; }
+  .pattern { width: 420px; }
+  .small { font-size: var(--fs-sm); }
+  .ok { color: var(--green); display: inline-flex; gap: 4px; align-items: center; }
+  .err { color: var(--red); }
+  .warn { color: var(--yellow); }
+  .danger { color: var(--red); }
+  code { font: var(--fs-sm) var(--font-mono); background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+</style>

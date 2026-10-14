@@ -94,6 +94,16 @@ export function entryLabel(lib: StyleLibrary | null, profile: Profile | null, ve
   return showStyles(lib, profile, entryStyleKeys(version, entry), bpm).map((s) => s.name).join(" / ");
 }
 
+/** An entry's dance as spoken in announcements: like the projector (the
+ * club's names; styles it doesn't dance left out), alternatives joined by "or". */
+export function spokenName(lib: StyleLibrary | null, profile: Profile | null, version: Version | undefined, entry: Partial<SetlistEntry> | null | undefined, bpm: number | null): string {
+  const custom = customLabel(version, entry);
+  if (custom) return custom;
+  const all = showStyles(lib, profile, entryStyleKeys(version, entry), bpm);
+  const shown = all.some((s) => !s.unmapped) ? all.filter((s) => !s.unmapped) : all;
+  return shown.map((s) => s.name).join(" or ");
+}
+
 /** The first club style an entry / version is danced as at `bpm` (for tempo ranges). */
 export function clubStyleOfEntry(lib: StyleLibrary | null, profile: Profile | null, version: Version | undefined, entry: Partial<SetlistEntry> | null | undefined, bpm: number | null): StyleDef | null {
   for (const k of entryStyleKeys(version, entry)) {

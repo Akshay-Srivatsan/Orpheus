@@ -165,6 +165,33 @@ Machine-specific state stays in the app data folder:
 - **Silence and levels:** silence at the start and end of songs is skipped,
   and there is optional automatic loudness levelling.
 
+## Auto mode and announcements
+
+Off by default; turn it on in Settings → Auto Mode (or with the **Auto**
+button under Play Next for the current session).
+
+- **Auto mode** starts the next song by itself after the pause.
+- **Announcements:** auto mode can also announce the next dance: the song
+  ends, a pause, a spoken announcement, another pause, then the next song.
+  - You write the sentences, e.g. "The next dance is a {dance}." or
+    "Please find a partner for a {dance}.". One is picked at random each
+    time, never the same twice in a row.
+  - `{dance}` is the next dance as the projector names it (the club's style
+    names, or the version's display name). Songs without a style just get
+    the pauses.
+  - Announcements play in the room and in the headphones. The speaker
+    button under Play Next announces the next dance whenever you like.
+  - Speech comes from [Piper](https://github.com/rhasspy/piper), an
+    open-source text-to-speech engine that runs on your computer. Settings
+    downloads Piper and a voice of your choice from Piper's catalogue
+    (about 25 MB plus 20–120 MB per voice) into the app data folder, or you
+    can point it at a Piper you already have. Downloading needs the
+    internet; speaking doesn't.
+- **Stops:** right-click a song in a setlist and choose **Auto Mode Stops
+  Before This Song** for points where you want to start the next song
+  yourself (e.g. before a mixer that needs explaining). Auto mode waits
+  there until you press Play Next.
+
 ## Spotify
 
 Settings → Spotify → **Connect** signs you in through the browser. A
@@ -246,6 +273,7 @@ src-tauri/src/
   audio/        engine: decks (stretch + SRC + fades) → lock-free rings → device mixer (cpal); stretch engines; thread priorities
   spotify.rs    librespot session, per-deck players, metadata, Web API search
   stems.rs      background stem separation and cache
+  tts.rs        Piper text-to-speech for announcements (install, voices, synthesis)
   midi.rs       midir hot-plug, mappings (DJ2GO2 built in), learn, LEDs
   commands.rs   Tauri commands
   profiles/     the built-in "No club" profile

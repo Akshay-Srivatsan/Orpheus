@@ -24,7 +24,11 @@
   const nextShown = $derived(next ? app.shownFor(next.row?.version, next.entry, nextPb?.target ?? null) : []);
   const inGap = $derived(!!p?.gapStartedAt && !playing);
   const gapMs = $derived(inGap && p?.gapStartedAt ? now - p.gapStartedAt : 0);
-  const gapTarget = $derived((p?.gapSeconds ?? 8) * 1000);
+  /** Expected pause: the general pause, or with announcements, both pauses and the speech. */
+  const gapTarget = $derived.by(() => {
+    if (p?.autoAdvanceAt && p.gapStartedAt) return Math.max(1000, p.autoAdvanceAt - p.gapStartedAt);
+    return (p?.gapSeconds ?? 8) * 1000;
+  });
   const autoIn = $derived(p?.autoAdvanceAt && inGap ? Math.max(0, p.autoAdvanceAt - now) : null);
 
   const label = $derived.by(() => {
@@ -64,9 +68,11 @@
         <span class="dim">pause · target {Math.round(gapTarget / 1000)}s</span>
       </div>
       <div class="bar"><div style:width="{Math.min(100, (gapMs / gapTarget) * 100)}%"></div></div>
-      {#if autoIn != null}<div class="auto num">Auto-play in {Math.ceil(autoIn / 1000)}s</div>{/if}
+      {#if p?.autoPhase === "announcing"}<div class="auto">Announcing the next dance…</div>
+      {:else if p?.autoPhase === "held"}<div class="auto held">Auto mode waits here: press Play Next</div>
+      {:else if autoIn != null}<div class="auto num">Next song in {Math.ceil(autoIn / 1000)}s</div>{/if}
     {:else if playing}
-      <div class="dim small">Next song starts only when you press Play Next.</div>
+      <div class="dim small">{p?.autoAdvance ? (p.autoPhase === "held" ? "Auto mode stops before the next song." : "Auto mode starts the next song after the pause.") : "Next song starts only when you press Play Next."}</div>
     {/if}
   </div>
   {/if}
@@ -99,8 +105,13 @@
     <button class="small" disabled={!next} onclick={() => api.skipNext()} title="Skip the up-next song (stays in the set, greyed out)">
       <Icon name="skip" size={13} /> Skip
     </button>
+    {#if app.tts?.state === "ready"}
+      <button class="small" disabled={!next} onclick={() => app.run(api.announceNext())} title="Announce the next dance now" aria-label="Announce the next dance">
+        <Icon name="speaker" size={13} />
+      </button>
+    {/if}
     <button class="small" class:on={p?.autoAdvance} onclick={() => api.setAutoAdvance(!p?.autoAdvance)}
-      title="Automatically start the next song after the pause">
+      title={app.settings?.announce.enabled ? "Auto mode: after a song, pause, announce the next dance, pause, and start it" : "Auto mode: start the next song after the pause"}>
       <Icon name="auto" size={13} /> Auto
     </button>
   </div>
@@ -123,6 +134,7 @@
   .bar { height: 4px; background: var(--bg-elev-3); border-radius: 2px; overflow: hidden; }
   .bar div { height: 100%; background: var(--green); transition: width 0.2s linear; }
   .auto { color: var(--teal); font-size: var(--fs-sm); }
+  .auto.held { color: var(--yellow); }
   .upnext { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 2px; padding-top: 6px; border-top: 1px solid var(--border); min-width: 0; }
   .upnext > * { flex: none; }
   .un-style { margin: 2px 0; }

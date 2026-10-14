@@ -15,7 +15,9 @@ use crate::model::*;
 use crate::settings::ProfileCore;
 use anyhow::{anyhow, Result};
 use serde::Serialize;
+use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Debug)]
@@ -26,6 +28,32 @@ pub enum PendingNext {
     Entry(Id),
     /// Whatever is loaded on this deck ("Go Live").
     Deck(usize),
+}
+
+/// A synthesized announcement: samples and rate, or the error.
+pub type Clip = std::result::Result<(Arc<Vec<f32>>, u32), String>;
+
+/// Auto mode's progress through the pause before the next song:
+/// song ends → pause → announcement → pause → next song.
+#[derive(Default, Clone)]
+pub enum AutoPhase {
+    #[default]
+    Idle,
+    /// Synthesizing the announcement for `entry` (started when the pause begins).
+    Preparing { entry: Id, clip: Arc<Mutex<Option<Clip>>> },
+    /// Speaking until the given time (epoch ms).
+    Speaking { entry: Id, until: i64 },
+    /// The announcement finished (or failed) at the given time.
+    Announced { entry: Id, at: i64 },
+}
+
+impl AutoPhase {
+    fn entry(&self) -> Option<&Id> {
+        match self {
+            AutoPhase::Idle => None,
+            AutoPhase::Preparing { entry, .. } | AutoPhase::Speaking { entry, .. } | AutoPhase::Announced { entry, .. } => Some(entry),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -45,6 +73,11 @@ pub struct Perform {
     pub live_deck: usize,
     /// Load generation of each deck's track once it has been counted as played.
     pub registered: [Option<u64>; 2],
+    pub auto: AutoPhase,
+    /// Last announcement pattern used (not repeated next time).
+    pub last_pattern: Option<usize>,
+    /// What the next entry is called for dancers (the UI resolves club names).
+    pub dance_names: HashMap<Id, String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -58,6 +91,9 @@ pub struct PerformState {
     pub gap_seconds: f64,
     pub auto_advance: bool,
     pub auto_advance_at: Option<i64>,
+    /// Auto mode: `waiting` (pause), `announcing`, `held` (next entry waits for
+    /// the DJ), or none.
+    pub auto_phase: Option<String>,
     pub pending_next: bool,
     pub armed: bool,
     pub message: Option<String>,
@@ -321,7 +357,9 @@ impl App {
             p.pending = None;
             p.armed_until = None;
             p.gap_started = None;
+            p.auto = AutoPhase::Idle;
         }
+        self.announcer.stop();
         self.emit_perform();
         Ok(())
     }
@@ -436,7 +474,10 @@ impl App {
             let mut p = self.perform.lock();
             p.live_deck = deck;
             p.gap_started = None;
+            p.auto = AutoPhase::Idle;
         }
+        // Music is on: an announcement in progress gives way.
+        self.announcer.stop();
         self.emit_setlist(&setlist_id);
         emit(&self.handle, "library-changed", vec![track_id]);
         self.emit_perform();
@@ -519,6 +560,158 @@ impl App {
 
     // ------------------------------------------------------------ state for the UI
 
+    // ------------------------------------------------------------ auto mode
+
+    /// The text spoken for an entry: a pattern with `{dance}` filled in.
+    fn announcement_for(&self, entry: &SetlistEntry) -> Option<String> {
+        let patterns: Vec<String> = self.settings.read().announce.patterns.iter().filter(|p| !p.trim().is_empty()).cloned().collect();
+        if patterns.is_empty() {
+            return None;
+        }
+        let name = self.perform.lock().dance_names.get(&entry.id).cloned().or_else(|| self.own_dance_name(entry))?;
+        let mut p = self.perform.lock();
+        let n = patterns.len();
+        let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos() as usize).unwrap_or(0);
+        let mut i = seed % n;
+        if n > 1 && p.last_pattern == Some(i) {
+            i = (i + 1 + seed / n % (n - 1)) % n;
+        }
+        p.last_pattern = Some(i);
+        Some(patterns[i].replace("{dance}", &name))
+    }
+
+    /// Fallback name when the UI hasn't said: the label, display name or your styles.
+    fn own_dance_name(&self, entry: &SetlistEntry) -> Option<String> {
+        if let Some(l) = entry.label.clone().filter(|l| !l.is_empty()) {
+            return Some(l);
+        }
+        let version = entry.version_id.as_ref().and_then(|v| self.store.version(v).ok()).map(|(v, _)| v);
+        if let Some(d) = version.as_ref().and_then(|v| v.display_name.clone()) {
+            return Some(d);
+        }
+        let keys = entry.styles.clone().or_else(|| version.map(|v| v.styles)).unwrap_or_default();
+        (!keys.is_empty()).then(|| keys.iter().map(|k| self.style_name(k)).collect::<Vec<_>>().join(" or "))
+    }
+
+    /// Records what an entry is called for dancers (sent by the UI, which resolves club names).
+    pub fn set_dance_name(&self, entry_id: Id, name: String) {
+        let mut p = self.perform.lock();
+        if p.dance_names.len() > 200 {
+            p.dance_names.clear();
+        }
+        p.dance_names.insert(entry_id, name);
+    }
+
+    /// Speaks `text` now (in a background thread).
+    pub fn speak(&self, text: String) {
+        let (tts, cfg, volume) = {
+            let s = self.settings.read();
+            (self.tts.clone(), s.announce.tts_config(), s.announce.volume as f32)
+        };
+        let announcer = self.announcer.clone();
+        let handle = self.handle.clone();
+        std::thread::spawn(move || match tts.synthesize(&cfg, &text) {
+            Ok((samples, rate)) => {
+                announcer.play(&samples, rate, volume);
+            }
+            Err(e) => emit(&handle, "toast", format!("Announcement: {e:#}")),
+        });
+    }
+
+    /// Announces the next dance now (manual button).
+    pub fn announce_next(&self) -> Result<()> {
+        let next = self.next_entry().ok_or_else(|| anyhow!("Nothing is coming up"))?;
+        let text = self.announcement_for(&next).ok_or_else(|| anyhow!("Add an announcement pattern in Settings → Auto Mode"))?;
+        self.speak(text);
+        Ok(())
+    }
+
+    /// Called by the poller: moves auto mode through the pause between songs.
+    pub fn auto_tick(&self) {
+        let (gap, pending) = {
+            let p = self.perform.lock();
+            (p.gap_started, p.pending.is_some())
+        };
+        let Some(g) = gap else { return };
+        if pending || !self.auto_advance() || (0..2).any(|d| self.audible(d)) {
+            return;
+        }
+        let Some(next) = self.next_entry() else { return };
+        if next.version_id.is_none() || next.hold {
+            return;
+        }
+        let ann = self.settings.read().announce.clone();
+        let now = now_ms();
+        let start = |app: &Self| {
+            if let Err(e) = app.play_next() {
+                emit(&app.handle, "toast", format!("{e:#}"));
+                let mut p = app.perform.lock();
+                p.gap_started = None;
+                p.auto = AutoPhase::Idle;
+            }
+        };
+        if !ann.enabled {
+            if now - g >= (self.gap_seconds() * 1000.0) as i64 {
+                start(self);
+            }
+            return;
+        }
+        let phase = self.perform.lock().auto.clone();
+        // A different song is next now (reordered): start over for it.
+        let phase = if phase.entry().is_some_and(|e| *e != next.id) { AutoPhase::Idle } else { phase };
+        match phase {
+            AutoPhase::Idle => {
+                // Prepare the announcement while the first pause runs.
+                let clip = Arc::new(Mutex::new(None));
+                match self.announcement_for(&next) {
+                    Some(text) => {
+                        log::info!("announcement: {text}");
+                        let (tts, cfg, slot) = (self.tts.clone(), ann.tts_config(), clip.clone());
+                        std::thread::spawn(move || {
+                            let r = tts.synthesize(&cfg, &text).map_err(|e| format!("{e:#}"));
+                            *slot.lock() = Some(r);
+                        });
+                    }
+                    // No patterns, or the song has no dance to name: just pause.
+                    None => *clip.lock() = Some(Err(String::new())),
+                }
+                self.perform.lock().auto = AutoPhase::Preparing { entry: next.id.clone(), clip };
+                self.emit_perform();
+            }
+            AutoPhase::Preparing { entry, clip } => {
+                if now - g < (ann.pause_before_secs * 1000.0) as i64 {
+                    return;
+                }
+                let Some(result) = clip.lock().take() else { return };
+                let phase = match result {
+                    Ok((samples, rate)) => {
+                        let len = self.announcer.play(&samples, rate, ann.volume as f32);
+                        AutoPhase::Speaking { entry, until: now + len.as_millis() as i64 }
+                    }
+                    Err(e) => {
+                        if !e.is_empty() {
+                            emit(&self.handle, "toast", format!("Announcement skipped: {e}"));
+                        }
+                        AutoPhase::Announced { entry, at: now }
+                    }
+                };
+                self.perform.lock().auto = phase;
+                self.emit_perform();
+            }
+            AutoPhase::Speaking { entry, until } => {
+                if now >= until && !self.announcer.speaking() {
+                    self.perform.lock().auto = AutoPhase::Announced { entry, at: now };
+                    self.emit_perform();
+                }
+            }
+            AutoPhase::Announced { at, .. } => {
+                if now - at >= (ann.pause_after_secs * 1000.0) as i64 {
+                    start(self);
+                }
+            }
+        }
+    }
+
     pub fn perform_state(&self) -> PerformState {
         let auto = self.auto_advance();
         let gap_secs = self.gap_seconds();
@@ -531,11 +724,33 @@ impl App {
         let message = p.message.clone();
         let setlist_id = p.setlist_id.clone();
         let (crossfader, live_deck) = (p.crossfader, p.live_deck);
+        let auto_phase_now = p.auto.clone();
         drop(p);
         let entries = self.entries();
         let started_at = entries.iter().filter_map(|e| e.played_at).min();
         let next = self.next_entry();
         let next_ready = next.as_ref().map(|e| e.version_id.is_some()).unwrap_or(false);
+        let next_held = next.as_ref().is_some_and(|e| e.hold);
+        let ann = self.settings.read().announce.clone();
+        // When the next song starts (estimated while the announcement is pending).
+        let auto_at = gap.map(|g| {
+            if !ann.enabled {
+                return g + (gap_secs * 1000.0) as i64;
+            }
+            let after = (ann.pause_after_secs * 1000.0) as i64;
+            match &auto_phase_now {
+                AutoPhase::Speaking { until, .. } => until + after,
+                AutoPhase::Announced { at, .. } => at + after,
+                _ => g + (ann.pause_before_secs * 1000.0) as i64 + 2500 + after,
+            }
+        });
+        let auto_phase = match (&auto_phase_now, gap) {
+            _ if !auto || next.is_none() => None,
+            _ if next_held => Some("held".to_string()),
+            (AutoPhase::Speaking { .. }, Some(_)) => Some("announcing".to_string()),
+            (_, Some(_)) if next_ready => Some("waiting".to_string()),
+            _ => None,
+        };
         PerformState {
             setlist_id,
             mode,
@@ -544,7 +759,8 @@ impl App {
             gap_started_at: gap,
             gap_seconds: gap_secs,
             auto_advance: auto,
-            auto_advance_at: if auto && next_ready { gap.map(|g| g + (gap_secs * 1000.0) as i64) } else { None },
+            auto_advance_at: if auto && next_ready && !next_held { auto_at } else { None },
+            auto_phase,
             pending_next: pending,
             armed,
             message,

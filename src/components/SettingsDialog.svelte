@@ -6,10 +6,11 @@
   import type { AudioDevice, MidiControl, MidiInfo, MidiMapping, Profile, Settings, StyleDef } from "../lib/types";
   import Icon from "./Icon.svelte";
   import StylesSettings from "./StylesSettings.svelte";
+  import AutoModeSettings from "./AutoModeSettings.svelte";
 
   const tabs = [
     ["general", "General"], ["library", "Library"], ["audio", "Audio"], ["midi", "Controllers"],
-    ["stems", "Stems"], ["spotify", "Spotify"], ["projector", "Projector"], ["styles", "Styles & Tags"], ["profiles", "Club Profiles"],
+    ["stems", "Stems"], ["spotify", "Spotify"], ["projector", "Projector"], ["auto", "Auto Mode"], ["styles", "Styles & Tags"], ["profiles", "Club Profiles"],
   ] as const;
   let tab = $state<string>(typeof app.settingsOpen === "string" ? app.settingsOpen : "general");
   const s = $derived(app.settings!);
@@ -202,8 +203,8 @@
             onchange={(e) => set("gapSeconds", e.currentTarget.value ? +e.currentTarget.value : null)} /> seconds <span class="faint">(empty = club default)</span></span>
           <span class="l">Next song</span>
           <span class="col">
-            <label><input type="radio" name="adv" checked={!(s.autoAdvance ?? app.profile?.autoAdvance)} onchange={() => set("autoAdvance", false)} /> Manual: start with Play Next (recommended)</label>
-            <label><input type="radio" name="adv" checked={!!(s.autoAdvance ?? app.profile?.autoAdvance)} onchange={() => set("autoAdvance", true)} /> Automatic after the pause</label>
+            <span>{(s.autoAdvance ?? app.profile?.autoAdvance) ? "Automatic (auto mode)" : "Manual: start each song with Play Next"}</span>
+            <button class="plain small link" onclick={() => (tab = "auto")}>Auto mode and announcements…</button>
           </span>
           <span class="l">Play Next while playing</span>
           <span class="col">
@@ -574,6 +575,8 @@
         <button class="small" onclick={addTag}><Icon name="plus" size={12} /> Add Tag</button>
         <h3>Announcements</h3>
         <textarea rows="4" value={draft.announcements.join("\n")} onchange={(e) => (draft!.announcements = e.currentTarget.value.split("\n").filter((x) => x.trim()))}></textarea>
+      {:else if tab === "auto"}
+        <AutoModeSettings />
       {:else if tab === "styles"}
         <StylesSettings />
       {/if}

@@ -152,6 +152,17 @@ export const api = {
   spotifyImport: (tracks: T.SpotifyTrack[], inLibrary = true) => call<T.Id[]>("spotify_import", { tracks, inLibrary }),
   setInLibrary: (id: T.Id, value: boolean) => call<T.Track>("track_set_in_library", { id, value }),
 
+  // announcements
+  ttsStatus: () => call<T.TtsStatus>("tts_status"),
+  /** Downloads Piper and the selected voice in the background ("tts-status" events). */
+  ttsInstall: () => call<void>("tts_install"),
+  ttsVoices: () => call<T.VoiceInfo[]>("tts_voices"),
+  ttsRemove: () => call<void>("tts_remove"),
+  ttsSay: (text: string) => call<void>("tts_say", { text }),
+  announceNext: () => call<void>("announce_next"),
+  /** Tells the backend what an entry is called for dancers (club names are resolved here). */
+  setDanceName: (entryId: T.Id, name: string) => call<void>("set_dance_name", { entryId, name }),
+
   // MIDI
   midiInfo: () => call<T.MidiInfo>("midi_info"),
   midiLearn: () => call<{ status: number; data1: number; kind: "button" | "absolute" } | null>("midi_learn"),
@@ -178,6 +189,7 @@ export interface Events {
   "midi-ui": { action: string; delta?: number; deck?: 0 | 1 };
   "toast-info": string;
   "stems-status": T.StemsStatus;
+  "tts-status": T.TtsStatus;
   "open-settings": string;
   "history-changed": null;
   toast: string;

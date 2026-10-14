@@ -3,7 +3,7 @@
 import { ask } from "@tauri-apps/plugin-dialog";
 import { api, on, type Events } from "./api";
 import type {
-  Crate, DeckState, Id, Levels, LibraryInfo, StemsStatus, OutputStatus, PerformState, Profile, Row, ScanProgress, Setlist,
+  Crate, DeckState, Id, Levels, TtsStatus, LibraryInfo, StemsStatus, OutputStatus, PerformState, Profile, Row, ScanProgress, Setlist,
   SetlistEntry, SetlistSummary, Settings, SpotifyStatus, StyleDef, StylesInfo, Track, Version,
 } from "./types";
 import { NEUTRAL, clubStyle, clubStyleOfEntry, clubTargets, entryStyleKeys, myStyle, prettify, showStyle, showStyles, type Shown } from "./styles";
@@ -54,6 +54,7 @@ class AppState {
   outputs = $state<OutputStatus | null>(null);
   library = $state<LibraryInfo | null>(null);
   stems = $state<StemsStatus | null>(null);
+  tts = $state<TtsStatus | null>(null);
   /** Tracks with prepared stems on this computer. */
   stemsReady = $state<Set<Id>>(new Set());
   toasts = $state<Toast[]>([]);
@@ -290,6 +291,8 @@ class AppState {
         this.stemsReady = new Set(await api.stemsReady());
       }
     });
+    this.listen("tts-status", (t) => (this.tts = t));
+    this.tts = await api.ttsStatus();
     this.stems = await api.stemsStatus();
     this.stemsReady = new Set(await api.stemsReady());
     this.listen("midi-ui", (m) => (this.midiNav = { ...m, n: this.midiNav.n + 1 }));

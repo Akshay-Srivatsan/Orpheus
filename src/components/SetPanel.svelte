@@ -108,6 +108,7 @@
         action: () => entry.versionId && api.deckLoad(d, entry.versionId, { entryId: entry.id }),
       })),
       { label: "Move to Play Next", disabled: isCurrent, action: () => moveNext(ids) },
+      { label: "Auto Mode Stops Before This Song", checked: !!entry.hold, action: () => api.updateEntry(entry.id, { hold: !entry.hold }) },
       { separator: true },
       entry.status === "skipped"
         ? { label: "Unskip", action: () => api.updateEntry(entry.id, { status: "pending" }) }
@@ -307,6 +308,12 @@
         {@const isCur = x.e.id === app.perform?.currentEntryId}
         {@const isNext = x.e.id === app.perform?.nextEntryId}
         {#if dropIndex === x.i}<div class="drop-line"></div>{/if}
+        {#if x.e.hold}
+          <div class="hold" title="Auto mode stops here: start the next song with Play Next">
+            <Icon name="pause" size={10} /> auto mode stops here
+            <button class="plain x" title="Remove the stop" onclick={() => api.updateEntry(x.e.id, { hold: false })}>×</button>
+          </div>
+        {/if}
         <div
           class="entry {x.e.status}"
           class:cur={isCur}
@@ -422,6 +429,9 @@
   .note { color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; }
   .right { display: flex; flex-direction: column; align-items: flex-end; font-size: var(--fs-sm); color: var(--text-dim); }
   .dur.long { color: var(--yellow); }
+  .hold { display: flex; align-items: center; gap: 5px; margin: 2px 8px 2px 32px; padding: 1px 6px; font-size: var(--fs-xs);
+    color: var(--yellow); border-top: 1px dashed color-mix(in srgb, var(--yellow) 60%, transparent); }
+  .hold .x { padding: 0 3px; height: 14px; color: inherit; min-width: 0; }
   .drop-line { height: 2px; background: var(--blue); margin: -1px 8px; border-radius: 1px; }
   .foot { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-top: 1px solid var(--border); }
   .spacer { flex: 1; }

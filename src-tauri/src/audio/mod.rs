@@ -8,6 +8,7 @@
 //! into channel pairs. Play/pause is applied in the output callback with a short
 //! ramp so it is instant and click-free.
 
+pub mod announcer;
 pub mod deck;
 pub mod output;
 pub mod priority;

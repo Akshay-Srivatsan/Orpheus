@@ -562,6 +562,60 @@ pub async fn tag_set(app: S<'_>, tag: String, version_ids: Vec<Id>, on: bool) ->
     Ok(())
 }
 
+// ---------------------------------------------------------------- announcements (auto mode)
+
+#[tauri::command]
+pub async fn tts_status(app: S<'_>) -> Res<crate::tts::TtsStatus> {
+    Ok(app.tts_status())
+}
+
+/// Downloads Piper and the selected voice (in the background).
+#[tauri::command]
+pub async fn tts_install(app: S<'_>) -> Res<()> {
+    let a = app.inner().clone();
+    std::thread::spawn(move || {
+        let cfg = a.settings.read().announce.tts_config();
+        if let Err(e) = a.tts.install(&cfg) {
+            crate::app::emit(&a.handle, "toast", format!("Installing the announcer voice failed: {e:#}"));
+        }
+        a.emit_tts_status();
+    });
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn tts_voices(app: S<'_>) -> Res<Vec<crate::tts::VoiceInfo>> {
+    let a = app.inner().clone();
+    blocking(move || a.tts.voices()).await
+}
+
+#[tauri::command]
+pub async fn tts_remove(app: S<'_>) -> Res<()> {
+    app.tts.remove().map_err(ae)?;
+    app.emit_tts_status();
+    Ok(())
+}
+
+/// Speaks `text` now (to try a voice or pattern).
+#[tauri::command]
+pub async fn tts_say(app: S<'_>, text: String) -> Res<()> {
+    app.speak(text);
+    Ok(())
+}
+
+/// Announces the next dance now.
+#[tauri::command]
+pub async fn announce_next(app: S<'_>) -> Res<()> {
+    app.announce_next().map_err(ae)
+}
+
+/// What an entry is called for dancers (the UI resolves club style names).
+#[tauri::command]
+pub async fn set_dance_name(app: S<'_>, entry_id: Id, name: String) -> Res<()> {
+    app.set_dance_name(entry_id, name);
+    Ok(())
+}
+
 // ---------------------------------------------------------------- profiles & settings
 
 #[tauri::command]

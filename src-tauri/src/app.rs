@@ -45,6 +45,9 @@ pub struct App {
     pub buffer_ms: Arc<AtomicU32>,
     pub spotify: Arc<Spotify>,
     pub stems: Arc<crate::stems::Stems>,
+    /// Text-to-speech (Piper) for announcements, and their playback.
+    pub tts: Arc<crate::tts::Tts>,
+    pub announcer: Arc<crate::audio::announcer::Announcer>,
     pub midi: OnceLock<Arc<Midi>>,
     pub perform: Mutex<Perform>,
     pub scan_progress: Mutex<crate::library::ScanProgress>,
@@ -99,6 +102,8 @@ impl App {
         let spotify = Arc::new(Spotify::new(rt.handle().clone(), data_dir.join("spotify")));
         spotify.set_web_client_id(&crate::commands::spotify_web_client_id(&settings));
         let stems = crate::stems::Stems::new(&data_dir);
+        let tts = crate::tts::Tts::new(&data_dir, rt.handle().clone());
+        let announcer = Arc::new(crate::audio::announcer::Announcer::default());
         let levels = Arc::new(Levels::default());
         let rate = Arc::new(AtomicU32::new(48000));
         let buffer_ms = Arc::new(AtomicU32::new(settings.audio.buffer_ms));
@@ -127,6 +132,8 @@ impl App {
             buffer_ms,
             spotify,
             stems,
+            tts,
+            announcer,
             midi: OnceLock::new(),
             perform: Mutex::new(Perform::default()),
             scan_progress: Mutex::new(Default::default()),
@@ -154,6 +161,19 @@ impl App {
                 app.on_stems_changed(track);
             }
         });
+        let weak = Arc::downgrade(&app);
+        let last = Mutex::new(Instant::now() - Duration::from_secs(1));
+        app.tts.on_change(Box::new(move || {
+            // Download progress arrives per chunk: send at most 5 updates a second.
+            let mut l = last.lock();
+            if l.elapsed() < Duration::from_millis(200) {
+                return;
+            }
+            *l = Instant::now();
+            if let Some(app) = weak.upgrade() {
+                app.emit_tts_status();
+            }
+        }));
         let (mapping, enabled, auto) = app.current_mapping();
         let _ = app.midi.set(Midi::new(mapping, enabled, auto, handler));
         // Restore the last active setlist.
@@ -206,6 +226,9 @@ impl App {
             self.apply_outputs();
         }
         self.spotify.set_web_client_id(&crate::commands::spotify_web_client_id(&new));
+        if serde_json::to_string(&old.announce)? != serde_json::to_string(&new.announce)? {
+            self.emit_tts_status();
+        }
         if old.keylock != new.keylock {
             for d in &self.decks {
                 d.set_keylock(new.keylock);
@@ -313,8 +336,9 @@ impl App {
             cue_channels: s.cue_channels,
             buffer_ms: s.buffer_ms,
         };
-        let master_taps = self.decks.iter().map(|d| d.shared.master_tap.clone()).collect();
-        let cue_taps = self.decks.iter().map(|d| d.shared.cue_tap.clone()).collect();
+        // Announcements go to the room and the headphones, like a deck.
+        let master_taps = self.decks.iter().map(|d| d.shared.master_tap.clone()).chain([self.announcer.room.clone()]).collect();
+        let cue_taps = self.decks.iter().map(|d| d.shared.cue_tap.clone()).chain([self.announcer.phones.clone()]).collect();
         let (rate, status) = self.outputs.apply(cfg, master_taps, cue_taps);
         self.rate.store(rate, Ordering::SeqCst);
         // Without a room output, let the headphone output pace playback.
@@ -503,6 +527,14 @@ impl App {
         self.queue_analysis(id.clone(), true);
     }
 
+    pub fn tts_status(&self) -> crate::tts::TtsStatus {
+        self.tts.status(&self.settings.read().announce.tts_config())
+    }
+
+    pub fn emit_tts_status(&self) {
+        emit(&self.handle, "tts-status", self.tts_status());
+    }
+
     /// Logs output underruns (frames played as silence) since the last call.
     fn log_underruns(&self) {
         for (i, d) in self.decks.iter().enumerate() {
@@ -572,23 +604,8 @@ impl App {
                         emit(&app.handle, "levels", &lv);
                         last = Some(key);
                     }
-                    // Auto-advance after the pause.
-                    let (gap, pending) = {
-                        let p = app.perform.lock();
-                        (p.gap_started, p.pending.is_some())
-                    };
-                    if let Some(g) = gap {
-                        if !pending && app.auto_advance() && now_ms() - g >= (app.gap_seconds() * 1000.0) as i64 {
-                            let ready = app.next_entry().map(|e| e.version_id.is_some()).unwrap_or(false);
-                            let busy = (0..2).any(|d| app.audible(d));
-                            if ready && !busy {
-                                if let Err(e) = app.play_next() {
-                                    emit(&app.handle, "toast", format!("{e:#}"));
-                                    app.perform.lock().gap_started = None;
-                                }
-                            }
-                        }
-                    }
+                    // Auto mode: pause, announcement, pause, next song.
+                    app.auto_tick();
                     let armed = app.perform.lock().armed_until.map(|t| t > Instant::now()).unwrap_or(false);
                     if armed != last_armed {
                         last_armed = armed;

@@ -18,8 +18,20 @@
   import Icon from "./Icon.svelte";
   import SmartCrateDialog from "./SmartCrateDialog.svelte";
   import { describe } from "../lib/smart";
+  import { spokenName } from "../lib/styles";
+  import { playback } from "../lib/tempo";
 
   let ready = $state(false);
+
+  // Announcements use the club's names for the next dance, which only the UI
+  // resolves: keep the backend told.
+  $effect(() => {
+    const next = app.entryRow(app.perform?.nextEntryId);
+    if (!next) return;
+    const pb = next.row ? playback(next.row.track, next.row.version, next.entry, app.clubStyleOf) : null;
+    const name = spokenName(app.styleLib, app.profile, next.row?.version, next.entry, pb?.target ?? null);
+    if (name) api.setDanceName(next.entry.id, name);
+  });
   let dragging = $state(false);
   let searchEl: HTMLInputElement | undefined = $state();
 
