@@ -2,10 +2,11 @@
 
 DJ software for **social dancing**: waltz, swing, Latin, fusion and more,
 where each song is a separate dance with a pause in between. It follows
-Richard Powers' [DJ tips](https://socialdance.stanford.edu/Syllabi/DJtips.htm)
-and ships with a profile for Stanford's
-[Dancebreak](https://dancebreak.stanford.edu/info/djing/). Other clubs can
-change every detail.
+Richard Powers' [DJ tips](https://socialdance.stanford.edu/Syllabi/DJtips.htm).
+Nothing about styles or clubs is built in: you define your dance styles and
+tags, and each club's profile (`examples/clubs/` has importable profiles for
+Stanford's [Dancebreak](https://dancebreak.stanford.edu/info/djing/) and
+Powers' tips).
 
 Runs on macOS, Linux and Windows (Tauri 2, Rust and Svelte).
 
@@ -36,7 +37,10 @@ Runs on macOS, Linux and Windows (Tauri 2, Rust and Svelte).
   - Live sets show the current dance, the song, its cover art and recent
     songs. Cover art is the file's embedded picture, an image next to the
     file (e.g. `cover.jpg`), or Spotify's.
-  - Preset sets show the whole setlist with your position in it.
+  - Preset sets show the whole setlist at once in columns (3 × 18 songs fit;
+    longer sets scroll sideways to keep the current song in view), with a
+    banner for the current dance.
+  - Live sets can also list what's coming up (queued songs and style slots).
   - During the pause it shows the next dance, so people can find a partner.
   - It can also show announcements, such as "No street shoes on the floor".
 
@@ -46,13 +50,15 @@ Runs on macOS, Linux and Windows (Tauri 2, Rust and Svelte).
 |---|---|
 | **Track** | A recording: title, artist, BPM, loudness and waveform. |
 | **Source** | Where a track's audio comes from: a local file or a Spotify track. A track can have both. |
-| **Version** | A playable configuration of a track: dance styles, tempo, start, end and fade points, gain, stem defaults, comments and tags. One song can be a Rotary Waltz at 150 BPM and a Fast Waltz at 168 BPM. You can also add a slowed "teaching" version. |
-| **Your dance styles** | Labels on versions, not places in the library. You define them in Settings → Dance Styles. A version can have several, e.g. a song that works as both Lindy Hop and East Coast Swing. Every view (all songs, a crate, a setlist, history) has a style filter bar: click a style to narrow the view, ⌘/Shift-click to combine styles. With one style chosen, unlabelled songs whose tempo fits it are suggested too. Drop songs on a style to add it; use the right-click menu to remove one. |
+| **Version** | A playable configuration of a track: dance styles, tempo, start, end and fade points, gain, stem defaults, comments and your tags. One song can be a Rotary Waltz at 150 BPM and a Fast Waltz at 168 BPM. You can also add a slowed "teaching" version. A version can have a **display name** shown to dancers instead of the style names, e.g. the name of a particular line dance. |
+| **Meter** | Triple (3/4, or 6/8 counted in eighths) or duple (2/4, 4/4), detected from the audio, or set by hand. It's detected on the beat grid of the song's BPM, so after fixing a BPM (e.g. with 1½) the meter is re-detected. Triple songs whose tempo was detected at 2/3 of the beat get the corrected BPM automatically. Songs where the evidence is unclear stay unknown. |
+| **Your tags** | Labels that aren't dance styles, e.g. "Classic" or "Teaching" (Settings → Styles & Tags). Smart crates can use them. |
+| **Your dance styles** | Labels on versions, not places in the library. You define them in Settings → Styles & Tags; there are no defaults. A version can have several, e.g. a song that works as both Lindy Hop and East Coast Swing. Every view (all songs, a crate, a setlist, history) has a style filter bar: click a style to narrow the view, ⌘/Shift-click to combine styles. With one style chosen, unlabelled songs whose tempo fits it are suggested too. Drop songs on a style to add it; use the right-click menu to remove one. Giving a Spotify song a style adds it to your library. |
 | **Club styles** | Each club profile has its own styles and tempo ranges. For each club, ordered **mapping rules** say how your styles count there, optionally by planned tempo. For example, your "Waltz" from 105 to 125 BPM is a Cross-Step Waltz, from 135 to 160 BPM a Rotary Waltz, and otherwise not danced. The first matching rule wins. Ranges are matched in their own counting, so half- and double-time BPMs count. Without a rule, a club style with the same key or name is used. The **No club** profile has no styles of its own and shows yours unchanged. |
 | **Crate** | Your own collection of songs: "Waltzes", "Dancebreak classics", "Pre-approved rotary waltzes", "Wedding requests". Crates can mix styles freely. Drag songs onto a crate to add them. |
 | **Smart crate** | A crate defined by rules instead of a hand-picked list, e.g. "in *Waltzes* and tempo fits Rotary Waltz", "Lindy Hop, not played in the last 30 days", "longer than 4:30". It updates as the library changes. |
-| **Setlist** | An ordered list of versions, or of **style slots** ("a West Coast Swing goes here") that you fill live. Each setlist uses one club. Each entry can override its version's settings for that set only. It can also show just some of a song's styles, or a custom label such as "Mixer" instead of style names. Songs already played in the open set are marked in the library and the set. |
-| **Club profile** | The club's dance styles and tempo ranges, pause length, fade length, tags (e.g. "Dance with a Stranger", "Jam") and announcements. |
+| **Setlist** | An ordered list of versions, or of **style slots** ("a West Coast Swing goes here") that you fill live: press **Choose Song…** on the slot, then double-click a song (or drag one onto the slot). Each setlist uses one club. Each entry can override its version's settings for that set only. It can also show just some of a song's styles, or a custom label such as "Mixer" instead of style names. Songs already played in the open set are greyed out in the library and the set. |
+| **Club profile** | The club's dance styles and tempo ranges, pause length, fade length, entry tags (e.g. "Dance with a Stranger", "Jam") and announcements. Only "No club" is built in; create clubs or **Import…** / **Export…** them as JSON files (Settings → Club Profiles). |
 | **History** | Derived from setlists: every song that was played (audible in the room). Play counts and "last played" come from it. "Remove from History" marks the entry as not played. |
 
 Settings resolve in this order: setlist entry override, then the version,
@@ -136,7 +142,12 @@ Machine-specific state stays in the app data folder:
     real-time priority comes from RealtimeKit (as for PipeWire), or from
     SCHED_FIFO if your user may use it (e.g. the `audio` group). Without
     either, Orpheus logs a warning and runs at normal priority.
-- **Tempo:** pitch is preserved while changing tempo (Signalsmith Stretch).
+- **Loading:** double-clicking a song loads it onto the off-air deck, paused;
+  the headphones button plays it there.
+- **Tempo:** pitch is preserved while changing tempo. Four time-stretch
+  engines (Settings → General): Signalsmith Stretch (default), Rubber Band
+  R3 (highest quality, more CPU), SoundTouch (crisp rhythm) and Bungee. If
+  slowed-down songs sound smeared, try Rubber Band or SoundTouch.
   BPM is detected automatically. The Info tab adds tap tempo and ½ / ⅔ /
   1½ / 2× fixes for octave and triple-meter mistakes. After editing a BPM,
   **↺ Analysed** or **↺ File tag** puts back the detected or tagged value.
@@ -217,6 +228,9 @@ The developer examples in `src-tauri/examples/` work without the UI:
 - `render` renders a file through the tempo/stretch pipeline and reports
   the output BPM and duration.
 - `devices` lists audio outputs.
+- `meter` prints detected BPM and meter evidence for files.
+- `stretch` renders an excerpt at a tempo with every time-stretch engine,
+  for listening tests.
 
 ### Layout
 
@@ -229,12 +243,13 @@ src-tauri/src/
   library.rs    folder scanning, content-addressed import, analysis jobs
   decode.rs     symphonia decoding + audio-content hashing
   analysis.rs   BPM, 3-band waveform, loudness, silence detection
-  audio/        engine: decks (stretch + SRC + fades) → lock-free rings → device mixer (cpal); thread priorities
+  audio/        engine: decks (stretch + SRC + fades) → lock-free rings → device mixer (cpal); stretch engines; thread priorities
   spotify.rs    librespot session, per-deck players, metadata, Web API search
   stems.rs      background stem separation and cache
   midi.rs       midir hot-plug, mappings (DJ2GO2 built in), learn, LEDs
   commands.rs   Tauri commands
-  profiles/     built-in club profiles (No club, Dancebreak, Powers' DJ tips)
+  profiles/     the built-in "No club" profile
+examples/clubs/ importable club profiles (Dancebreak, Powers' DJ tips)
 src/
   components/   main window (decks, transport, library, set panel, inspector, settings)
   components/projector/  public display
@@ -242,3 +257,8 @@ src/
   lib/smart.ts  smart crate rules
   lib/tempo.ts  tempo/duration helpers shared with the backend's logic
 ```
+
+## License
+
+Orpheus is licensed under the GNU General Public License, version 3 or
+later (it uses the GPL Rubber Band Library).

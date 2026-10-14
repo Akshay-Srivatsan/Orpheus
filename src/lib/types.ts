@@ -252,6 +252,8 @@ export interface ProjectorSettings {
   title: string;
   displayMode: "auto" | "live" | "preset";
   historyCount: number;
+  /** Live layout: upcoming songs / slots to list (0 = only "Up next"). */
+  upcomingCount: number;
   showNext: boolean;
   revealNextInGap: boolean;
   showArtist: boolean;

@@ -506,6 +506,8 @@
           </span>
           <span class="l">Recently played</span>
           <span><input type="number" min="0" max="12" value={s.projector.historyCount} onchange={(e) => setProj({ historyCount: +e.currentTarget.value })} /> songs</span>
+          <span class="l">Coming up</span>
+          <span><input type="number" min="0" max="8" value={s.projector.upcomingCount ?? 0} onchange={(e) => setProj({ upcomingCount: +e.currentTarget.value })} /> songs or slots <span class="faint">(live layout; 0 = just “Up next”)</span></span>
           <span class="l">Text size</span>
           <span class="row"><input type="range" min="0.6" max="1.6" step="0.05" value={s.projector.fontScale} onchange={(e) => setProj({ fontScale: +e.currentTarget.value })} /> {Math.round(s.projector.fontScale * 100)}%</span>
           <span class="l">Theme</span>

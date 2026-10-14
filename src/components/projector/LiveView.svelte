@@ -1,5 +1,6 @@
 <script lang="ts">
-  // Live mode: the current dance dominates; recent songs alongside.
+  // Live mode: the current dance dominates; recent songs alongside, and
+  // optionally what's coming up (queued songs and style slots).
   import { flip } from "svelte/animate";
   import { fade } from "svelte/transition";
   import { projStyle } from "../../lib/styles";
@@ -11,7 +12,16 @@
   const s = $derived(payload.settings);
   const gap = $derived(payload.inGap && !payload.playing);
   // "Up next" while a song plays (during the pause the main card shows it).
-  const upNext = $derived(s.showNext && !gap && payload.next ? payload.next : null);
+  const revealing = $derived(gap && s.revealNextInGap && !!payload.next);
+  /** Queued songs / slots after the one the main card shows. */
+  const upcoming = $derived.by(() => {
+    const n = s.upcomingCount ?? 0;
+    if (!n) return [];
+    const anchor = revealing ? payload.next?.id : (payload.current?.id ?? null);
+    const i = anchor ? payload.entries.findIndex((e) => e.id === anchor) : -1;
+    return payload.entries.slice(i + 1).filter((e) => e.status === "pending").slice(0, n);
+  });
+  const upNext = $derived(!upcoming.length && s.showNext && !gap && payload.next ? payload.next : null);
   const history = $derived.by(() => {
     // During the pause the main card shows the last song (unless revealing the next), so skip it here.
     const showingLast = gap && !(s.revealNextInGap && payload.next);
@@ -20,9 +30,9 @@
   });
 </script>
 
-<div class="live" class:no-side={!upNext && history.length === 0}>
+<div class="live" class:no-side={!upNext && !upcoming.length && history.length === 0}>
   <NowCard {payload} {progress} />
-  {#if upNext || history.length}
+  {#if upNext || upcoming.length || history.length}
     <aside>
       {#if upNext}
         {@const st = projStyle(payload, upNext)}
@@ -32,6 +42,23 @@
           {#if upNext.tags.length}
             <div class="next-tags">{upNext.tags.map((t) => t.name).join(" · ")}</div>
           {/if}
+        </section>
+      {/if}
+      {#if upcoming.length}
+        <section class="recent coming">
+          <div class="h">Coming up</div>
+          <ol>
+            {#each upcoming as e (e.id)}
+              {@const st = projStyle(payload, e)}
+              <li style:--c={st.color} animate:flip={{ duration: 350 }} in:fade={{ duration: 300 }}>
+                <span class="stripe"></span>
+                <span class="txt">
+                  <span class="r-style">{st.name || "—"}</span>
+                  {#if e.title}<span class="r-title">{e.title}</span>{/if}
+                </span>
+              </li>
+            {/each}
+          </ol>
         </section>
       {/if}
       {#if history.length}
@@ -111,6 +138,25 @@
     font-size: calc(2 * var(--u));
     font-weight: 650;
     color: var(--p-text);
+  }
+  .coming {
+    flex: none;
+  }
+  /* One line per upcoming entry: style, then the song (smaller). */
+  .coming .txt {
+    flex-direction: row;
+    align-items: baseline;
+    gap: calc(1 * var(--u));
+  }
+  .coming .r-style {
+    flex: 0 0 auto;
+    max-width: 100%;
+  }
+  .coming .r-title {
+    flex: 1 1 0;
+    min-width: 0;
+    font-size: calc(1.7 * var(--u));
+    color: var(--p-text-2);
   }
   .recent {
     flex: 1;

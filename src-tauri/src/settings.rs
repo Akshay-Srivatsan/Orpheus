@@ -36,6 +36,8 @@ pub struct ProjectorSettings {
     /// `auto` follows the setlist mode; `live` and `preset` force a layout.
     pub display_mode: String,
     pub history_count: u32,
+    /// Live layout: how many upcoming songs / slots to list (0 = only "Up next").
+    pub upcoming_count: u32,
     /// Live layout: show the next dance once it is queued.
     pub show_next: bool,
     /// During the pause between songs, show the upcoming dance style so dancers
@@ -56,6 +58,7 @@ impl Default for ProjectorSettings {
             title: String::new(),
             display_mode: "auto".into(),
             history_count: 5,
+            upcoming_count: 0,
             show_next: true,
             reveal_next_in_gap: true,
             show_artist: true,

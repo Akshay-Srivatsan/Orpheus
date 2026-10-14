@@ -16,19 +16,6 @@
   "maxSlowdownPct": 8
  },
  "styles": [],
- "tags": [
-  {
-   "id": "last",
-   "name": "Last dance",
-   "color": "#fca5a5",
-   "announce": true
-  },
-  {
-   "id": "request",
-   "name": "Request",
-   "color": "#bae6fd",
-   "announce": false
-  }
- ],
+ "tags": [],
  "announcements": []
 }

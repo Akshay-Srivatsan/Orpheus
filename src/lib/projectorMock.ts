@@ -73,6 +73,7 @@ export function mockSettings(p: URLSearchParams): ProjectorSettings {
     title: "Dancebreak — Fall Social",
     displayMode: "auto",
     historyCount: 5,
+    upcomingCount: Number(p.get("upcoming") ?? 0),
     showNext: true,
     revealNextInGap: true,
     showArtist: true,
@@ -89,7 +90,10 @@ export function mockPayload(p: URLSearchParams): ProjectorPayload {
   const gap = p.has("gap");
   const idle = p.has("idle");
   const cur = Number(p.get("index") ?? 11);
-  const entries: ProjEntry[] = SONGS.map(([st, title, artist, tags], i) => {
+  // ?n=60: a longer set (songs repeat).
+  const count = Number(p.get("n") ?? SONGS.length);
+  const songs = Array.from({ length: count }, (_, i) => SONGS[i % SONGS.length]);
+  const entries: ProjEntry[] = songs.map(([st, title, artist, tags], i) => {
     return {
       id: `e${i}`,
       trackId: null,

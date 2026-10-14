@@ -293,6 +293,9 @@
       <select title="Club: whose style names, tempo ranges and tags this set uses" value={set.profileId}
         onchange={(e) => api.updateSetlist(set.id, { profileId: e.currentTarget.value })}>
         {#each app.profiles as p}<option value={p.id}>{p.name}</option>{/each}
+        {#if !app.profiles.some((p) => p.id === set.profileId)}
+          <option value={set.profileId} disabled>Missing club “{set.profileId}” (import it in Settings → Club Profiles)</option>
+        {/if}
       </select>
     </div>
 

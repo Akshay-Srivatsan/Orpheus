@@ -337,6 +337,7 @@
   <div class="filling" role="status">
     <Icon name="list" size={13} />
     <span>Choosing a song for slot {slotNumber}{slot.styles?.length ? ` (${slot.styles.map((k) => app.styleName(k)).join(" / ")})` : ""}: double-click a song, press <Icon name="check" size={11} />, or drag it onto the slot.</span>
+    {#if app.styleFilter.length}<button class="plain small" onclick={() => (app.styleFilter = [])}>Show All Songs</button>{/if}
     <button class="plain small" onclick={() => (app.fillingSlot = null)}>Cancel</button>
   </div>
 {/if}
