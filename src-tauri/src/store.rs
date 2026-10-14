@@ -389,8 +389,10 @@ impl Store {
             duration_ms: t.duration_ms,
             bpm: t.bpm,
             bpm_source: t.bpm_source.clone(),
+            tag_bpm: if t.bpm_source.as_deref() == Some("tag") { t.bpm } else { None },
             artwork_url: t.artwork_url.clone(),
             added_at: now_ms(),
+            in_library: true,
             sources: vec![source],
             versions: vec![Version {
                 id: new_id(),
@@ -516,12 +518,79 @@ impl Store {
             if a.duration_ms > 0 {
                 t.duration_ms = a.duration_ms;
             }
+            t.detected_bpm = a.bpm;
             // Never overwrite a BPM the DJ entered (or one from tags).
             if t.bpm.is_none() || t.bpm_source.as_deref() == Some("detected") {
                 t.bpm = a.bpm;
                 t.bpm_source = a.bpm.map(|_| "detected".into());
             }
             Ok(())
+        })
+    }
+
+    pub fn set_in_library(&self, id: &str, value: bool) -> Result<()> {
+        self.with_track(id, |t| {
+            t.in_library = value;
+            Ok(())
+        })
+    }
+
+    /// Deletes set-only tracks that no setlist or crate references any more.
+    /// `keep` protects tracks that are loaded on a deck.
+    pub fn prune_unused(&self, keep: &[Id]) -> Result<usize> {
+        let doomed: Vec<Id> = {
+            let inner = self.inner.read();
+            let mut used: std::collections::HashSet<&str> = std::collections::HashSet::new();
+            for s in inner.setlists.values() {
+                for e in &s.entries {
+                    if let Some(v) = &e.version_id {
+                        used.insert(v);
+                    }
+                }
+            }
+            for c in inner.crates.values() {
+                used.extend(c.version_ids.iter().map(|v| v.as_str()));
+            }
+            inner
+                .tracks
+                .values()
+                .filter(|t| !t.in_library && !keep.contains(&t.id))
+                .filter(|t| !t.versions.iter().any(|v| used.contains(v.id.as_str())))
+                .map(|t| t.id.clone())
+                .collect()
+        };
+        self.delete_tracks(&doomed)?;
+        Ok(doomed.len())
+    }
+
+    /// Reverts the BPM to the analysed value (`detected`) or the file's tag
+    /// (`tag`, passing the tag value if the record doesn't have it yet).
+    /// Returns `true` if the track must be re-analysed first.
+    pub fn reset_bpm(&self, id: &str, from: &str, tag_bpm: Option<f64>) -> Result<bool> {
+        self.with_track(id, |t| match from {
+            "tag" => {
+                if tag_bpm.is_some() {
+                    t.tag_bpm = tag_bpm;
+                }
+                let b = t.tag_bpm.ok_or_else(|| anyhow!("This song has no BPM in its tags."))?;
+                t.bpm = Some(b);
+                t.bpm_source = Some("tag".into());
+                Ok(false)
+            }
+            "detected" => match t.detected_bpm {
+                Some(b) => {
+                    t.bpm = Some(b);
+                    t.bpm_source = Some("detected".into());
+                    Ok(false)
+                }
+                None => {
+                    // Not analysed since this field existed: clear and re-analyse.
+                    t.bpm = None;
+                    t.bpm_source = None;
+                    Ok(true)
+                }
+            },
+            other => Err(anyhow!("unknown BPM source {other}")),
         })
     }
 
@@ -974,6 +1043,51 @@ mod tests {
     fn temp_dirs() -> (PathBuf, PathBuf) {
         let base = std::env::temp_dir().join(format!("orpheus-test-{}", new_id()));
         (base.join("lib"), base.join("local"))
+    }
+
+    #[test]
+    fn bpm_can_be_reset_after_editing() {
+        let (lib, local) = temp_dirs();
+        let store = Store::open(&lib, &local).unwrap();
+        let nt = NewTrack { title: "W".into(), bpm: Some(120.0), bpm_source: Some("tag".into()), ..Default::default() };
+        let id = store.insert_track(&nt, SourceRef { kind: "file".into(), key: "h".into() }).unwrap();
+        store.set_analysis(&id, &Analysis { bpm: Some(93.1), ..Default::default() }).unwrap();
+        // Tag BPM wins over analysis, but the analysed value is remembered.
+        assert_eq!(store.track(&id).unwrap().rec.bpm, Some(120.0));
+        store.update_track(&id, &TrackPatch { bpm: Some(Some(139.6)), ..Default::default() }).unwrap();
+        assert_eq!(store.track(&id).unwrap().rec.bpm_source.as_deref(), Some("user"));
+
+        assert!(!store.reset_bpm(&id, "detected", None).unwrap());
+        let t = store.track(&id).unwrap().rec;
+        assert_eq!((t.bpm, t.bpm_source.as_deref()), (Some(93.1), Some("detected")));
+        assert!(!store.reset_bpm(&id, "tag", None).unwrap());
+        assert_eq!(store.track(&id).unwrap().rec.bpm, Some(120.0));
+
+        // Survives a reload from disk.
+        let store2 = Store::open(&lib, &local).unwrap();
+        assert_eq!(store2.track(&id).unwrap().rec.detected_bpm, Some(93.1));
+        let _ = fs::remove_dir_all(lib.parent().unwrap());
+    }
+
+    #[test]
+    fn set_only_tracks_are_pruned_when_unused() {
+        let (lib, local) = temp_dirs();
+        let store = Store::open(&lib, &local).unwrap();
+        let src = SourceRef { kind: "spotify".into(), key: "spotify:track:abc".into() };
+        let id = store.insert_track(&NewTrack { title: "S".into(), ..Default::default() }, src).unwrap();
+        store.set_in_library(&id, false).unwrap();
+        let vid = store.track(&id).unwrap().rec.versions[0].id.clone();
+        let sid = store.setlist_create("Set", "live", "dancebreak", None, None).unwrap();
+        let eids = store.entries_insert(&sid, None, &[NewEntry { version_id: Some(vid), ..Default::default() }]).unwrap();
+        assert_eq!(store.prune_unused(&[]).unwrap(), 0, "still used by the set");
+        // Reloading keeps the flag (it's only written when false).
+        let store = Store::open(&lib, &local).unwrap();
+        assert!(!store.track(&id).unwrap().rec.in_library);
+        store.entries_delete(&sid, &eids).unwrap();
+        assert_eq!(store.prune_unused(&[id.clone()]).unwrap(), 0, "protected while on a deck");
+        assert_eq!(store.prune_unused(&[]).unwrap(), 1);
+        assert!(store.track(&id).is_err());
+        let _ = fs::remove_dir_all(lib.parent().unwrap());
     }
 
     #[test]

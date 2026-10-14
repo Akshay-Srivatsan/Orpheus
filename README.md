@@ -91,7 +91,8 @@ Machine-specific state stays in the app data folder:
   the room and 3–4 for headphones.
 - **Tempo:** pitch is preserved while changing tempo (Signalsmith Stretch).
   BPM is detected automatically. The Info tab adds tap tempo and ½ / ⅔ /
-  1½ / 2× fixes for octave and triple-meter mistakes.
+  1½ / 2× fixes for octave and triple-meter mistakes. After editing a BPM,
+  **↺ Analysed** or **↺ File tag** puts back the detected or tagged value.
 - **Silence and levels:** silence at the start and end of songs is skipped,
   and there is optional automatic loudness levelling.
 
@@ -103,11 +104,16 @@ Premium account is required, and playback uses
 get the same tempo control, fades, preview and projector support as local
 files. You can:
 
-- search Spotify;
+- search Spotify, either in the Spotify view or from the library search
+  box, which shows Spotify results under your local matches;
 - paste a track, album or playlist link;
 - browse your playlists;
 - turn a playlist into a setlist;
 - link a Spotify track to an existing local track.
+
+Previewing a Spotify song, or adding it to a set, does **not** add it to
+your library. It's kept just for the setlists that use it, and removed
+once none do. Use **+** (or "Add to Library" in the Info tab) to keep it.
 
 Spotify needs an internet connection while playing.
 

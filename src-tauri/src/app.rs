@@ -927,6 +927,19 @@ impl App {
 
     // ------------------------------------------------------------ background
 
+    /// Removes set-only songs nothing uses any more (keeping whatever is on a deck).
+    pub fn prune(&self) {
+        let keep: Vec<Id> = self.decks.iter().filter_map(|d| d.track_id()).collect();
+        match self.store.prune_unused(&keep) {
+            Ok(0) => {}
+            Ok(n) => {
+                log::info!("removed {n} unused set-only track(s)");
+                emit(&self.handle, "library-changed", Vec::<Id>::new());
+            }
+            Err(e) => log::warn!("pruning set-only tracks: {e:#}"),
+        }
+    }
+
     pub fn queue_analysis(&self, id: Id, priority: bool) {
         let _ = self.analysis_tx.send((id, priority));
     }

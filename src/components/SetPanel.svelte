@@ -2,7 +2,7 @@
   import { save } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api";
   import type { CheckResult } from "../lib/rules";
-  import { addToSet, app } from "../lib/state.svelte";
+  import { addToSet, app, spotifyVersions } from "../lib/state.svelte";
   import { fmtBpm, fmtTime, playback, playedDurationMs, styleOf } from "../lib/tempo";
   import type { Id, SetlistEntry } from "../lib/types";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
@@ -137,7 +137,8 @@
     const at = dropIndex ?? set?.entries.length ?? 0;
     dropIndex = null;
     if (!set) {
-      const ids = JSON.parse(ev.dataTransfer?.getData("application/x-orpheus-versions") || "[]");
+      const sp = JSON.parse(ev.dataTransfer?.getData("application/x-orpheus-spotify") || "[]");
+      const ids = sp.length ? await spotifyVersions(sp, false) : JSON.parse(ev.dataTransfer?.getData("application/x-orpheus-versions") || "[]");
       if (ids.length) addToSet(ids, "end");
       return;
     }
@@ -147,6 +148,12 @@
       const before = ids.slice(0, at).filter((id) => !moving.includes(id));
       const after = ids.slice(at).filter((id) => !moving.includes(id));
       await app.run(api.reorderEntries(set.id, [...before, ...moving, ...after]));
+      return;
+    }
+    const spotify = JSON.parse(ev.dataTransfer?.getData("application/x-orpheus-spotify") || "[]");
+    if (spotify.length) {
+      const vids = await spotifyVersions(spotify, false);
+      await app.run(api.insertEntries(set.id, vids.map((v) => ({ versionId: v })), at));
       return;
     }
     const versions: Id[] = JSON.parse(ev.dataTransfer?.getData("application/x-orpheus-versions") || "[]");

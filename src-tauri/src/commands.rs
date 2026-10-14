@@ -64,6 +64,28 @@ pub async fn tracks_delete(app: S<'_>, ids: Vec<Id>) -> Res<()> {
     Ok(())
 }
 
+/// Resets a track's BPM to the analysed value (`from = "detected"`) or the
+/// value in the file's tags (`from = "tag"`).
+#[tauri::command]
+pub async fn track_reset_bpm(app: S<'_>, id: Id, from: String) -> Res<Track> {
+    let mut tag = None;
+    if from == "tag" && app.store.track(&id).map_err(ae)?.rec.tag_bpm.is_none() {
+        // Older library entries didn't record the tag value; read it now.
+        if let Some(path) = crate::library::resolve_path(&app.store, &id) {
+            let t = crate::library::read_tags(&path);
+            if t.bpm_source.as_deref() == Some("tag") {
+                tag = t.bpm;
+            }
+        }
+    }
+    if app.store.reset_bpm(&id, &from, tag).map_err(ae)? {
+        app.queue_analysis(id.clone(), true);
+    }
+    crate::app::emit(&app.handle, "library-changed", vec![id.clone()]);
+    app.emit_perform();
+    app.store.track(&id).map_err(ae)
+}
+
 #[tauri::command]
 pub async fn track_waveform(app: S<'_>, id: Id) -> Res<Vec<u8>> {
     Ok(app.store.waveform(&id).unwrap_or_default())
@@ -133,10 +155,19 @@ pub async fn history(app: S<'_>, limit: usize) -> Res<Vec<HistoryItem>> {
 
 /// Adds Spotify tracks to the library (idempotent). Returns track ids in order.
 #[tauri::command]
-pub async fn spotify_import(app: S<'_>, tracks: Vec<SpotifyTrack>) -> Res<Vec<Id>> {
+pub async fn spotify_import(app: S<'_>, tracks: Vec<SpotifyTrack>, in_library: Option<bool>) -> Res<Vec<Id>> {
+    let in_library = in_library.unwrap_or(true);
     let mut ids = vec![];
     for t in tracks {
         let src = SourceRef { kind: "spotify".into(), key: t.uri.clone() };
+        if let Some(existing) = app.store.track_for_source(&src) {
+            // Already known: promote set-only songs when added to the library.
+            if in_library && !app.store.track(&existing).map_err(ae)?.rec.in_library {
+                app.store.set_in_library(&existing, true).map_err(ae)?;
+            }
+            ids.push(existing);
+            continue;
+        }
         let id = app
             .store
             .insert_track(
@@ -151,10 +182,24 @@ pub async fn spotify_import(app: S<'_>, tracks: Vec<SpotifyTrack>) -> Res<Vec<Id
                 src,
             )
             .map_err(ae)?;
+        if !in_library {
+            app.store.set_in_library(&id, false).map_err(ae)?;
+        }
         ids.push(id);
     }
     crate::app::emit(&app.handle, "library-changed", ids.clone());
     Ok(ids)
+}
+
+/// Adds a set-only song to the library (or hides it again).
+#[tauri::command]
+pub async fn track_set_in_library(app: S<'_>, id: Id, value: bool) -> Res<Track> {
+    app.store.set_in_library(&id, value).map_err(ae)?;
+    if !value {
+        app.prune();
+    }
+    crate::app::emit(&app.handle, "library-changed", vec![id.clone()]);
+    app.store.track(&id).map_err(ae)
 }
 
 /// Links a Spotify track (URI or URL) as an additional source of a track.
@@ -243,6 +288,7 @@ pub async fn crate_rename(app: S<'_>, id: Id, name: String) -> Res<()> {
 #[tauri::command]
 pub async fn crate_delete(app: S<'_>, id: Id) -> Res<()> {
     app.store.crate_delete(&id).map_err(ae)?;
+    app.prune();
     crate::app::emit(&app.handle, "crates-changed", ());
     Ok(())
 }
@@ -257,6 +303,7 @@ pub async fn crate_add(app: S<'_>, id: Id, version_ids: Vec<Id>) -> Res<()> {
 #[tauri::command]
 pub async fn crate_remove(app: S<'_>, id: Id, version_ids: Vec<Id>) -> Res<()> {
     app.store.crate_remove(&id, &version_ids).map_err(ae)?;
+    app.prune();
     crate::app::emit(&app.handle, "crates-changed", ());
     Ok(())
 }
@@ -303,6 +350,7 @@ pub async fn setlist_delete(app: S<'_>, id: Id) -> Res<()> {
         app.open_setlist(None).map_err(ae)?;
     }
     app.store.setlist_delete(&id).map_err(ae)?;
+    app.prune();
     crate::app::emit(&app.handle, "setlists-changed", ());
     Ok(())
 }
@@ -333,7 +381,11 @@ pub async fn entries_insert(app: S<'_>, setlist_id: Id, position: Option<usize>,
 #[tauri::command]
 pub async fn entry_update(app: S<'_>, id: Id, patch: serde_json::Value) -> Res<SetlistEntry> {
     let patch: EntryPatch = serde_json::from_value(patch).map_err(err)?;
+    let replaced = patch.version_id.is_some();
     let e = app.store.entry_update(&id, &patch).map_err(ae)?;
+    if replaced {
+        app.prune();
+    }
     let (_, sid) = app.store.entry(&id).map_err(ae)?;
     app.emit_setlist(&sid);
     app.emit_perform();
@@ -343,6 +395,7 @@ pub async fn entry_update(app: S<'_>, id: Id, patch: serde_json::Value) -> Res<S
 #[tauri::command]
 pub async fn entries_delete(app: S<'_>, setlist_id: Id, ids: Vec<Id>) -> Res<()> {
     app.store.entries_delete(&setlist_id, &ids).map_err(ae)?;
+    app.prune();
     app.emit_setlist(&setlist_id);
     app.emit_perform();
     Ok(())

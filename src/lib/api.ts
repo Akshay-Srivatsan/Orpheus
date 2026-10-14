@@ -12,6 +12,7 @@ export const api = {
   track: (id: T.Id) => call<T.Track>("track_get", { id }),
   updateTrack: (id: T.Id, patch: T.TrackPatch) => call<T.Track>("track_update", { id, patch }),
   deleteTracks: (ids: T.Id[]) => call<void>("tracks_delete", { ids }),
+  resetBpm: (id: T.Id, from: "detected" | "tag") => call<T.Track>("track_reset_bpm", { id, from }),
   waveform: (id: T.Id) => call<number[]>("track_waveform", { id }),
   analyze: (ids: T.Id[]) => call<void>("track_analyze", { ids }),
   rescan: () => call<void>("library_rescan"),
@@ -112,7 +113,9 @@ export const api = {
   spotifyPlaylists: () => call<T.SpotifyPlaylist[]>("spotify_playlists"),
   spotifyPlaylistTracks: (uri: string) => call<T.SpotifyTrack[]>("spotify_playlist_tracks", { uri }),
   spotifyResolve: (input: string) => call<T.SpotifyTrack[]>("spotify_resolve", { input }),
-  spotifyImport: (tracks: T.SpotifyTrack[]) => call<T.Id[]>("spotify_import", { tracks }),
+  /** Creates tracks for Spotify songs. `inLibrary: false` = for setlists only (hidden from the library). */
+  spotifyImport: (tracks: T.SpotifyTrack[], inLibrary = true) => call<T.Id[]>("spotify_import", { tracks, inLibrary }),
+  setInLibrary: (id: T.Id, value: boolean) => call<T.Track>("track_set_in_library", { id, value }),
 
   // MIDI
   midiInfo: () => call<T.MidiInfo>("midi_info"),

@@ -28,6 +28,7 @@ pub fn run() {
             log::info!("data directory: {}", data_dir.display());
             let state = app::App::new(app.handle().clone(), data_dir)?;
             app.manage(state.clone());
+            state.prune();
             state.scan_library();
             let s = state.clone();
             std::thread::spawn(move || {
@@ -53,6 +54,7 @@ pub fn run() {
             commands::library_info,
             commands::setlist_get,
             commands::track_waveform,
+            commands::track_reset_bpm,
             commands::track_analyze,
             commands::library_rescan,
             commands::library_import,
@@ -113,6 +115,7 @@ pub fn run() {
             commands::spotify_resolve,
             commands::spotify_import,
             commands::source_link_spotify,
+            commands::track_set_in_library,
             commands::source_remove,
             commands::tracks_merge,
             commands::version_create,

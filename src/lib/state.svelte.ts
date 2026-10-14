@@ -70,11 +70,13 @@ class AppState {
     for (const t of this.tracks) for (const v of t.versions) m.set(v.id, { track: t, version: v });
     return m;
   });
+  /** Rows in the library (excludes set-only songs, which are still in versionMap). */
   rows = $derived.by(() => {
     const out: Row[] = [];
-    for (const t of this.tracks) for (const v of t.versions) out.push({ track: t, version: v });
+    for (const t of this.tracks) if (t.inLibrary !== false) for (const v of t.versions) out.push({ track: t, version: v });
     return out;
   });
+  libraryTracks = $derived(this.tracks.filter((t) => t.inLibrary !== false));
   profile = $derived.by((): Profile | null => {
     const id = this.current?.profileId ?? this.settings?.activeProfileId;
     return this.profiles.find((p) => p.id === id) ?? this.profiles[0] ?? null;
@@ -230,4 +232,15 @@ export async function addToSet(versionIds: Id[], where: "next" | "end" | number)
     return { versionId: id, style: v?.style ? undefined : app.view.kind === "style" ? app.view.key : undefined };
   });
   await app.run(api.insertEntries(set.id, entries, position));
+}
+
+/**
+ * Makes Spotify songs playable and returns the default version id of each.
+ * With `inLibrary: false` they are only used by setlists / the preview deck and
+ * don't appear in the library (songs already in the library stay there).
+ */
+export async function spotifyVersions(tracks: import("./types").SpotifyTrack[], inLibrary: boolean): Promise<Id[]> {
+  const ids = (await app.run(api.spotifyImport(tracks, inLibrary))) ?? [];
+  await app.reloadTracks(ids);
+  return ids.map((id) => app.trackMap.get(id)?.versions[0]?.id).filter(Boolean) as Id[];
 }

@@ -13,6 +13,7 @@
   import SettingsDialog from "./SettingsDialog.svelte";
   import Sidebar from "./Sidebar.svelte";
   import SpotifyBrowser from "./SpotifyBrowser.svelte";
+  import SpotifySearchSection from "./SpotifySearchSection.svelte";
   import Toasts from "./Toasts.svelte";
   import TopBar from "./TopBar.svelte";
   import Transport from "./Transport.svelte";
@@ -118,7 +119,8 @@
               <input type="search" placeholder="Search" bind:value={app.search} bind:this={searchEl} />
             </div>
           </div>
-          <LibraryTable />
+          <div class="tablewrap"><LibraryTable /></div>
+          {#if app.spotify?.connected}<SpotifySearchSection query={app.search} />{/if}
         {/if}
       </main>
       <aside class="right">
@@ -159,6 +161,7 @@
   .decks > :global(*) { min-height: 0; overflow: hidden; }
   .bottom { display: grid; grid-template-columns: 220px minmax(0, 1fr) 380px; min-height: 0; border-top: 1px solid var(--border); }
   .browser { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  .tablewrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .bhead { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
   .vt { flex: 1; display: flex; align-items: center; gap: 8px; font: 600 var(--fs-md) var(--font-display); min-width: 0; }
   .sdot { width: 10px; height: 10px; border-radius: 50%; }

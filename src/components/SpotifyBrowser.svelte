@@ -1,20 +1,14 @@
 <script lang="ts">
   import { api } from "../lib/api";
-  import { addToSet, app } from "../lib/state.svelte";
-  import { fmtTime } from "../lib/tempo";
-  import type { Id, SpotifyTrack } from "../lib/types";
+  import { app, spotifyVersions } from "../lib/state.svelte";
+  import type { SpotifyTrack } from "../lib/types";
   import Icon from "./Icon.svelte";
+  import SpotifyTrackList from "./SpotifyTrackList.svelte";
 
-  let query = $state("");
+  let query = $state(app.search);
   let results = $state<SpotifyTrack[]>([]);
   let loading = $state(false);
   let error = $state<string | null>(null);
-
-  const inLibrary = $derived.by(() => {
-    const m = new Map<string, Id>();
-    for (const t of app.tracks) for (const s of t.sources) if (s.kind === "spotify") m.set(s.key, t.id);
-    return m;
-  });
 
   const playlist = $derived(app.view.kind === "spotify-playlist" ? app.view : null);
 
@@ -45,25 +39,14 @@
     }
   }
 
-  async function importTracks(ts: SpotifyTrack[]): Promise<Id[]> {
-    return (await app.run(api.spotifyImport(ts))) ?? [];
-  }
-
-  /** Imports and returns the default version id of each track. */
-  async function versionsFor(ts: SpotifyTrack[]): Promise<Id[]> {
-    const ids = await importTracks(ts);
-    await app.reloadTracks(ids);
-    return ids.map((id) => app.trackMap.get(id)?.versions[0]?.id).filter(Boolean) as Id[];
-  }
-
-  async function preview(t: SpotifyTrack) {
-    const [v] = await versionsFor([t]);
-    if (v) app.run(api.previewLoad(v, { play: true }));
-  }
+  $effect(() => {
+    if (!playlist && query.trim() && !results.length) search();
+  });
 
   async function newSetFromPlaylist() {
     if (!playlist) return;
-    const vids = await versionsFor(results);
+    // Songs go into the set only; the library stays as it is.
+    const vids = await spotifyVersions(results, false);
     const set = await app.run(api.createSetlist({ name: playlist.name, mode: "preset", profileId: app.settings?.activeProfileId ?? "dancebreak" }));
     if (!set) return;
     await app.run(api.insertEntries(set.id, vids.map((versionId) => ({ versionId }))));
@@ -77,36 +60,23 @@
     {#if playlist}
       <div class="pl-title"><Icon name="spotify" /> {playlist.name}</div>
       <span class="spacer"></span>
-      <button disabled={!results.length} onclick={() => importTracks(results).then((ids) => ids.length && app.toast(`Added ${ids.length} songs to your library`, "info"))}>Add All to Library</button>
+      <button disabled={!results.length} onclick={async () => { const v = await spotifyVersions(results, true); app.toast(`Added ${v.length} songs to your library`, "info"); }}>Add All to Library</button>
       <button class="primary" disabled={!results.length} onclick={newSetFromPlaylist}>New Setlist from Playlist</button>
     {:else}
-      <input type="search" placeholder="Search Spotify, or paste a track / album / playlist link" bind:value={query}
+      <!-- svelte-ignore a11y_autofocus -->
+      <input type="search" placeholder="Search Spotify, or paste a track / album / playlist link" bind:value={query} autofocus
         onkeydown={(e) => e.key === "Enter" && search()} style="flex:1" />
       <button onclick={search}>Search</button>
     {/if}
   </div>
   {#if error}<div class="error">{error}</div>{/if}
-  <div class="list">
+  <div class="scroll">
     {#if loading}<div class="empty">Loading…</div>{/if}
-    {#each results as t (t.uri)}
-      {@const lib = inLibrary.get(t.uri)}
-      <div class="item" role="listitem" ondblclick={() => preview(t)}>
-        {#if t.artworkUrl}<img src={t.artworkUrl} alt="" />{:else}<div class="noart"></div>{/if}
-        <div class="txt">
-          <div class="t">{t.title}</div>
-          <div class="a dim">{t.artist} · {t.album}</div>
-        </div>
-        <span class="num dim">{fmtTime(t.durationMs)}</span>
-        {#if lib}<span class="inlib" title="In your library"><Icon name="check" size={13} /></span>{/if}
-        <button class="plain icon" title="Preview in headphones" onclick={() => preview(t)}><Icon name="headphones" size={14} /></button>
-        <button class="plain icon" title="Add to library" disabled={!!lib} onclick={() => importTracks([t])}><Icon name="plus" size={14} /></button>
-        <button class="small" title="Play next" onclick={async () => addToSet(await versionsFor([t]), "next")}>Next</button>
-      </div>
-    {:else}
-      {#if !loading && !playlist}
-        <div class="empty">Search Spotify by song or artist. You can also paste an open.spotify.com link.</div>
-      {/if}
-    {/each}
+    <SpotifyTrackList tracks={results} />
+    {#if !loading && !results.length && !playlist}
+      <div class="empty">Search Spotify by song or artist, or paste an open.spotify.com link.<br />
+        <span class="faint">Previewing or adding a song to your set doesn't add it to your library.</span></div>
+    {/if}
   </div>
 </div>
 
@@ -115,14 +85,6 @@
   .bar { display: flex; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border); align-items: center; }
   .pl-title { display: flex; gap: 6px; align-items: center; font-weight: 600; }
   .spacer { flex: 1; }
-  .list { flex: 1; overflow-y: auto; }
-  .item { display: flex; align-items: center; gap: 10px; padding: 5px 10px; border-bottom: 1px solid rgba(255,255,255,0.03); }
-  .item:hover { background: var(--bg-hover); }
-  img, .noart { width: 36px; height: 36px; border-radius: 4px; object-fit: cover; background: var(--bg-elev-3); flex: none; }
-  .txt { flex: 1; min-width: 0; }
-  .t, .a { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .a { font-size: var(--fs-sm); }
-  .inlib { color: var(--green); display: flex; }
+  .scroll { flex: 1; overflow-y: auto; }
   .error { color: var(--red); padding: 8px 12px; }
-  .small { font-size: var(--fs-sm); }
 </style>

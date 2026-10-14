@@ -132,6 +132,12 @@
     {/if}
 
     {#if track}
+      {#if track.inLibrary === false}
+        <section class="box setonly">
+          <span>Only in setlists — not in your library.</span>
+          <button class="small" onclick={() => app.run(api.setInLibrary(track.id, true))}><Icon name="plus" size={12} /> Add to Library</button>
+        </section>
+      {/if}
       <section class="box">
         <div class="section-title">Song</div>
         <input class="big" type="text" value={track.title} onchange={(e) => patchTrack({ title: e.currentTarget.value })} aria-label="Title" />
@@ -150,7 +156,22 @@
             </span>
           </span>
           <span></span>
-          <span class="faint small">{track.bpmSource ? `from ${track.bpmSource}` : track.analyzed ? "not detected" : "analysing…"}{#if track.loudnessDb != null} · {track.loudnessDb.toFixed(1)} LUFS{/if} · {fmtTime(track.durationMs)}</span>
+          <span class="row">
+            {#if track.bpmSource !== "detected"}
+              <button class="plain small" title="Use the BPM found by analysis"
+                onclick={() => app.run(api.resetBpm(track.id, "detected"))}>
+                ↺ Analysed{track.detectedBpm != null ? ` (${fmtBpm(track.detectedBpm)})` : ""}
+              </button>
+            {/if}
+            {#if track.bpmSource !== "tag" && (track.tagBpm != null || track.files.length)}
+              <button class="plain small" title="Use the BPM stored in the file's tags"
+                onclick={() => app.run(api.resetBpm(track.id, "tag"))}>
+                ↺ File tag{track.tagBpm != null ? ` (${fmtBpm(track.tagBpm)})` : ""}
+              </button>
+            {/if}
+          </span>
+          <span></span>
+          <span class="faint small">{track.bpmSource ? `from ${{ detected: "analysis", tag: "file tag", tap: "tapping", user: "you" }[track.bpmSource] ?? track.bpmSource}` : track.analyzed ? "not detected" : "analysing…"}{#if track.loudnessDb != null} · {track.loudnessDb.toFixed(1)} LUFS{/if} · {fmtTime(track.durationMs)}</span>
           <span class="lbl" title="Energy 0–10 (Powers' DJ tips)">Energy</span>
           <span class="row"><input type="range" min="0" max="10" step="1" value={track.energy ?? 5}
             onchange={(e) => patchTrack({ energy: +e.currentTarget.value })} /><span class="num">{track.energy ?? "–"}</span></span>
@@ -269,6 +290,7 @@
 <style>
   .insp { overflow-y: auto; height: 100%; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
   .box { display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: var(--radius); }
+  .setonly { flex-direction: row; align-items: center; justify-content: space-between; font-size: var(--fs-sm); color: var(--text-dim); }
   .entrybox { border-color: color-mix(in srgb, var(--main) 40%, var(--border)); }
   .section-title.row { display: flex; justify-content: space-between; align-items: center; }
   .grid { display: grid; grid-template-columns: 74px 1fr; gap: 5px 8px; align-items: center; }

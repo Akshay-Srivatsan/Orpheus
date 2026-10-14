@@ -9,8 +9,8 @@
     for (const r of app.rows) if (r.version.style) m.set(r.version.style, (m.get(r.version.style) ?? 0) + 1);
     return m;
   });
-  const unstyled = $derived(app.tracks.filter((t) => t.versions.every((v) => !v.style)).length);
-  const missing = $derived(app.tracks.filter((t) => t.missing).length);
+  const unstyled = $derived(app.libraryTracks.filter((t) => t.versions.every((v) => !v.style)).length);
+  const missing = $derived(app.libraryTracks.filter((t) => t.missing).length);
   const extraStyles = $derived([...styleCounts.keys()].filter((k) => !app.styleMap.has(k)));
 
   let playlists = $state<SpotifyPlaylist[] | null>(null);

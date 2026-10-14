@@ -313,7 +313,7 @@
     </div>
     {#if sorted.length === 0}
       <div class="empty">
-        {#if app.tracks.length === 0}
+        {#if app.libraryTracks.length === 0}
           <p>Your library is empty.</p>
           <p class="dim">Add a music folder in Settings → Library, drag files onto this window, or connect Spotify.</p>
           <button onclick={() => (app.settingsOpen = "library")}>Add Music Folder…</button>

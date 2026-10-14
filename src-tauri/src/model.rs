@@ -27,6 +27,14 @@ pub fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+fn yes() -> bool {
+    true
+}
+
+fn is_true(b: &bool) -> bool {
+    *b
+}
+
 fn is_false(b: &bool) -> bool {
     !*b
 }
@@ -113,8 +121,16 @@ pub struct TrackRecord {
     #[serde(skip_serializing_if = "String::is_empty")]
     pub genre: String,
     pub duration_ms: i64,
+    /// BPM used for playback: detected, from tags, or entered by the DJ.
     pub bpm: Option<f64>,
+    /// `detected`, `tag`, `tap` or `user`.
     pub bpm_source: Option<String>,
+    /// Last BPM found by analysis (kept so an edited BPM can be reset).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detected_bpm: Option<f64>,
+    /// BPM from the file's tags or Spotify metadata, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag_bpm: Option<f64>,
     /// 0–10 (Powers' DJ tips).
     pub energy: Option<i64>,
     /// 0–10 rhythmic intensity: how clearly audible the beat is.
@@ -141,6 +157,11 @@ pub struct TrackRecord {
     /// IDs of tracks merged into this one (keeps history references valid).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<Id>,
+    /// `false` for songs used only in setlists (e.g. a Spotify song added
+    /// straight to a set). They are hidden from library views and removed once
+    /// no setlist or crate uses them.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub in_library: bool,
 }
 
 /// A track as sent to the UI: the record plus machine-local/derived state.

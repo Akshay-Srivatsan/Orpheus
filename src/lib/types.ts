@@ -37,6 +37,10 @@ export interface Track {
   durationMs: number;
   bpm: number | null;
   bpmSource: string | null;
+  /** Last BPM found by analysis (kept so an edited BPM can be reset). */
+  detectedBpm?: number | null;
+  /** BPM from the file's tags, if any. */
+  tagBpm?: number | null;
   energy: number | null;
   rhythm: number | null;
   rating: number | null;
@@ -53,6 +57,8 @@ export interface Track {
   sources: SourceRef[];
   versions: Version[];
   aliases?: Id[];
+  /** false = used only in setlists (e.g. a Spotify song added straight to a set). Absent = true. */
+  inLibrary?: boolean;
   /** Paths of this track's files on this machine. */
   files: string[];
   missing: boolean;
