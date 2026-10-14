@@ -306,6 +306,16 @@ pub struct Spotify {
     search_cache: Mutex<HashMap<String, (i64, Vec<SpotifyTrack>)>>,
     /// Client id of your own Spotify app for the Web API ("" = the shared one).
     web_client_id: Mutex<String>,
+    /// Largest page size the Web API accepted (see `web_get_limited`).
+    page_limit: Mutex<u32>,
+}
+
+/// Page sizes to try, largest first.
+const PAGE_LIMITS: &[u32] = &[50, 20, 10, 5, 1];
+
+fn is_invalid_limit(e: &anyhow::Error) -> bool {
+    let m = e.to_string().to_lowercase();
+    m.contains("400") && m.contains("limit")
 }
 
 /// How long search results are reused.
@@ -332,6 +342,7 @@ impl Spotify {
             web_blocked_until: Mutex::new(0),
             search_cache: Mutex::new(HashMap::new()),
             web_client_id: Mutex::new(String::new()),
+            page_limit: Mutex::new(PAGE_LIMITS[0]),
         };
         *s.web_token.lock() = std::fs::read_to_string(s.web_token_path()).ok().and_then(|t| serde_json::from_str(&t).ok());
         s
@@ -402,8 +413,9 @@ impl Spotify {
         let mut cur = self.web_client_id.lock();
         if *cur != id {
             *cur = id;
-            // A rate limit on one client id says nothing about another.
+            // A rate limit or page-size cap on one client id says nothing about another.
             *self.web_blocked_until.lock() = 0;
+            *self.page_limit.lock() = PAGE_LIMITS[0];
         }
     }
 
@@ -640,6 +652,24 @@ impl Spotify {
         Ok(body)
     }
 
+    /// GET with the largest page size Spotify accepts: `url` contains
+    /// `{limit}`. The maximum differs between apps (and has changed over
+    /// time), so on "Invalid limit" smaller sizes are tried and the one that
+    /// works is remembered.
+    async fn web_get_limited(&self, url: &str) -> Result<serde_json::Value> {
+        loop {
+            let limit = *self.page_limit.lock();
+            match self.web_get(&url.replace("{limit}", &limit.to_string())).await {
+                Err(e) if is_invalid_limit(&e) => {
+                    let Some(&smaller) = PAGE_LIMITS.iter().find(|&&l| l < limit) else { return Err(e) };
+                    log::info!("Spotify Web API: limit {limit} refused, using {smaller}");
+                    *self.page_limit.lock() = smaller;
+                }
+                r => return r,
+            }
+        }
+    }
+
     pub fn search(&self, query: &str) -> Result<Vec<SpotifyTrack>> {
         let key = query.trim().to_lowercase();
         let now = crate::model::now_ms();
@@ -649,10 +679,10 @@ impl Spotify {
             }
         }
         let url = format!(
-            "https://api.spotify.com/v1/search?type=track&limit=50&q={}",
+            "https://api.spotify.com/v1/search?type=track&limit={{limit}}&q={}",
             urlencode(query.trim())
         );
-        let v = self.rt.block_on(self.web_get(&url))?;
+        let v = self.rt.block_on(self.web_get_limited(&url))?;
         let hits: Vec<SpotifyTrack> =
             v["tracks"]["items"].as_array().map(|a| a.iter().filter_map(web_track).collect()).unwrap_or_default();
         let mut cache = self.search_cache.lock();
@@ -673,9 +703,8 @@ impl Spotify {
                 track_count: -1,
                 artwork_url: None,
             }];
-            let mut url = Some("https://api.spotify.com/v1/me/playlists?limit=50".to_string());
-            while let Some(u) = url.take() {
-                let v = self.web_get(&u).await?;
+            let mut v = self.web_get_limited("https://api.spotify.com/v1/me/playlists?limit={limit}").await?;
+            loop {
                 for p in v["items"].as_array().cloned().unwrap_or_default() {
                     if p.is_null() {
                         continue;
@@ -688,7 +717,10 @@ impl Spotify {
                         artwork_url: p["images"][0]["url"].as_str().map(String::from),
                     });
                 }
-                url = v["next"].as_str().map(String::from);
+                match v["next"].as_str() {
+                    Some(next) => v = self.web_get(next).await?,
+                    None => break,
+                }
             }
             Ok(out)
         })
@@ -698,15 +730,17 @@ impl Spotify {
         if uri == "liked" {
             return self.rt.block_on(async {
                 let mut out = vec![];
-                let mut url = Some("https://api.spotify.com/v1/me/tracks?limit=50".to_string());
-                while let Some(u) = url.take() {
-                    let v = self.web_get(&u).await?;
+                let mut v = self.web_get_limited("https://api.spotify.com/v1/me/tracks?limit={limit}").await?;
+                loop {
                     for it in v["items"].as_array().cloned().unwrap_or_default() {
                         if let Some(t) = web_track(&it["track"]) {
                             out.push(t);
                         }
                     }
-                    url = v["next"].as_str().map(String::from);
+                    match v["next"].as_str() {
+                        Some(next) => v = self.web_get(next).await?,
+                        None => break,
+                    }
                 }
                 Ok(out)
             });
