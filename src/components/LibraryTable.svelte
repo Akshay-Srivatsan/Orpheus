@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, on } from "../lib/api";
   import { evaluate } from "../lib/smart";
-  import { NO_STYLE, addToSet, app, audition, confirmAction, loadDeck } from "../lib/state.svelte";
+  import { NO_STYLE, addToSet, app, audition, confirmAction, fillSlot, loadDeck } from "../lib/state.svelte";
   import type { SetlistEntry } from "../lib/types";
   import { fmtBpm, fmtPct, fmtTime, playback, playedDurationMs, tempoFit } from "../lib/tempo";
   import type { HistoryItem, Id, Row } from "../lib/types";
@@ -10,7 +10,7 @@
   import StyleBadge from "./StyleBadge.svelte";
   import StyleFilterBar from "./StyleFilterBar.svelte";
 
-  type SortKey = "position" | "title" | "artist" | "version" | "style" | "bpm" | "time" | "energy" | "plays" | "played";
+  type SortKey = "position" | "title" | "artist" | "version" | "style" | "bpm" | "time" | "meter" | "plays" | "played";
   let sortKey = $state<SortKey>("artist");
   let sortAsc = $state(true);
   let history = $state<HistoryItem[]>([]);
@@ -126,7 +126,7 @@
         case "style": return (x.r.version.styles ?? []).map((k) => app.styleName(k)).join(" ");
         case "bpm": return x.i.pb.target ?? x.r.track.bpm ?? 0;
         case "time": return x.i.dur;
-        case "energy": return x.r.track.energy ?? -1;
+        case "meter": return x.r.track.beatsPerBar ?? 0;
         case "plays": return x.r.track.playCount;
         case "played": return x.r.playedAt ?? x.r.track.lastPlayedAt ?? 0;
       }
@@ -174,6 +174,24 @@
     app.inspectEntry = null;
   }
 
+  /** Double-click / Enter: fill the slot being filled, else load onto the off-air deck (paused). */
+  function choose(r: Row) {
+    if (app.fillingSlot) return fillSlot(r.version.id);
+    loadDeck(app.freeDeck, r.version.id);
+  }
+
+  function meterLabel(n: number | null | undefined): string {
+    return n === 3 || n === 6 ? "triple" : n === 2 || n === 4 ? "duple" : "";
+  }
+
+  const slot = $derived(app.fillingSlot ? app.current?.entries.find((e) => e.id === app.fillingSlot) : undefined);
+  const slotNumber = $derived(slot ? (app.current?.entries.filter((e) => e.status !== "skipped").indexOf(slot) ?? -1) + 1 : 0);
+  $effect(() => {
+    // The slot was filled or removed elsewhere.
+    if (app.fillingSlot && (!slot || slot.versionId)) app.fillingSlot = null;
+  });
+
+  /** Play in the headphones on the off-air deck. */
   function preview(r: Row) {
     audition(r.version.id);
   }
@@ -221,7 +239,8 @@
   function keydown(e: KeyboardEvent) {
     if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
     else if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
-    else if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) { const r = selectedRow(); if (r) preview(r); }
+    else if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) { const r = selectedRow(); if (r) choose(r); }
+    else if (e.key === "Escape" && app.fillingSlot) app.fillingSlot = null;
     else if ((e.key === "Backspace" || e.key === "Delete") && plainCrate && app.selected.length) {
       api.removeFromCrate(plainCrate.id, app.selected);
     }
@@ -243,6 +262,7 @@
       : [];
     const items: MenuItem[] = [
       ...historyItems,
+      ...(app.fillingSlot ? [{ label: "Use for the Slot", action: () => fillSlot(r.version.id) }, { separator: true } as MenuItem] : []),
       { label: "Preview in Headphones (free deck)", action: () => preview(r) },
       { label: "Load onto Deck A", disabled: app.decks[0].onAir && app.decks[0].status === "playing", action: () => loadDeck(0, r.version.id) },
       { label: "Load onto Deck B", disabled: app.decks[1].onAir && app.decks[1].status === "playing", action: () => loadDeck(1, r.version.id) },
@@ -253,6 +273,7 @@
       ...(plainCrate ? [{ label: "Remove from Crate", action: () => api.removeFromCrate(plainCrate.id, ids) }] : []),
       { separator: true },
       ...styleMenu(ids, r),
+      ...tagMenu(ids),
       { separator: true },
       { label: "New Version of This Song…", action: () => { app.inspectTrack = r.track.id; app.rightTab = "info"; } },
       { label: "Re-analyze", action: () => api.analyze([...new Set(ids.map((id) => app.versionMap.get(id)?.track.id).filter(Boolean) as Id[])]) },
@@ -263,6 +284,19 @@
       { label: "Remove from Library…", danger: true, action: () => deleteSelected(ids) },
     ];
     menu = { x: e.clientX, y: e.clientY, items };
+  }
+
+  /** Add / remove your tags on the selected songs. */
+  function tagMenu(ids: Id[]): MenuItem[] {
+    if (!app.myTags.length) return [];
+    const versions = ids.map((id) => app.versionMap.get(id)?.version).filter(Boolean) as { tags?: string[] }[];
+    return [
+      { separator: true },
+      ...app.myTags.map((t) => {
+        const all = versions.every((v) => v.tags?.includes(t.key));
+        return { label: `Tag: ${t.name}`, checked: all, action: () => app.run(api.setTag(t.key, ids, !all)) };
+      }),
+    ];
   }
 
   /** Add / remove your dance styles on the selected songs. */
@@ -299,6 +333,13 @@
 </script>
 
 <StyleFilterBar rows={baseRows} />
+{#if slot}
+  <div class="filling" role="status">
+    <Icon name="list" size={13} />
+    <span>Choosing a song for slot {slotNumber}{slot.styles?.length ? ` (${slot.styles.map((k) => app.styleName(k)).join(" / ")})` : ""}: double-click a song, press <Icon name="check" size={11} />, or drag it onto the slot.</span>
+    <button class="plain small" onclick={() => (app.fillingSlot = null)}>Cancel</button>
+  </div>
+{/if}
 <div class="table" role="grid" tabindex="0" onkeydown={keydown} aria-label="Library">
   <div class="thead">
     {#if showPos}<button class="c pos" onclick={() => sortBy("position")}>#</button>{/if}
@@ -308,7 +349,7 @@
     <button class="c style" onclick={() => sortBy("style")}>Style</button>
     <button class="c bpm" onclick={() => sortBy("bpm")}>BPM {sortKey === "bpm" ? (sortAsc ? "▲" : "▼") : ""}</button>
     <button class="c time" onclick={() => sortBy("time")}>Time {sortKey === "time" ? (sortAsc ? "▲" : "▼") : ""}</button>
-    <button class="c energy" onclick={() => sortBy("energy")} title="Energy (0–10)">En.</button>
+    <button class="c meter" onclick={() => sortBy("meter")} title="Meter: triple (3/4, 6/8) or duple (2/4, 4/4)">Meter</button>
     <button class="c plays" onclick={() => sortBy(app.view.kind === "history" ? "played" : "plays")}>{app.view.kind === "history" ? "Played" : "Plays"}</button>
     <span class="c actions"></span>
   </div>
@@ -332,7 +373,7 @@
           draggable="true"
           ondragstart={(e) => dragStart(e, r)}
           onclick={(e) => select(e, idx)}
-          ondblclick={() => preview(r)}
+          ondblclick={() => choose(r)}
           oncontextmenu={(e) => openMenu(e, r, idx)}
           onkeydown={() => {}}
         >
@@ -341,7 +382,6 @@
             {#if r.track.missing}<span title="File missing on this computer"><Icon name="warning" size={12} /></span>{/if}
             {#if r.track.sources.some((s) => s.kind === "spotify") && !r.track.files.length}<span class="sp" title="Spotify">●</span>{/if}
             {r.track.title}
-            {#if app.view.kind !== "history" && app.playedInSet.has(r.track.id)}<span class="played" title="Already played in this set">played</span>{/if}
           </span>
           <span class="c artist" title={r.track.artist}>{r.track.artist}</span>
           <span class="c version faint" title={r.version.comment ?? ""}>{app.versionLabel(r.version, r.track)}</span>
@@ -352,13 +392,17 @@
             {#if !r.track.bpm && !r.track.analyzed && r.track.files.length}<span class="faint">…</span>{/if}
           </span>
           <span class="c time num" class:long={inf.dur > 270000}>{fmtTime(inf.dur)}</span>
-          <span class="c energy num faint">{r.track.energy ?? ""}</span>
+          <span class="c meter num faint" title={r.track.meterSource === "user" ? "set by you" : r.track.beatsPerBar ? "detected" : ""}>{meterLabel(r.track.beatsPerBar)}</span>
           <span class="c plays num faint">
             {#if r.playedAt}{new Date(r.playedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}{:else}{r.track.playCount || ""}{/if}
           </span>
           <span class="c actions">
             <button class="plain icon mini" title="Preview on the free deck" onclick={(e) => { e.stopPropagation(); preview(r); }}><Icon name="headphones" size={13} /></button>
-            <button class="plain icon mini" title="Play next" onclick={(e) => { e.stopPropagation(); addToSet([r.version.id], "next"); }}><Icon name="plus" size={13} /></button>
+            {#if app.fillingSlot}
+              <button class="plain icon mini fill" title="Use this song for the slot" onclick={(e) => { e.stopPropagation(); fillSlot(r.version.id); }}><Icon name="check" size={13} /></button>
+            {:else}
+              <button class="plain icon mini" title="Play next" onclick={(e) => { e.stopPropagation(); addToSet([r.version.id], "next"); }}><Icon name="plus" size={13} /></button>
+            {/if}
           </span>
         </div>
       {/each}
@@ -392,8 +436,8 @@
 <style>
   .table { display: flex; flex-direction: column; min-height: 0; flex: 1; outline: none; }
   .thead, .tr { display: grid; grid-template-columns: var(--cols); align-items: center; column-gap: 8px; padding: 0 10px; }
-  .table { --cols: minmax(160px, 2.2fr) minmax(110px, 1.4fr) minmax(60px, 0.8fr) 92px 92px 52px 34px 70px 52px; }
-  .table:has(.pos) { --cols: 30px minmax(160px, 2.2fr) minmax(110px, 1.4fr) minmax(60px, 0.8fr) 92px 92px 52px 34px 70px 52px; }
+  .table { --cols: minmax(160px, 2.2fr) minmax(110px, 1.4fr) minmax(60px, 0.8fr) 92px 92px 52px 46px 70px 52px; }
+  .table:has(.pos) { --cols: 30px minmax(160px, 2.2fr) minmax(110px, 1.4fr) minmax(60px, 0.8fr) 92px 92px 52px 46px 70px 52px; }
   .thead { height: 26px; border-bottom: 1px solid var(--border); background: var(--bg-elev); }
   .thead .c { height: 26px; padding: 0; background: none; border: none; justify-content: flex-start; font-size: var(--fs-xs); color: var(--text-faint); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
   .tbody { flex: 1; overflow-y: auto; position: relative; }
@@ -405,8 +449,9 @@
   .tr.suggested { color: var(--text-dim); font-style: italic; }
   .tr.suggested:first-of-type, .tr:not(.suggested) + .tr.suggested { border-top: 1px dashed var(--border-strong); }
   .sugg { font-size: var(--fs-xs); color: var(--text-faint); font-style: normal; }
-  .tr.inset { color: var(--text-dim); }
-  .played { flex: none; font-size: var(--fs-xs); color: var(--yellow); border: 1px solid currentColor; border-radius: 3px; padding: 0 3px; line-height: 13px; }
+  /* Already played in the open set. */
+  .tr.inset { color: var(--text-faint); }
+  .tr.inset .title { color: var(--text-faint); }
   .tr.playing .title { color: var(--main); }
   .tr.previewing .title { color: var(--preview); }
   .c { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -421,6 +466,9 @@
   .actions { display: flex; gap: 2px; justify-content: flex-end; opacity: 0; }
   .tr:hover .actions, .tr.sel .actions { opacity: 1; }
   .mini { width: 22px; height: 20px; }
+  .filling { display: flex; align-items: center; gap: 8px; padding: 5px 12px; font-size: var(--fs-sm); background: color-mix(in srgb, var(--yellow) 18%, var(--bg-elev)); border-bottom: 1px solid var(--border); }
+  .filling span { flex: 1; }
+  .fill { color: var(--yellow); }
   .empty { position: absolute; inset: 40px 0 auto; display: flex; flex-direction: column; align-items: center; gap: 8px; }
   .empty p { margin: 0; }
 </style>

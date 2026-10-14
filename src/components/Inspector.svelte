@@ -62,6 +62,10 @@
     await app.run(api.createVersion(track.id, { ...rest, name: `${v.name} (copy)` }));
   }
 
+  function meterName(n: number): string {
+    return n === 3 || n === 6 ? "triple" : "duple";
+  }
+
   function fitToStyle(v: Version) {
     const s = app.clubStyleOf(v, null, track?.bpm ?? null);
     if (!track?.bpm || !s) return;
@@ -181,16 +185,17 @@
           </span>
           <span></span>
           <span class="faint small">{track.bpmSource ? `from ${{ detected: "analysis", tag: "file tag", tap: "tapping", user: "you" }[track.bpmSource] ?? track.bpmSource}` : track.analyzed ? "not detected" : "analysing…"}{#if track.loudnessDb != null} · {track.loudnessDb.toFixed(1)} LUFS{/if} · {fmtTime(track.durationMs)}</span>
-          <span class="lbl" title="Energy 0–10 (Powers' DJ tips)">Energy</span>
-          <span class="row"><input type="range" min="0" max="10" step="1" value={track.energy ?? 5}
-            onchange={(e) => patchTrack({ energy: +e.currentTarget.value })} /><span class="num">{track.energy ?? "–"}</span></span>
-          <span class="lbl" title="Rhythmic intensity 0–10: how clearly the beat can be heard">Beat</span>
-          <span class="row"><input type="range" min="0" max="10" step="1" value={track.rhythm ?? 5}
-            onchange={(e) => patchTrack({ rhythm: +e.currentTarget.value })} /><span class="num">{track.rhythm ?? "–"}</span></span>
+          <span class="lbl" title="Beats per bar. Detected from the audio, on the beat grid of the BPM above (fix the BPM first if it's off)">Meter</span>
+          <span class="row">
+            <select value={track.meterSource === "user" ? String(track.beatsPerBar ?? "") : "auto"}
+              onchange={(e) => { const v = e.currentTarget.value; patchTrack({ beatsPerBar: v === "auto" ? null : +v }); }}>
+              <option value="auto">Detected{track.detectedMeter ? `: ${meterName(track.detectedMeter)}` : track.analyzed ? ": unclear" : ""}</option>
+              <option value="3">Triple (3/4, 6/8)</option>
+              <option value="4">Duple (2/4, 4/4)</option>
+            </select>
+          </span>
           <span class="lbl">Gain</span>
           <span class="row"><input type="number" step="0.5" value={track.gainDb ?? 0} onchange={(e) => patchTrack({ gainDb: +e.currentTarget.value })} /> dB</span>
-          <span class="lbl"></span>
-          <label class="small"><input type="checkbox" checked={!!track.familiar} onchange={(e) => patchTrack({ familiar: e.currentTarget.checked })} /> Familiar / classic</label>
         </div>
         <textarea rows="2" placeholder="Notes" value={track.notes ?? ""} onchange={(e) => patchTrack({ notes: e.currentTarget.value })}></textarea>
       </section>
@@ -210,6 +215,11 @@
             <div class="grid">
               <span class="lbl">Styles</span>
               <StyleChips value={v.styles ?? []} bpm={pb.target} onchange={(keys) => patchVersion(v, { styles: keys })} />
+              <span class="lbl" title="Shown to dancers instead of the style names, e.g. the name of a line dance">Shown as</span>
+              <input type="text" value={v.displayName ?? ""} placeholder={app.shownFor(v, null, pb.target).map((s) => s.name).join(" / ") || "style names"}
+                onchange={(e) => patchVersion(v, { displayName: e.currentTarget.value.trim() || null })} />
+              <span class="lbl">Tags</span>
+              <StyleChips kind="tag" value={v.tags ?? []} onchange={(keys) => patchVersion(v, { tags: keys })} />
               <span class="lbl">Tempo</span>
               <span class="row">
                 <input type="number" step="0.5" placeholder={pb.base ? fmtBpm(pb.base) : "orig."} value={v.targetBpm ?? ""}
@@ -349,5 +359,4 @@
   .warn { color: var(--yellow); }
   .danger { color: var(--red); }
   textarea { width: 100%; }
-  input[type="range"] { width: 120px; }
 </style>

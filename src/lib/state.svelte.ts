@@ -79,6 +79,8 @@ class AppState {
   rightTab = $state<"set" | "info">("set");
   settingsOpen = $state<false | string>(false);
   newSetlistOpen = $state(false);
+  /** A style slot in the open set the DJ is choosing a song for. */
+  fillingSlot = $state<Id | null>(null);
   /** Smart crate being edited: its id, or "new". */
   smartEditor = $state<string | false>(false);
   /** Bumped by MIDI browse actions; the library table reacts. */
@@ -103,6 +105,17 @@ class AppState {
   });
   /** Your dance styles (what songs are tagged with). */
   myStyles = $derived(this.styleLib?.styles ?? []);
+  /** Your tags (labels that aren't dance styles). */
+  myTags = $derived(this.styleLib?.tags ?? []);
+
+  tagName(key: string): string {
+    return this.myTags.find((t) => t.key === key)?.name ?? prettify(key);
+  }
+
+  tagColor(key: string): string {
+    return this.myTags.find((t) => t.key === key)?.color || NEUTRAL;
+  }
+
   /** The current club has its own styles (otherwise yours are shown as they are). */
   hasClub = $derived((this.profile?.styles.length ?? 0) > 0);
 
@@ -361,6 +374,20 @@ export async function audition(versionId: Id, entryId?: Id | null) {
     return;
   }
   await app.run(api.deckLoad(app.freeDeck, versionId, { entryId, play: true }));
+}
+
+/** Starts choosing a song for a style slot: the library shows that style. */
+export function startFillingSlot(entry: SetlistEntry) {
+  app.fillingSlot = entry.id;
+  if (entry.styles?.length) app.styleFilter = [...entry.styles];
+  app.selected = [];
+}
+
+/** Puts a song into the slot being filled (or `slotId`). */
+export async function fillSlot(versionId: Id, slotId: Id | null = app.fillingSlot) {
+  if (!slotId) return;
+  const ok = await app.run(api.updateEntry(slotId, { versionId }));
+  if (ok !== undefined && app.fillingSlot === slotId) app.fillingSlot = null;
 }
 
 /** Loads a version onto a specific deck (paused). */

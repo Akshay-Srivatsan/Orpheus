@@ -2,9 +2,10 @@
   // Spotify search / playlist results. Previewing or adding a song to the set
   // does NOT add it to the library; use the + button for that.
   import { api } from "../lib/api";
-  import { addToSet, app, audition, spotifyVersions } from "../lib/state.svelte";
+  import { addToSet, app, audition, loadDeck, spotifyVersions } from "../lib/state.svelte";
   import { fmtTime } from "../lib/tempo";
   import type { Id, SpotifyTrack } from "../lib/types";
+  import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
   import Icon from "./Icon.svelte";
 
   interface Props { tracks: SpotifyTrack[]; compact?: boolean }
@@ -21,6 +22,34 @@
   async function preview(t: SpotifyTrack) {
     const [v] = await spotifyVersions([t], false);
     if (v) await audition(v);
+  }
+
+  /** Double-click: load onto the off-air deck, paused. */
+  async function load(t: SpotifyTrack) {
+    const [v] = await spotifyVersions([t], false);
+    if (v) await loadDeck(app.freeDeck, v);
+  }
+
+  /** Tagging a song with a style adds it to the library. */
+  async function tagStyle(t: SpotifyTrack, style: string) {
+    const vs = await spotifyVersions([t], true);
+    if (vs.length) await app.run(api.styleAdd(style, vs));
+  }
+
+  let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  function openMenu(e: MouseEvent, t: SpotifyTrack) {
+    e.preventDefault();
+    const k = known.get(t.uri);
+    const items: MenuItem[] = [
+      { label: "Load onto the Off-Air Deck", action: () => load(t) },
+      { label: "Preview in Headphones", action: () => preview(t) },
+      { label: "Play Next", action: () => toSet(t, "next") },
+      { label: "Add to End of Set", action: () => toSet(t, "end") },
+      { separator: true },
+      ...(k?.inLibrary ? [] : [{ label: "Add to Library", action: () => toLibrary(t) }]),
+      ...app.myStyles.map((s) => ({ label: `Add to Library as ${s.name}`, action: () => tagStyle(t, s.key) })),
+    ];
+    menu = { x: e.clientX, y: e.clientY, items };
   }
 
   async function toSet(t: SpotifyTrack, where: "next" | "end") {
@@ -42,7 +71,7 @@
 <div class="list" class:compact>
   {#each tracks as t (t.uri)}
     {@const k = known.get(t.uri)}
-    <div class="item" role="listitem" draggable="true" ondragstart={(e) => dragStart(e, t)} ondblclick={() => preview(t)}>
+    <div class="item" role="listitem" draggable="true" ondragstart={(e) => dragStart(e, t)} ondblclick={() => load(t)} oncontextmenu={(e) => openMenu(e, t)}>
       {#if t.artworkUrl}<img src={t.artworkUrl} alt="" />{:else}<div class="noart"></div>{/if}
       <div class="txt">
         <div class="t">{t.title}</div>
@@ -60,6 +89,10 @@
     </div>
   {/each}
 </div>
+
+{#if menu}
+  <ContextMenu x={menu.x} y={menu.y} items={menu.items} onclose={() => (menu = null)} />
+{/if}
 
 <style>
   .item { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-bottom: 1px solid rgba(255,255,255,0.03); }

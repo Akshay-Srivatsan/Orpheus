@@ -3,7 +3,7 @@
   // on songs, not collections: any view (all songs, a crate, a setlist...) can
   // be narrowed to one or more styles. Dropping songs on a style labels them.
   import { api } from "../lib/api";
-  import { NO_STYLE, app } from "../lib/state.svelte";
+  import { NO_STYLE, app, spotifyVersions } from "../lib/state.svelte";
   import type { Id, Row } from "../lib/types";
 
   interface Props { rows: Row[] }
@@ -51,7 +51,9 @@
   async function dropOn(e: DragEvent, key: string) {
     e.preventDefault();
     drop = null;
-    const ids = dragged(e);
+    // Spotify songs dropped on a style join the library with that style.
+    const spotify = JSON.parse(e.dataTransfer?.getData("application/x-orpheus-spotify") || "[]");
+    const ids = spotify.length && key !== NO_STYLE ? await spotifyVersions(spotify, true) : dragged(e);
     if (!ids.length) return;
     if (key === NO_STYLE) await app.run(api.styleRemove(ids, null));
     else await app.run(api.styleAdd(key, ids));

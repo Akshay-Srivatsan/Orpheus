@@ -69,6 +69,10 @@ export const api = {
   saveStyles: (library: T.StyleLibrary) => call<void>("styles_save", { library }),
   /** Renames a style key on every song; `to = null` removes the style from all songs. */
   rekeyStyle: (from: string, to: string | null) => call<void>("styles_rekey", { from, to }),
+  /** Renames one of your tags on every song; `to = null` deletes it. */
+  rekeyTag: (from: string, to: string | null) => call<void>("tags_rekey", { from, to }),
+  /** Adds (`on`) or removes one of your tags on versions. */
+  setTag: (tag: string, versionIds: T.Id[], on: boolean) => call<void>("tag_set", { tag, versionIds, on }),
 
   // profiles & settings
   profiles: () => call<T.Profile[]>("profiles_list"),

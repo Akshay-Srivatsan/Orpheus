@@ -10,7 +10,7 @@ let seq = 0;
 function row(style: string | null, bpm: number | null, extra: Partial<Track> = {}, vextra: Partial<Version> = {}): Row {
   const id = `t${++seq}`;
   const track: Track = {
-    id, title: id, artist: "", album: "", durationMs: 180_000, bpm, bpmSource: "user", energy: null, rhythm: null,
+    id, title: id, artist: "", album: "", durationMs: 180_000, bpm, bpmSource: "user",
     rating: null, loudnessDb: null, audioStartMs: null, audioEndMs: null, analyzed: true, addedAt: 0,
     sources: [{ kind: "file", key: id }], versions: [], files: ["/x"], missing: false, playCount: 0, lastPlayedAt: null,
     ...extra,
@@ -28,7 +28,7 @@ describe("smart crates", () => {
   const rotary = row("rotary-waltz", 150);
   const csw = row("cross-step-waltz", 116);
   const unlabelledRotaryTempo = row(null, 148);
-  const unlabelledSlow = row(null, 112, { energy: 3, familiar: true });
+  const unlabelledSlow = row(null, 112, { beatsPerBar: 3 }, { tags: ["classic"] });
   const spotify = row(null, 96, { sources: [{ kind: "spotify", key: "spotify:track:x" }], durationMs: 300_000 });
   const rows = [rotary, csw, unlabelledRotaryTempo, unlabelledSlow, spotify];
   const waltzes: Crate = { id: "w", name: "Waltzes", position: 1, versionIds: [rotary.version.id, csw.version.id, unlabelledRotaryTempo.version.id, unlabelledSlow.version.id] };
@@ -57,8 +57,8 @@ describe("smart crates", () => {
     expect(run({ match: "all", conditions: [{ field: "bpm", op: "between", value: [110, 120] }] })).toEqual([csw.version.id, unlabelledSlow.version.id]);
     expect(run({ match: "all", conditions: [{ field: "duration", op: "atLeast", value: 240 }] })).toEqual([spotify.version.id]);
     expect(run({ match: "all", conditions: [{ field: "source", op: "is", value: "spotify" }] })).toEqual([spotify.version.id]);
-    expect(run({ match: "all", conditions: [{ field: "familiar", op: "isTrue" }] })).toEqual([unlabelledSlow.version.id]);
-    expect(run({ match: "all", conditions: [{ field: "energy", op: "atMost", value: 4 }] })).toEqual([unlabelledSlow.version.id]);
+    expect(run({ match: "all", conditions: [{ field: "tag", op: "has", value: "classic" }] })).toEqual([unlabelledSlow.version.id]);
+    expect(run({ match: "all", conditions: [{ field: "meter", op: "triple" }] })).toEqual([unlabelledSlow.version.id]);
     expect(run({ match: "any", conditions: [{ field: "style", op: "is", value: "rotary-waltz" }, { field: "source", op: "is", value: "spotify" }] })).toEqual([rotary.version.id, spotify.version.id]);
     expect(run({ match: "all", conditions: [{ field: "lastPlayed", op: "never" }] })).toHaveLength(5);
     expect(run({ match: "all", conditions: [] })).toEqual([]);

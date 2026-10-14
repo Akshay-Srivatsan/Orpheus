@@ -82,9 +82,15 @@ export function showStyles(lib: StyleLibrary | null, profile: Profile | null, ke
   return out;
 }
 
-/** The text dancers see for an entry: its custom label, else the shown styles joined. */
+/** A custom label replacing style names: the entry's, else the version's display name. */
+export function customLabel(version: Version | undefined, entry: Partial<SetlistEntry> | null | undefined): string | null {
+  return entry?.label || version?.displayName || null;
+}
+
+/** The text dancers see for an entry: a custom label, else the shown styles joined. */
 export function entryLabel(lib: StyleLibrary | null, profile: Profile | null, version: Version | undefined, entry: Partial<SetlistEntry> | null | undefined, bpm: number | null): string {
-  if (entry?.label) return entry.label;
+  const custom = customLabel(version, entry);
+  if (custom) return custom;
   return showStyles(lib, profile, entryStyleKeys(version, entry), bpm).map((s) => s.name).join(" / ");
 }
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { NEUTRAL } from "../lib/styles";
-  import { open as openDialog } from "@tauri-apps/plugin-dialog";
+  import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api";
   import { app, confirmAction } from "../lib/state.svelte";
   import type { AudioDevice, MidiControl, MidiInfo, MidiMapping, Profile, Settings, StyleDef } from "../lib/types";
@@ -9,7 +9,7 @@
 
   const tabs = [
     ["general", "General"], ["library", "Library"], ["audio", "Audio"], ["midi", "Controllers"],
-    ["stems", "Stems"], ["spotify", "Spotify"], ["projector", "Projector"], ["styles", "Dance Styles"], ["profiles", "Club Profiles"],
+    ["stems", "Stems"], ["spotify", "Spotify"], ["projector", "Projector"], ["styles", "Styles & Tags"], ["profiles", "Club Profiles"],
   ] as const;
   let tab = $state<string>(typeof app.settingsOpen === "string" ? app.settingsOpen : "general");
   const s = $derived(app.settings!);
@@ -109,18 +109,56 @@
     if (!draft) return;
     await app.run(api.saveProfile($state.snapshot(draft) as Profile));
   }
-  async function duplicateProfile() {
-    if (!draft) return;
-    const name = prompt("Name for the new club profile:", `${draft.name} (copy)`);
-    if (!name) return;
-    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "custom";
-    const p = { ...structuredClone($state.snapshot(draft)), id, name, builtin: false, modified: false } as Profile;
-    await app.run(api.saveProfile(p));
+  function profileId_(name: string): string {
+    const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "club";
+    let id = base;
+    for (let i = 2; app.profiles.some((p) => p.id === id); i++) id = `${base}-${i}`;
+    return id;
+  }
+  /** Saves a profile as a new club (fresh id) and selects it. */
+  async function addProfile(p: Profile, name: string) {
+    const id = profileId_(name);
+    const { builtin: _b, modified: _m, ...rest } = structuredClone($state.snapshot(p)) as Profile;
+    await app.run(api.saveProfile({ ...rest, id, name } as Profile));
     profileId = id;
+  }
+  async function duplicateProfile() {
+    if (draft) await addProfile(draft, `${draft.name} (copy)`);
+  }
+  async function newProfile() {
+    // Start from "No club" (no styles) for its defaults.
+    const base = app.profiles.find((p) => p.builtin) ?? draft;
+    if (base) await addProfile({ ...base, styles: [], tags: [], announcements: [], description: "" } as Profile, "New club");
+  }
+  async function importProfile() {
+    const path = await openDialog({ multiple: false, title: "Import club", filters: [{ name: "Club (JSON)", extensions: ["json"] }] });
+    if (typeof path !== "string") return;
+    const text = await app.run(api.readTextFile(path));
+    if (text == null) return;
+    let p: Profile;
+    try {
+      p = JSON.parse(text);
+      if (typeof p !== "object" || !Array.isArray(p.styles) || typeof p.name !== "string") throw new Error("not a club file");
+    } catch (e) {
+      return app.toast(`Couldn't import: ${e}`);
+    }
+    // Keep the file's id when free, so setlists that refer to it reconnect.
+    const id = p.id && /^[A-Za-z0-9_-]+$/.test(p.id) && !app.profiles.some((x) => x.id === p.id) ? p.id : profileId_(p.name);
+    const { builtin: _b, modified: _m, ...rest } = p;
+    await app.run(api.saveProfile({ ...rest, id } as Profile));
+    profileId = id;
+    app.toast(`Imported “${p.name}”`, "info");
+  }
+  async function exportProfile() {
+    if (!profile) return;
+    const path = await saveDialog({ defaultPath: `${profile.id}.json`, filters: [{ name: "Club (JSON)", extensions: ["json"] }] });
+    if (!path) return;
+    const { builtin: _b, modified: _m, ...rest } = $state.snapshot(profile) as Profile;
+    await app.run(api.writeTextFile(path, JSON.stringify(rest, null, 1) + "\n"));
   }
   function addStyle() {
     if (!draft) return;
-    draft.styles.push({ key: uniqueId(draft.styles.map((x) => x.key), "style"), name: "New style", short: "NEW", color: NEUTRAL, sweet: null, extended: null });
+    draft.styles.push({ key: uniqueId(draft.styles.map((x) => x.key), "style"), name: "New style", short: "", color: NEUTRAL, sweet: null, extended: null });
   }
   function addTag() {
     if (!draft) return;
@@ -185,6 +223,15 @@
           <span class="l">Tempo</span>
           <span class="col">
             <label><input type="checkbox" checked={s.keylock} onchange={(e) => set("keylock", e.currentTarget.checked)} /> Keep pitch when changing tempo (key lock)</label>
+            <span title="How tempo changes are computed; applies to songs loaded from now on">Time-stretch engine
+              <select value={s.stretchEngine || "signalsmith"} onchange={(e) => set("stretchEngine", e.currentTarget.value as Settings["stretchEngine"])}>
+                <option value="signalsmith">Signalsmith Stretch (default, smooth)</option>
+                <option value="rubberband">Rubber Band R3 (high quality, more CPU)</option>
+                <option value="soundtouch">SoundTouch (crisp rhythm)</option>
+                <option value="bungee">Bungee</option>
+              </select>
+            </span>
+            <span class="faint small">If slowed-down songs sound smeared or phasey, try Rubber Band or SoundTouch. Changes apply to the next song loaded.</span>
             <span>Tempo slider range ± <input type="number" min="2" max="50" value={s.tempoRangePct} onchange={(e) => set("tempoRangePct", +e.currentTarget.value)} /> %</span>
           </span>
           <span class="l">Levels</span>
@@ -473,7 +520,10 @@
         <p class="dim">A club profile holds the club's own dance styles and tempo ranges, tags and announcements. How your styles map onto a club's is set in <button class="plain link" onclick={() => (tab = "styles")}>Dance Styles</button>. Built in: {app.profiles.filter((p) => p.builtin).map((p) => p.name).join(", ")}.</p>
         <div class="row">
           <select bind:value={profileId}>{#each app.profiles as p}<option value={p.id}>{p.name}{p.modified ? " (modified)" : ""}</option>{/each}</select>
-          <button onclick={duplicateProfile}><Icon name="copy" size={13} /> Duplicate…</button>
+          <button onclick={newProfile}><Icon name="plus" size={13} /> New Club</button>
+          <button onclick={duplicateProfile}><Icon name="copy" size={13} /> Duplicate</button>
+          <button onclick={importProfile}>Import…</button>
+          <button onclick={exportProfile} disabled={!profile}>Export…</button>
           {#if profile?.modified}<button onclick={() => confirmAction("Discard your changes to this built-in profile?", "Discard").then((ok) => { if (ok) api.deleteProfile(profileId); })}>Reset to Built-in</button>{/if}
           {#if profile && !profile.builtin}<button class="danger" onclick={() => confirmAction(`Delete “${profile.name}”?`).then((ok) => { if (ok) api.deleteProfile(profileId); })}>Delete</button>{/if}
           <span class="spacer"></span>

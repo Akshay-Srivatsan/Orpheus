@@ -19,18 +19,37 @@
   /** Applies a change to styles.json and saves it. */
   function update(change: (l: StyleLibrary) => void) {
     if (!lib) return;
-    const { usage: u, ...rest } = $state.snapshot(lib);
+    const { usage: u, tagUsage: tu, ...rest } = $state.snapshot(lib);
     const next = structuredClone(rest) as StyleLibrary;
+    next.tags ??= [];
     change(next);
-    app.styleLib = { ...next, usage: u };
+    app.styleLib = { ...next, usage: u, tagUsage: tu };
     app.run(api.saveStyles(next));
   }
 
-  function slug(name: string): string {
-    const base = name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "style";
+  function slug(name: string, taken: { key: string }[] = lib?.styles ?? []): string {
+    const base = name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "item";
     let key = base;
-    for (let i = 2; lib?.styles.some((s) => s.key === key); i++) key = `${base}-${i}`;
+    for (let i = 2; taken.some((s) => s.key === key); i++) key = `${base}-${i}`;
     return key;
+  }
+
+  // ---------------------------------------------------------------- your tags
+  let newTag = $state("");
+  const tags = $derived(lib?.tags ?? []);
+  const tagUsage = $derived(lib?.tagUsage ?? {});
+  const undefinedTags = $derived(Object.keys(tagUsage).filter((k) => !tags.some((t) => t.key === k)));
+
+  function addTag(name: string, key?: string) {
+    const k = key && !tags.some((t) => t.key === key) ? key : slug(name, tags);
+    update((l) => l.tags!.push({ key: k, name, color: NEUTRAL }));
+  }
+
+  async function removeTag(key: string) {
+    const n = tagUsage[key] ?? 0;
+    const name = app.tagName(key);
+    if (!(await confirmAction(n ? `Delete the tag “${name}”? It is removed from ${n} song version(s).` : `Delete the tag “${name}”?`))) return;
+    await app.run(api.rekeyTag(key, null));
   }
 
   function addStyle(name: string, from?: { short: string; color: string; key?: string }) {
@@ -72,7 +91,7 @@
   );
 </script>
 
-<h2>Dance Styles</h2>
+<h2>Dance Styles &amp; Tags</h2>
 <p class="dim">
   Your dance styles are what you tag songs with. A song can have several. Clubs can name and split styles differently, so each
   club profile has its own styles. The rules below say how yours appear at a club. The setlist and projector always show the
@@ -87,7 +106,7 @@
       <tr>
         <td><input type="color" value={st.color} onchange={(e) => update((l) => (l.styles[i].color = e.currentTarget.value))} /></td>
         <td><input type="text" value={st.name} title="Key: {st.key}" onchange={(e) => update((l) => (l.styles[i].name = e.currentTarget.value.trim() || st.name))} /></td>
-        <td><input type="text" class="w5" value={st.short} placeholder={st.name.slice(0, 4)} onchange={(e) => update((l) => (l.styles[i].short = e.currentTarget.value.trim()))} /></td>
+        <td><input type="text" class="w5" value={st.short} placeholder={st.name} title="Short name for tight spaces (empty = the full name)" onchange={(e) => update((l) => (l.styles[i].short = e.currentTarget.value.trim()))} /></td>
         <td class="num faint">{usage[st.key] ?? 0}</td>
         <td>
           <select value="" onchange={(e) => { const v = e.currentTarget.value; e.currentTarget.value = ""; mergeStyle(st.key, v); }}>
@@ -120,6 +139,35 @@
       Add {club.name}'s {importable.length} other style{importable.length === 1 ? "" : "s"}
     </button>
   {/if}
+</form>
+
+<h3>Your tags</h3>
+<p class="dim small">Labels for songs that aren't dance styles, e.g. “Classic”, “Teaching”, “Requests”. Smart crates can use them.</p>
+<table>
+  <thead><tr><th></th><th>Name</th><th>Songs</th><th></th></tr></thead>
+  <tbody>
+    {#each tags as t, i (t.key)}
+      <tr>
+        <td><input type="color" value={t.color} onchange={(e) => update((l) => (l.tags![i].color = e.currentTarget.value))} /></td>
+        <td><input type="text" value={t.name} onchange={(e) => update((l) => (l.tags![i].name = e.currentTarget.value.trim() || t.name))} /></td>
+        <td class="num faint">{tagUsage[t.key] ?? 0}</td>
+        <td><button class="plain icon danger" title="Delete tag" onclick={() => removeTag(t.key)}><Icon name="trash" size={12} /></button></td>
+      </tr>
+    {:else}
+      <tr><td colspan="4" class="faint">No tags yet.</td></tr>
+    {/each}
+  </tbody>
+</table>
+{#if undefinedTags.length}
+  <p class="small warn">
+    Songs carry tags that aren't in your list:
+    {#each undefinedTags as k, i}{i ? ", " : ""}<button class="plain link" onclick={() => addTag(app.tagName(k), k)}>{app.tagName(k)} ({tagUsage[k]})</button>{/each}.
+    Click one to add it.
+  </p>
+{/if}
+<form class="row add" onsubmit={(e) => { e.preventDefault(); if (newTag.trim()) { addTag(newTag.trim()); newTag = ""; } }}>
+  <input type="text" placeholder="New tag name" bind:value={newTag} />
+  <button type="submit" disabled={!newTag.trim()}><Icon name="plus" size={12} /> Add Tag</button>
 </form>
 
 <h3>At a club</h3>

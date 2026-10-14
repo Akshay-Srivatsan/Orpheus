@@ -23,9 +23,12 @@ export interface Overrides {
 export interface Version extends Overrides {
   id: Id;
   name: string;
+  /** Shown to dancers instead of the style names (e.g. a line dance's name). */
+  displayName?: string | null;
   /** Your dance styles (keys into styles.json) this version can be danced as. */
   styles?: string[];
   comment?: string;
+  /** Your tags (keys into styles.json's tags). */
   tags?: string[];
 }
 
@@ -42,10 +45,12 @@ export interface Track {
   detectedBpm?: number | null;
   /** BPM from the file's tags, if any. */
   tagBpm?: number | null;
-  energy: number | null;
-  rhythm: number | null;
+  /** Beats per bar: 3 (triple, e.g. waltzes) or 4 (duple); null = unknown. */
+  beatsPerBar?: number | null;
+  /** "detected" or "user". */
+  meterSource?: string | null;
+  detectedMeter?: number | null;
   rating: number | null;
-  familiar?: boolean;
   gainDb?: number;
   loudnessDb: number | null;
   audioStartMs: number | null;
@@ -72,8 +77,8 @@ export interface Track {
 export type TrackPatch = Partial<
   Pick<
     Track,
-    | "title" | "artist" | "album" | "genre" | "bpm" | "bpmSource" | "energy" | "rhythm" | "rating"
-    | "familiar" | "gainDb" | "notes" | "preferredSource"
+    | "title" | "artist" | "album" | "genre" | "bpm" | "bpmSource" | "beatsPerBar" | "rating"
+    | "gainDb" | "notes" | "preferredSource"
   >
 >;
 
@@ -168,15 +173,25 @@ export interface StyleMappingRule {
   to: string;
 }
 
-/** styles.json: your styles and, per club profile id, the mapping rules. */
+/** One of your tags: a label on songs that isn't a dance style. */
+export interface LibraryTag {
+  key: string;
+  name: string;
+  color: string;
+}
+
+/** styles.json: your styles and tags and, per club profile id, the mapping rules. */
 export interface StyleLibrary {
   styles: LibraryStyle[];
   mappings: Record<string, StyleMappingRule[]>;
+  tags?: LibraryTag[];
 }
 
 export interface StylesInfo extends StyleLibrary {
   /** Number of versions tagged with each style key. */
   usage: Record<string, number>;
+  /** Number of versions carrying each of your tags. */
+  tagUsage: Record<string, number>;
 }
 
 export interface LibraryInfo {
@@ -284,6 +299,8 @@ export interface Settings {
   manualNextFadeMs: number;
   fadeOutMs: number | null;
   keylock: boolean;
+  /** Time-stretch engine. */
+  stretchEngine: "signalsmith" | "soundtouch" | "bungee" | "rubberband";
   tempoRangePct: number;
   autoGain: boolean;
   targetLoudnessDb: number;

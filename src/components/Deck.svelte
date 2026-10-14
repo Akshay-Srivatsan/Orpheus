@@ -1,7 +1,7 @@
 <script lang="ts">
   // One of two identical decks. The crossfader decides which deck the room
   // hears ("on air"); the other is the free deck, cued in headphones.
-  import { NEUTRAL } from "../lib/styles";
+  import { NEUTRAL, customLabel } from "../lib/styles";
   import { api } from "../lib/api";
   import { artwork } from "../lib/artwork";
   import { addToSet, app, loadDeck } from "../lib/state.svelte";
@@ -169,7 +169,7 @@
       {#if art}
         <img src={art} alt="" />
       {:else}
-        <span>{entry?.label || shown[0]?.short || (loaded ? "♪" : "")}</span>
+        <span>{customLabel(row?.version, entry) || shown[0]?.short || (loaded ? "♪" : "")}</span>
       {/if}
     </div>
     <div class="titles">
@@ -180,7 +180,7 @@
           {#if row && app.versionLabel(row.version, track)}<span class="ver">· {row.version.name}</span>{/if}
         </div>
         <div class="chips">
-          <StyleBadge styles={shown} label={entry?.label} />
+          <StyleBadge styles={shown} label={customLabel(row?.version, entry)} />
           {#each entry?.tags ?? [] as tag}
             {@const t = app.profile?.tags.find((x) => x.id === tag)}
             <span class="badge" style:--c={t?.color ?? "#999"}>{t?.name ?? tag}</span>

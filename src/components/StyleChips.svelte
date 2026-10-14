@@ -1,7 +1,7 @@
 <script lang="ts">
-  // Edits a list of your dance styles: removable chips plus an "add" menu.
-  // With `choices`, only those styles can be toggled on and off (e.g. which of
-  // a song's styles a setlist shows).
+  // Edits a list of your dance styles (or your tags): removable chips plus an
+  // "add" menu. With `choices`, only those can be toggled on and off (e.g.
+  // which of a song's styles a setlist shows).
   import { app } from "../lib/state.svelte";
 
   interface Props {
@@ -11,12 +11,17 @@
     choices?: string[];
     /** Planned tempo, for showing how each style maps at the current club. */
     bpm?: number | null;
+    kind?: "style" | "tag";
   }
-  let { value, onchange, choices, bpm = null }: Props = $props();
+  let { value, onchange, choices, bpm = null, kind = "style" }: Props = $props();
 
-  const addable = $derived(app.myStyles.filter((s) => !value.includes(s.key)));
+  const all = $derived(kind === "tag" ? app.myTags : app.myStyles);
+  const addable = $derived(all.filter((s) => !value.includes(s.key)));
+  const name = (k: string) => (kind === "tag" ? app.tagName(k) : app.styleName(k));
+  const color = (k: string) => (kind === "tag" ? app.tagColor(k) : app.styleColor(k));
 
   function title(key: string): string {
+    if (kind === "tag") return app.tagName(key);
     const s = app.show(key, bpm);
     if (!app.hasClub) return app.styleName(key);
     return s.club ? `${app.styleName(key)} → ${s.name} at ${app.profile?.name}` : `${app.styleName(key)}: not a ${app.profile?.name} style`;
@@ -27,25 +32,25 @@
   {#if choices}
     {#each choices as k}
       {@const on = value.includes(k)}
-      <button class="badge chip" class:off={!on} style:--c={app.styleColor(k)} title={title(k)}
+      <button class="badge chip" class:off={!on} style:--c={color(k)} title={title(k)}
         onclick={() => onchange(on ? value.filter((x) => x !== k) : choices.filter((x) => x === k || value.includes(x)))}>
-        {app.styleName(k)}
+        {name(k)}
       </button>
     {/each}
   {:else}
     {#each value as k}
-      <span class="badge chip" style:--c={app.styleColor(k)} title={title(k)}>
-        {app.styleName(k)}
-        <button class="plain x" title="Remove {app.styleName(k)}" onclick={() => onchange(value.filter((x) => x !== k))}>×</button>
+      <span class="badge chip" style:--c={color(k)} title={title(k)}>
+        {name(k)}
+        <button class="plain x" title="Remove {name(k)}" onclick={() => onchange(value.filter((x) => x !== k))}>×</button>
       </span>
     {/each}
     {#if addable.length}
       <select class="add" value="" onchange={(e) => { const k = e.currentTarget.value; e.currentTarget.value = ""; if (k) onchange([...value, k]); }}>
-        <option value="">{value.length ? "+" : "Add style…"}</option>
+        <option value="">{value.length ? "+" : kind === "tag" ? "Add tag…" : "Add style…"}</option>
         {#each addable as s}<option value={s.key}>{s.name}</option>{/each}
       </select>
-    {:else if !app.myStyles.length}
-      <button class="plain small" onclick={() => (app.settingsOpen = "styles")}>Add dance styles…</button>
+    {:else if !all.length}
+      <button class="plain small" onclick={() => (app.settingsOpen = "styles")}>{kind === "tag" ? "Create tags…" : "Create dance styles…"}</button>
     {/if}
   {/if}
 </span>

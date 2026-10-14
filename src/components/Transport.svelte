@@ -6,6 +6,7 @@
   import { MOD, fmtBpm, fmtTime, playback } from "../lib/tempo";
   import Icon from "./Icon.svelte";
   import StyleBadge from "./StyleBadge.svelte";
+  import { customLabel } from "../lib/styles";
 
   let now = $state(Date.now());
   $effect(() => {
@@ -73,7 +74,7 @@
   <div class="upnext">
     <div class="section-title">Up next</div>
     {#if next}
-      <div class="un-style"><StyleBadge styles={nextShown} label={next.entry.label} big /></div>
+      <div class="un-style"><StyleBadge styles={nextShown} label={customLabel(next.row?.version, next.entry)} big /></div>
       {#if next.row}
         <div class="un-title" title={next.row.track.title}>{next.row.track.title}</div>
         <div class="un-artist dim small num">

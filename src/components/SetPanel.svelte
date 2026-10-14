@@ -1,8 +1,8 @@
 <script lang="ts">
   import { save } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api";
-  import { addToSet, app, audition, spotifyVersions, confirmAction } from "../lib/state.svelte";
-  import { entryStyleKeys, NEUTRAL } from "../lib/styles";
+  import { addToSet, app, audition, spotifyVersions, confirmAction, fillSlot, startFillingSlot } from "../lib/state.svelte";
+  import { customLabel, entryStyleKeys, NEUTRAL } from "../lib/styles";
   import { fmtBpm, fmtTime, playback, playedDurationMs } from "../lib/tempo";
   import type { Id, SetlistEntry } from "../lib/types";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
@@ -12,6 +12,8 @@
   const selSet = $derived(new Set(app.selectedEntries));
   let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
   let dropIndex = $state<number | null>(null);
+  /** A style slot a song is being dragged onto (fills it instead of inserting). */
+  let dropSlot = $state<Id | null>(null);
   let renaming = $state(false);
   let listEl: HTMLDivElement | undefined = $state();
 
@@ -21,7 +23,7 @@
       const pb = r ? playback(r.track, r.version, e, app.clubStyleOf) : null;
       const dur = r ? playedDurationMs(r.track, r.version, e, pb!.rate, { fadeSeconds: app.fadeSeconds, trimSilence: app.settings?.trimSilence }) : 0;
       const shown = app.shownFor(r?.version, e, pb?.target ?? null);
-      const label = e.label || shown.map((s) => s.short).join(" / ");
+      const label = customLabel(r?.version, e) || shown.map((s) => s.short).join(" / ");
       // A song coming up that the room has already heard in this set.
       const repeat = e.status === "pending" && !!r && app.playedInSet.has(r.track.id);
       return { e, i, r, pb, dur, shown, label, repeat };
@@ -64,15 +66,18 @@
     app.inspectEntry = entry.id;
     const r = entry.versionId ? app.versionMap.get(entry.versionId) : undefined;
     app.inspectTrack = r?.track.id ?? null;
-    // Selecting an empty slot filters the library to its style.
-    if (!entry.versionId && entry.styles?.length) {
-      app.styleFilter = [...entry.styles];
-      app.selected = [];
-    }
+    // Selecting an empty slot starts choosing its song.
+    if (!entry.versionId) startFillingSlot(entry);
   }
 
   function preview(entry: SetlistEntry) {
     if (entry.versionId) audition(entry.versionId, entry.id);
+  }
+
+  /** Double-click: load onto the off-air deck (paused); on a slot, choose its song. */
+  function choose(entry: SetlistEntry) {
+    if (!entry.versionId) return startFillingSlot(entry);
+    api.deckLoad(app.freeDeck, entry.versionId, { entryId: entry.id, play: false });
   }
 
   async function remove(ids: Id[]) {
@@ -94,6 +99,7 @@
     const ids = app.selectedEntries.slice();
     const isCurrent = entry.id === app.perform?.currentEntryId;
     const items: MenuItem[] = [
+      ...(!entry.versionId ? [{ label: "Choose Song for This Slot…", action: () => startFillingSlot(entry) }, { separator: true } as MenuItem] : []),
       { label: "Play Now", disabled: !entry.versionId || isCurrent, action: () => app.run(api.playEntry(entry.id)) },
       { label: "Preview in Headphones (free deck)", disabled: !entry.versionId, action: () => preview(entry) },
       ...([0, 1] as const).map((d) => ({
@@ -151,14 +157,33 @@
 
   function dragOver(ev: DragEvent, i: number) {
     ev.preventDefault();
+    const entry = set?.entries[i];
+    const songs = ev.dataTransfer?.types.some((t) => t === "application/x-orpheus-versions" || t === "application/x-orpheus-spotify");
+    const moving = ev.dataTransfer?.types.includes("application/x-orpheus-entries");
+    // Songs dropped on the middle of an empty slot fill it.
     const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect();
-    dropIndex = ev.clientY > rect.top + rect.height / 2 ? i + 1 : i;
+    const y = (ev.clientY - rect.top) / rect.height;
+    if (entry && !entry.versionId && songs && !moving && y > 0.2 && y < 0.8) {
+      dropSlot = entry.id;
+      dropIndex = null;
+      return;
+    }
+    dropSlot = null;
+    dropIndex = y > 0.5 ? i + 1 : i;
   }
 
   async function drop(ev: DragEvent) {
     ev.preventDefault();
     const at = dropIndex ?? set?.entries.length ?? 0;
     dropIndex = null;
+    if (dropSlot) {
+      const slotId = dropSlot;
+      dropSlot = null;
+      const sp = JSON.parse(ev.dataTransfer?.getData("application/x-orpheus-spotify") || "[]");
+      const ids: Id[] = sp.length ? await spotifyVersions(sp, false) : JSON.parse(ev.dataTransfer?.getData("application/x-orpheus-versions") || "[]");
+      if (ids[0]) await fillSlot(ids[0], slotId);
+      return;
+    }
     if (!set) {
       const sp = JSON.parse(ev.dataTransfer?.getData("application/x-orpheus-spotify") || "[]");
       const ids = sp.length ? await spotifyVersions(sp, false) : JSON.parse(ev.dataTransfer?.getData("application/x-orpheus-versions") || "[]");
@@ -220,7 +245,7 @@
     const lines = [["#", "Style", "Title", "Artist", "Version", "BPM", "Length", "Tags", "Note", "Status"].map(esc).join(",")];
     for (const x of rows) {
       lines.push([
-        number.get(x.e.id) ?? "", x.e.label || x.shown.map((s) => s.name).join(" / "), x.r?.track.title ?? "(slot)", x.r?.track.artist ?? "", x.r?.version.name ?? "",
+        number.get(x.e.id) ?? "", customLabel(x.r?.version, x.e) || x.shown.map((s) => s.name).join(" / "), x.r?.track.title ?? "(slot)", x.r?.track.artist ?? "", x.r?.version.name ?? "",
         x.pb?.target ? fmtBpm(x.pb.target) : "", x.dur ? fmtTime(x.dur) : "",
         (x.e.tags ?? []).map((t) => app.profile?.tags.find((d) => d.id === t)?.name ?? t).join("; "), x.e.note ?? "", x.e.status,
       ].map(esc).join(","));
@@ -273,7 +298,7 @@
 
     <div class="entries" bind:this={listEl} role="listbox" aria-multiselectable="true" tabindex="0" onkeydown={keydown}
       ondragover={(e) => { e.preventDefault(); if (!set.entries.length) dropIndex = 0; }}
-      ondragleave={(e) => { if (e.currentTarget === e.target) dropIndex = null; }}
+      ondragleave={(e) => { if (e.currentTarget === e.target) { dropIndex = null; dropSlot = null; } }}
       ondrop={drop}>
       {#each rows as x (x.e.id)}
         {@const isCur = x.e.id === app.perform?.currentEntryId}
@@ -284,6 +309,9 @@
           class:cur={isCur}
           class:next={isNext}
           class:sel={selSet.has(x.e.id)}
+          class:repeat={x.repeat}
+          class:filling={app.fillingSlot === x.e.id}
+          class:dropslot={dropSlot === x.e.id}
           data-entry={x.e.id}
           style:--c={x.shown[0]?.color ?? NEUTRAL}
           role="option"
@@ -292,7 +320,7 @@
           ondragstart={(ev) => dragStart(ev, x.e)}
           ondragover={(ev) => dragOver(ev, x.i)}
           onclick={(ev) => select(ev, x.e)}
-          ondblclick={() => preview(x.e)}
+          ondblclick={() => choose(x.e)}
           oncontextmenu={(ev) => openMenu(ev, x.e)}
           onkeydown={() => {}}
           tabindex="-1"
@@ -301,17 +329,23 @@
           <span class="stripe"></span>
           <div class="body">
             <div class="l1">
-              <span class="sname" class:unmapped={!x.e.label && x.shown.some((s) => s.unmapped)}
+              <span class="sname" class:unmapped={!customLabel(x.r?.version, x.e) && x.shown.some((s) => s.unmapped)}
                 title={x.shown.map((s) => (s.unmapped ? `${s.name}: not a ${app.profile?.name} style` : s.club && s.name !== app.styleName(s.key) ? `${s.name} (your ${app.styleName(s.key)})` : s.name)).join("\n")}
                 >{x.label || "—"}</span>
               {#if x.r}
                 <span class="t" title={x.r.track.title}>{x.r.track.title}</span>
               {:else}
-                <span class="t slot">{x.shown.length ? `Pick a ${x.shown.map((s) => s.name).join(" / ")}` : "Empty slot"}</span>
+                <span class="t slot">{x.shown.length ? `${x.shown.map((s) => s.name).join(" / ")} slot` : "Empty slot"}</span>
               {/if}
             </div>
             <div class="l2">
-              {#if x.repeat}<span class="badge tag" style:--c="var(--yellow)" title="Already played in this set">played</span>{/if}
+              {#if !x.r}
+                <button class="small pick" class:on={app.fillingSlot === x.e.id}
+                  onclick={(ev) => { ev.stopPropagation(); if (app.fillingSlot === x.e.id) app.fillingSlot = null; else startFillingSlot(x.e); }}>
+                  {app.fillingSlot === x.e.id ? "Choosing… (Cancel)" : "Choose Song…"}
+                </button>
+                {#if app.fillingSlot === x.e.id}<span class="hint">or drag a song here</span>{/if}
+              {/if}
               {#if x.r}<span class="a">{x.r.track.artist}{#if app.versionLabel(x.r.version, x.r.track)} · {x.r.version.name}{/if}</span>{/if}
               {#each x.e.tags ?? [] as tag}
                 {@const t = app.profile?.tags.find((d) => d.id === tag)}
@@ -363,6 +397,13 @@
   .entry.played { opacity: 0.45; }
   .entry.skipped { opacity: 0.35; }
   .entry.skipped .t { text-decoration: line-through; }
+  /* Already played earlier in this set. */
+  .entry.repeat .t, .entry.repeat .a { color: var(--text-faint); }
+  .entry.filling { box-shadow: inset 0 0 0 1px var(--yellow); }
+  .entry.dropslot { background: color-mix(in srgb, var(--blue) 25%, transparent); }
+  .pick { height: 20px; padding: 0 8px; }
+  .pick.on { border-color: var(--yellow); color: var(--yellow); }
+  .hint { color: var(--text-faint); font-size: var(--fs-xs); }
   .n { text-align: right; color: var(--text-faint); font-size: var(--fs-xs); display: flex; justify-content: flex-end; }
   .cur .n { color: var(--main); }
   .stripe { width: 4px; align-self: stretch; border-radius: 2px; background: var(--c); }

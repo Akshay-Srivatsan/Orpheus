@@ -6,8 +6,8 @@ import { playback, playedDurationMs, tempoFit, bpmForStyle } from "./tempo";
 import type { Crate, Id, Profile, Row, StyleLibrary } from "./types";
 
 export type SmartField =
-  | "style" | "bpm" | "tempoFit" | "duration" | "energy" | "rhythm" | "rating" | "text" | "source"
-  | "familiar" | "plays" | "lastPlayed" | "added" | "crate" | "tag";
+  | "style" | "bpm" | "tempoFit" | "meter" | "duration" | "text" | "source"
+  | "plays" | "lastPlayed" | "added" | "crate" | "tag";
 
 export interface SmartCondition {
   field: SmartField;
@@ -70,6 +70,15 @@ export const SMART_FIELDS: SmartFieldDef[] = [
     ],
   },
   {
+    field: "meter",
+    label: "Meter",
+    ops: [
+      { op: "triple", label: "is triple (3/4, 6/8)", input: "none" },
+      { op: "duple", label: "is duple (2/4, 4/4)", input: "none" },
+      { op: "isEmpty", label: "is unknown", input: "none" },
+    ],
+  },
+  {
     field: "duration",
     label: "Length",
     ops: [
@@ -77,9 +86,6 @@ export const SMART_FIELDS: SmartFieldDef[] = [
       { op: "atLeast", label: "is at least (seconds)", input: "number" },
     ],
   },
-  { field: "energy", label: "Energy", ops: [num("atLeast", "is at least"), num("atMost", "is at most"), { op: "isEmpty", label: "is not rated", input: "none" }] },
-  { field: "rhythm", label: "Beat clarity", ops: [num("atLeast", "is at least"), num("atMost", "is at most"), { op: "isEmpty", label: "is not rated", input: "none" }] },
-  { field: "rating", label: "Rating", ops: [num("atLeast", "is at least"), num("atMost", "is at most"), { op: "isEmpty", label: "is not rated", input: "none" }] },
   {
     field: "text",
     label: "Title, artist, album or notes",
@@ -89,7 +95,6 @@ export const SMART_FIELDS: SmartFieldDef[] = [
     ],
   },
   { field: "source", label: "Source", ops: [{ op: "is", label: "is", input: "source" }, { op: "isNot", label: "is not", input: "source" }] },
-  { field: "familiar", label: "Familiar / classic", ops: [{ op: "isTrue", label: "yes", input: "none" }, { op: "isFalse", label: "no", input: "none" }] },
   { field: "plays", label: "Times played", ops: [num("atLeast", "is at least"), num("atMost", "is at most")] },
   {
     field: "lastPlayed",
@@ -102,7 +107,7 @@ export const SMART_FIELDS: SmartFieldDef[] = [
   },
   { field: "added", label: "Added", ops: [{ op: "withinDays", label: "in the last (days)", input: "days" }] },
   { field: "crate", label: "Crate", ops: [{ op: "in", label: "contains it", input: "crate" }, { op: "notIn", label: "doesn't contain it", input: "crate" }] },
-  { field: "tag", label: "Version tag", ops: [{ op: "has", label: "includes", input: "tag" }, { op: "lacks", label: "doesn't include", input: "tag" }] },
+  { field: "tag", label: "Tag", ops: [{ op: "has", label: "includes", input: "tag" }, { op: "lacks", label: "doesn't include", input: "tag" }] },
 ];
 
 export function fieldDef(f: SmartField): SmartFieldDef {
@@ -181,9 +186,6 @@ function test(cond: SmartCondition, row: Row, ctx: SmartContext, depth: number):
       const secs = playedDurationMs(t, v, null, pb.rate, { fadeSeconds: ctx.fadeSeconds, trimSilence: ctx.trimSilence }) / 1000;
       return cmp(secs, cond.op, cond.value);
     }
-    case "energy": return cmp(t.energy, cond.op, cond.value);
-    case "rhythm": return cmp(t.rhythm, cond.op, cond.value);
-    case "rating": return cmp(t.rating, cond.op, cond.value);
     case "plays": return cmp(t.playCount, cond.op, cond.value);
     case "text": {
       const q = String(cond.value ?? "").toLowerCase().trim();
@@ -195,7 +197,11 @@ function test(cond: SmartCondition, row: Row, ctx: SmartContext, depth: number):
       const has = t.sources.some((s) => s.kind === cond.value);
       return cond.op === "isNot" ? !has : has;
     }
-    case "familiar": return cond.op === "isFalse" ? !t.familiar : !!t.familiar;
+    case "meter": {
+      const m = t.beatsPerBar ?? null;
+      if (cond.op === "isEmpty") return m == null;
+      return cond.op === "triple" ? m === 3 || m === 6 : m === 2 || m === 4;
+    }
     case "lastPlayed": {
       const now = ctx.now ?? Date.now();
       const last = t.lastPlayedAt;

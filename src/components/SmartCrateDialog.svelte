@@ -25,13 +25,13 @@
   const preview = $derived(
     evaluate($state.snapshot(rules) as SmartRules, app.rows, { ...app.smartCtx, crates: app.crates.filter((c) => c.id !== editing?.id) }),
   );
-  const tags = $derived(app.profile?.tags ?? []);
+  const tags = $derived(app.myTags);
   const otherCrates = $derived(app.crates.filter((c) => c.id !== editing?.id));
 
   function setField(c: SmartCondition, f: SmartField) {
     Object.assign(c, defaultCondition(f));
     if (f === "crate") c.value = otherCrates[0]?.id ?? null;
-    if (f === "tag") c.value = tags[0]?.id ?? null;
+    if (f === "tag") c.value = tags[0]?.key ?? null;
     if (f === "bpm" || f === "style") c.value = app.filterStyle ?? app.myStyles[0]?.key ?? null;
   }
 
@@ -104,7 +104,7 @@
             </select>
           {:else if op?.input === "tag"}
             <select bind:value={c.value}>
-              {#each tags as t}<option value={t.id}>{t.name}</option>{/each}
+              {#each tags as t}<option value={t.key}>{t.name}</option>{/each}
             </select>
           {/if}
           <span class="spacer"></span>
