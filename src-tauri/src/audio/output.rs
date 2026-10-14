@@ -17,6 +17,8 @@ pub struct OutputConfig {
     pub master_channels: [u16; 2],
     pub cue_device: Option<String>,
     pub cue_channels: [u16; 2],
+    /// Output latency (device buffer) in ms.
+    pub buffer_ms: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -141,7 +143,7 @@ fn find_device(id: &Option<String>) -> Result<cpal::Device> {
     }
 }
 
-fn choose_config(device: &cpal::Device, needed_channels: u16, preferred_rate: Option<u32>) -> Result<(StreamConfig, SampleFormat)> {
+fn choose_config(device: &cpal::Device, needed_channels: u16, preferred_rate: Option<u32>, buffer_ms: u32) -> Result<(StreamConfig, SampleFormat)> {
     let default = device.default_output_config().context("no default output config")?;
     let want_rate = preferred_rate.unwrap_or(default.sample_rate());
     let mut best: Option<cpal::SupportedStreamConfigRange> = None;
@@ -168,12 +170,22 @@ fn choose_config(device: &cpal::Device, needed_channels: u16, preferred_rate: Op
             let rate = want_rate.clamp(c.min_sample_rate(), c.max_sample_rate());
             let fmt = c.sample_format();
             let sc = c.with_sample_rate(rate);
-            Ok((StreamConfig { channels: sc.channels(), sample_rate: rate, buffer_size: cpal::BufferSize::Default }, fmt))
+            Ok((StreamConfig { channels: sc.channels(), sample_rate: rate, buffer_size: device_buffer(c.buffer_size(), rate, buffer_ms) }, fmt))
         }
         None => {
             // Device has fewer channels than requested; use its default.
             Ok((default.config(), default.sample_format()))
         }
+    }
+}
+
+/// Device buffer for a latency of `buffer_ms`: a fixed size (some systems'
+/// defaults are tiny and underrun), within what the device supports.
+fn device_buffer(supported: &cpal::SupportedBufferSize, rate: u32, buffer_ms: u32) -> cpal::BufferSize {
+    let want = (rate as u64 * buffer_ms.clamp(10, 200) as u64 / 1000).next_power_of_two() as u32;
+    match supported {
+        cpal::SupportedBufferSize::Range { min, max } => cpal::BufferSize::Fixed(want.clamp(*min, *max)),
+        cpal::SupportedBufferSize::Unknown => cpal::BufferSize::Default,
     }
 }
 
@@ -214,7 +226,7 @@ fn open_streams(
         if cue_same_device {
             needed = needed.max(config.cue_channels.iter().max().copied().unwrap_or(1) + 1);
         }
-        match choose_config(dev, needed, None) {
+        match choose_config(dev, needed, None, config.buffer_ms) {
             Ok((sc, fmt)) => {
                 rate = sc.sample_rate;
                 let mut assigns: Vec<Assign> = master_taps
@@ -245,7 +257,7 @@ fn open_streams(
 
     if let (Some(dev), false) = (&cue_dev, cue_same_device) {
         let needed = config.cue_channels.iter().max().copied().unwrap_or(1) + 1;
-        match choose_config(dev, needed, Some(rate)) {
+        match choose_config(dev, needed, Some(rate), config.buffer_ms) {
             Ok((sc, fmt)) => {
                 let assigns = cue_taps
                     .iter()
@@ -293,6 +305,9 @@ fn build_stream(
     Ok(stream)
 }
 
+/// Fill level a follower ring is held at (the clock ring stays near full).
+const FOLLOWER_FILL: f64 = 0.7;
+
 #[inline]
 fn pop_frame(c: &mut rtrb::Consumer<f32>) -> [f32; 2] {
     if c.slots() >= 2 {
@@ -339,8 +354,17 @@ where
                 let playing = a.tap.playing.load(Ordering::Relaxed);
                 let Some(mut guard) = a.tap.ring.try_lock() else { continue };
                 let Some(ring) = guard.as_mut() else { continue };
-                let step = a.tap.rate.load(Ordering::Relaxed) as f64 / device_rate;
-                let resample = (step - 1.0).abs() > 1e-9;
+                let mut step = a.tap.rate.load(Ordering::Relaxed) as f64 / device_rate;
+                if ring.follower {
+                    // Keep the ring half full: speed up slightly when it fills,
+                    // slow down when it drains (at most 0.2%, inaudible).
+                    let fill = ring.consumer.slots() as f64 / ring.consumer.buffer().capacity().max(1) as f64;
+                    let target = ((fill - FOLLOWER_FILL) * 0.004).clamp(-0.002, 0.002);
+                    ring.drift += (target - ring.drift) * 0.01;
+                    step *= 1.0 + ring.drift;
+                }
+                let resample = ring.follower || (step - 1.0).abs() > 1e-9;
+                let mut starved = 0u64;
                 for f in 0..frames {
                     let target = if playing { 1.0 } else { 0.0 };
                     if !playing && ring.ramp <= 0.0 {
@@ -350,6 +374,9 @@ where
                         ring.ramp = (ring.ramp + ramp_step).min(1.0);
                     } else if ring.ramp > target {
                         ring.ramp = (ring.ramp - ramp_step).max(0.0);
+                    }
+                    if playing && ring.consumer.slots() < 2 {
+                        starved += 1;
                     }
                     let fr = if !resample {
                         pop_frame(&mut ring.consumer)
@@ -383,6 +410,9 @@ where
                     } else {
                         master_peak = master_peak.max(p);
                     }
+                }
+                if starved > 0 {
+                    a.tap.underruns.fetch_add(starved, Ordering::Relaxed);
                 }
             }
             for (d, s) in data.iter_mut().zip(mix.iter()) {

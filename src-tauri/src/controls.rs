@@ -17,6 +17,9 @@ const JOG_FINE_SECS_PER_REV: f64 = 1.8;
 const JOG_COARSE_SECS_PER_REV: f64 = 12.0;
 /// Length of the snippet played while scrubbing a paused deck.
 const SCRUB_SNIPPET: Duration = Duration::from_millis(110);
+/// How long after a scrub seek the deck's reported position is not trusted
+/// (seeks are applied asynchronously; the old position would pull it back).
+const SCRUB_SETTLE: Duration = Duration::from_millis(400);
 
 #[derive(Default)]
 pub struct DeckControlState {
@@ -29,6 +32,9 @@ pub struct DeckControlState {
     /// CUE is held for a preview from the cue point.
     pub cue_preview: bool,
     pub jog_touch: bool,
+    /// Last scrub seek: (target, when, deck was playing). Further scrubbing
+    /// continues from here until the deck has caught up.
+    pub scrub_anchor: Option<(f64, Instant, bool)>,
 }
 
 #[derive(Default)]
@@ -145,6 +151,16 @@ impl App {
 
     /// Moves the playhead by `secs` (coalesced; plays a snippet when paused).
     pub fn deck_nudge_position(&self, deck: usize, secs: f64) -> Result<()> {
+        self.scrub(deck, |base| base + secs)
+    }
+
+    /// Scrub to an absolute position (waveform drag).
+    pub fn deck_scrub_to(&self, deck: usize, secs: f64) -> Result<()> {
+        self.scrub(deck, |_| secs)
+    }
+
+    /// Sets the coalesced scrub target from the current scrub position.
+    fn scrub(&self, deck: usize, target: impl FnOnce(f64) -> f64) -> Result<()> {
         let d = &self.decks[deck];
         self.require_loaded(deck)?;
         if self.protected(deck) {
@@ -152,20 +168,18 @@ impl App {
         }
         let mut cs = self.deck_ctl.lock();
         let st = &mut cs[deck];
-        let base = st.pending_seek.unwrap_or_else(|| d.position_secs());
+        let base = st.pending_seek.unwrap_or_else(|| match st.scrub_anchor {
+            Some((at_secs, at, playing)) if at.elapsed() < SCRUB_SETTLE => {
+                at_secs + if playing { at.elapsed().as_secs_f64() * d.tempo() } else { 0.0 }
+            }
+            _ => d.position_secs(),
+        });
         let snap = d.snapshot();
         let end = snap.end_ms.unwrap_or(snap.duration_ms) as f64 / 1000.0;
-        st.pending_seek = Some((base + secs).clamp(0.0, (end - 0.05).max(0.0)));
+        st.pending_seek = Some(target(base).clamp(0.0, (end - 0.05).max(0.0)));
         // Snippets only in headphones: never while the room can hear the deck.
         st.snippet = d.status() != "playing" && !d.is_on_air();
         Ok(())
-    }
-
-    /// Scrub to an absolute position (waveform drag).
-    pub fn deck_scrub_to(&self, deck: usize, secs: f64) -> Result<()> {
-        let cur = self.decks[deck].position_secs();
-        let pending = self.deck_ctl.lock()[deck].pending_seek;
-        self.deck_nudge_position(deck, secs - pending.unwrap_or(cur))
     }
 
     pub fn deck_jog(&self, deck: usize, ticks: i32) -> Result<()> {
@@ -182,6 +196,7 @@ impl App {
             let d = &self.decks[i];
             if let Some(secs) = st.pending_seek.take() {
                 d.seek(secs);
+                st.scrub_anchor = Some((secs, now, d.status() == "playing"));
                 if st.snippet && d.status() == "paused" {
                     d.set_audible(true);
                     st.snippet_until = Some(now + SCRUB_SNIPPET);

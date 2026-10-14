@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { evaluate, type SmartContext, type SmartRules } from "./smart";
 import type { Crate, Profile, Row, Track, Version } from "./types";
 
-const profileModules = import.meta.glob("../../src-tauri/profiles/*.json", { eager: true, import: "default" });
+const profileModules = import.meta.glob("../../examples/clubs/*.json", { eager: true, import: "default" });
 const dancebreak = () =>
   structuredClone(Object.entries(profileModules).find(([p]) => p.endsWith("/dancebreak.json"))![1]) as Profile;
 

@@ -11,6 +11,7 @@
 pub mod deck;
 pub mod output;
 pub mod priority;
+pub mod stretch;
 pub mod source;
 
 use parking_lot::Mutex;
@@ -60,11 +61,17 @@ pub struct TapRing {
     pub cur: [f32; 2],
     /// Smoothed routing gain (avoids clicks when a deck goes on/off air).
     pub gain: f32,
+    /// This copy doesn't pace the deck (it's on another device than the
+    /// clock): its consumption is nudged to keep the ring half full, which
+    /// absorbs the drift between the two devices' clocks.
+    pub follower: bool,
+    /// Current drift correction (playback-rate factor - 1).
+    pub drift: f64,
 }
 
 impl TapRing {
-    pub fn new(consumer: rtrb::Consumer<f32>) -> Self {
-        Self { consumer, ramp: 0.0, frac: 1.0, prev: [0.0; 2], cur: [0.0; 2], gain: 0.0 }
+    pub fn new(consumer: rtrb::Consumer<f32>, follower: bool) -> Self {
+        Self { consumer, ramp: 0.0, frac: 1.0, prev: [0.0; 2], cur: [0.0; 2], gain: 0.0, follower, drift: 0.0 }
     }
 }
 
@@ -76,11 +83,13 @@ pub struct Tap {
     pub gain: AtomicF32,
     /// Rate (Hz) the deck renders at.
     pub rate: AtomicU32,
+    /// Frames the output had to fill with silence while playing (diagnostics).
+    pub underruns: AtomicU64,
 }
 
 impl Tap {
     pub fn new(playing: Arc<AtomicBool>, gain: f32) -> Arc<Self> {
-        Arc::new(Self { ring: Mutex::new(None), playing, gain: AtomicF32::new(gain), rate: AtomicU32::new(48000) })
+        Arc::new(Self { ring: Mutex::new(None), playing, gain: AtomicF32::new(gain), rate: AtomicU32::new(48000), underruns: AtomicU64::new(0) })
     }
 }
 

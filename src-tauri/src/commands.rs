@@ -489,11 +489,13 @@ pub struct StylesInfo {
     pub library: StyleLibrary,
     /// How many versions are tagged with each style key.
     pub usage: std::collections::BTreeMap<String, usize>,
+    /// How many versions carry each of your tags.
+    pub tag_usage: std::collections::BTreeMap<String, usize>,
 }
 
 #[tauri::command]
 pub async fn styles_get(app: S<'_>) -> Res<StylesInfo> {
-    Ok(StylesInfo { library: app.style_library(), usage: app.store.style_usage() })
+    Ok(StylesInfo { library: app.style_library(), usage: app.store.style_usage(), tag_usage: app.store.tag_usage() })
 }
 
 #[tauri::command]
@@ -528,6 +530,35 @@ pub async fn styles_rekey(app: S<'_>, from: String, to: Option<String>) -> Res<(
     crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
     crate::app::emit(&app.handle, "styles-changed", ());
     app.emit_perform();
+    Ok(())
+}
+
+/// Renames one of your tags everywhere (onto an existing tag: merges);
+/// `to = null` deletes it from every song.
+#[tauri::command]
+pub async fn tags_rekey(app: S<'_>, from: String, to: Option<String>) -> Res<()> {
+    let to = to.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    let mut lib = app.style_library();
+    match to.as_deref() {
+        Some(t) if lib.tags.iter().any(|s| s.key == t) => lib.tags.retain(|s| s.key != from),
+        Some(t) => lib.tags.iter_mut().filter(|s| s.key == from).for_each(|s| s.key = t.to_string()),
+        None => lib.tags.retain(|s| s.key != from),
+    }
+    app.store.save_style_library(lib).map_err(ae)?;
+    app.store.rekey_tag(&from, to.as_deref()).map_err(ae)?;
+    crate::app::emit(&app.handle, "crates-changed", ());
+    crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
+    crate::app::emit(&app.handle, "styles-changed", ());
+    Ok(())
+}
+
+/// Adds (`on`) or removes one of your tags on versions.
+#[tauri::command]
+pub async fn tag_set(app: S<'_>, tag: String, version_ids: Vec<Id>, on: bool) -> Res<()> {
+    for v in &version_ids {
+        app.store.set_version_tag(v, &tag, on).map_err(ae)?;
+    }
+    crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
     Ok(())
 }
 

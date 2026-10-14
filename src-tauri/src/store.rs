@@ -910,6 +910,17 @@ impl Store {
         Ok(())
     }
 
+    /// Adds (`on`) or removes one of your tags on a version.
+    pub fn set_version_tag(&self, version_id: &str, tag: &str, on: bool) -> Result<()> {
+        let (v, _) = self.version(version_id)?;
+        let has = v.tags.iter().any(|t| t == tag);
+        if has != on {
+            let tags = if on { [v.tags.clone(), vec![tag.to_string()]].concat() } else { v.tags.iter().filter(|t| *t != tag).cloned().collect() };
+            self.version_update(version_id, &VersionPatch { tags: Some(tags), ..Default::default() })?;
+        }
+        Ok(())
+    }
+
     pub fn crate_remove(&self, id: &str, version_ids: &[Id]) -> Result<()> {
         self.with_crate(id, |c| c.version_ids.retain(|v| !version_ids.contains(v)))
     }
@@ -1102,6 +1113,12 @@ impl Store {
                 return Err(anyhow!("every style needs a unique, non-empty key (\"{}\")", s.key));
             }
         }
+        let mut seen = std::collections::HashSet::new();
+        for t in &lib.tags {
+            if t.key.trim().is_empty() || !seen.insert(t.key.clone()) {
+                return Err(anyhow!("every tag needs a unique, non-empty key (\"{}\")", t.key));
+            }
+        }
         write_json(&self.library_dir().join("styles.json"), &lib)?;
         self.inner.write().styles = Some(lib);
         Ok(())
@@ -1109,15 +1126,73 @@ impl Store {
 
     /// Style keys used by versions, with how many versions use each.
     pub fn style_usage(&self) -> BTreeMap<String, usize> {
+        self.version_key_usage(|v| &v.styles)
+    }
+
+    /// Your tag keys used by versions, with how many versions use each.
+    pub fn tag_usage(&self) -> BTreeMap<String, usize> {
+        self.version_key_usage(|v| &v.tags)
+    }
+
+    fn version_key_usage(&self, keys: impl Fn(&Version) -> &Vec<String>) -> BTreeMap<String, usize> {
         let mut m = BTreeMap::new();
         for t in self.inner.read().tracks.values() {
             for v in &t.versions {
-                for s in &v.styles {
+                for s in keys(v) {
                     *m.entry(s.clone()).or_insert(0) += 1;
                 }
             }
         }
         m
+    }
+
+    /// Replaces one of your tag keys on every version and smart-crate
+    /// condition (`None` removes it).
+    pub fn rekey_tag(&self, from: &str, to: Option<&str>) -> Result<()> {
+        let (tracks, crates): (Vec<TrackRecord>, Vec<Crate>) = {
+            let mut inner = self.inner.write();
+            let mut ts = vec![];
+            for t in inner.tracks.values_mut() {
+                let mut hit = false;
+                for v in t.versions.iter_mut().filter(|v| v.tags.iter().any(|s| s == from)) {
+                    v.tags = rekey(&v.tags, from, to);
+                    hit = true;
+                }
+                if hit {
+                    ts.push(t.clone());
+                }
+            }
+            let mut cs = vec![];
+            for c in inner.crates.values_mut() {
+                let Some(conds) = c.smart.as_mut().and_then(|v| v.get_mut("conditions")).and_then(|v| v.as_array_mut()) else {
+                    continue;
+                };
+                let before = conds.clone();
+                conds.retain_mut(|cond| {
+                    if cond["field"].as_str() != Some("tag") || cond["value"].as_str() != Some(from) {
+                        return true;
+                    }
+                    match to {
+                        Some(t) => {
+                            cond["value"] = serde_json::Value::String(t.to_string());
+                            true
+                        }
+                        None => false,
+                    }
+                });
+                if *conds != before {
+                    cs.push(c.clone());
+                }
+            }
+            (ts, cs)
+        };
+        for t in &tracks {
+            self.save_track(t)?;
+        }
+        for c in &crates {
+            self.save_crate(c)?;
+        }
+        Ok(())
     }
 
     /// Replaces a style key on every version, setlist entry and smart-crate

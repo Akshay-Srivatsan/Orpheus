@@ -114,6 +114,8 @@ pub struct Settings {
     pub fade_out_ms: Option<u32>,
     /// Pitch-preserving tempo changes.
     pub keylock: bool,
+    /// Time-stretch engine: `signalsmith` (default), `soundtouch` or `bungee`.
+    pub stretch_engine: String,
     /// Range of the tempo sliders / MIDI pitch faders in percent.
     pub tempo_range_pct: f64,
     pub auto_gain: bool,
@@ -145,6 +147,7 @@ impl Default for Settings {
             manual_next_fade_ms: 2500,
             fade_out_ms: None,
             keylock: true,
+            stretch_engine: "signalsmith".into(),
             tempo_range_pct: 10.0,
             auto_gain: false,
             target_loudness_db: -14.0,
@@ -206,11 +209,9 @@ pub struct TagCore {
     pub announce: bool,
 }
 
-pub const BUILTIN_PROFILES: &[&str] = &[
-    include_str!("../profiles/none.json"),
-    include_str!("../profiles/dancebreak.json"),
-    include_str!("../profiles/powers.json"),
-];
+/// Only "No club" is built in; clubs are your own (or imported, see
+/// `examples/clubs/`).
+pub const BUILTIN_PROFILES: &[&str] = &[include_str!("../profiles/none.json")];
 
 impl Settings {
     pub fn library_path(&self, data_dir: &std::path::Path) -> std::path::PathBuf {

@@ -6,7 +6,6 @@ use anyhow::Result;
 use crossbeam_channel::{unbounded, Receiver, RecvTimeoutError, Sender};
 use parking_lot::Mutex;
 use serde::Serialize;
-use signalsmith_stretch::Stretch;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -104,6 +103,8 @@ pub struct DeckShared {
     position: AtomicF64,
     pub tempo: AtomicF64,
     pub keylock: AtomicBool,
+    /// Time-stretch engine for the next song loaded (`audio::stretch::Engine`).
+    pub stretch_engine: Mutex<String>,
     pub trim_db: AtomicF64,
     pub track_gain_db: AtomicF64,
     pub pfl: AtomicBool,
@@ -145,6 +146,7 @@ impl Deck {
             position: AtomicF64::new(0.0),
             tempo: AtomicF64::new(1.0),
             keylock: AtomicBool::new(true),
+            stretch_engine: Mutex::new(String::new()),
             trim_db: AtomicF64::new(0.0),
             track_gain_db: AtomicF64::new(0.0),
             pfl: AtomicBool::new(false),
@@ -277,6 +279,11 @@ impl Deck {
         self.shared.keylock.store(on, Ordering::Relaxed);
     }
 
+    /// Time-stretch engine for songs loaded from now on.
+    pub fn set_stretch_engine(&self, engine: &str) {
+        *self.shared.stretch_engine.lock() = engine.to_string();
+    }
+
     pub fn set_trim_db(&self, db: f64) {
         self.shared.trim_db.set(db.clamp(-24.0, 12.0));
     }
@@ -392,7 +399,7 @@ struct Worker {
     events: Sender<DeckEvent>,
     src: Option<Box<dyn Source>>,
     src_rate: u32,
-    stretch: Option<Stretch>,
+    stretch: Option<Box<dyn super::stretch::TimeStretch>>,
     transpose: f32,
     /// (producer, is_clock)
     prods: Vec<(rtrb::Producer<f32>, bool)>,
@@ -480,8 +487,11 @@ impl Worker {
 
     fn make_rings(&mut self) {
         let rate = self.sh.rate.load(Ordering::Relaxed);
-        let ms = self.sh.buffer_ms.load(Ordering::Relaxed).clamp(20, 500);
-        let frames = ((rate as u64 * ms as u64 / 1000) as usize).max(4096);
+        // The ring holds several device buffers' worth so a briefly delayed
+        // worker never starves the output (play/pause and volume act in the
+        // output callback, and seeks flush the ring, so this adds no lag there).
+        let ms = (self.sh.buffer_ms.load(Ordering::Relaxed) * 4).clamp(250, 1000);
+        let frames = (rate as u64 * ms as u64 / 1000) as usize;
         self.prods.clear();
         // The master output paces playback; the headphone copy follows (and
         // drops samples if that device runs slightly fast or slow).
@@ -491,7 +501,7 @@ impl Worker {
         for (tap, clock) in taps {
             let (p, c) = rtrb::RingBuffer::<f32>::new(frames * 2);
             tap.rate.store(rate, Ordering::Relaxed);
-            *tap.ring.lock() = Some(super::TapRing::new(c));
+            *tap.ring.lock() = Some(super::TapRing::new(c, !clock));
             self.prods.push((p, clock));
         }
         self.clock_capacity = frames * 2;
@@ -579,7 +589,7 @@ impl Worker {
             }
         }
         self.src_rate = src.sample_rate();
-        self.stretch = Some(Stretch::preset_default(2, self.src_rate));
+        self.stretch = Some(super::stretch::create(super::stretch::Engine::from_setting(&self.sh.stretch_engine.lock()), self.src_rate));
         self.transpose = 0.0;
         self.written_pos = src.position_secs();
         let duration = src.duration_secs().unwrap_or(0.0);
@@ -689,13 +699,11 @@ impl Worker {
             (self.src_rate as f64 / out_rate * tempo) as f32
         };
         if (transpose - self.transpose).abs() > 1e-6 {
-            stretch.set_transpose_factor(transpose, None);
+            stretch.set_pitch(transpose);
             self.transpose = transpose;
         }
         if n == 0 {
             if self.eof && !self.tail_flushed {
-                let lat = stretch.output_latency();
-                self.outbuf.resize(lat * 2, 0.0);
                 stretch.flush(&mut self.outbuf);
                 self.tail_flushed = true;
                 let mut out = std::mem::take(&mut self.outbuf);
@@ -761,7 +769,7 @@ impl Worker {
         let latency = self
             .stretch
             .as_ref()
-            .map(|s| (s.input_latency() + s.output_latency()) as f64 / self.src_rate as f64)
+            .map(|s| s.latency_src_frames() / self.src_rate as f64)
             .unwrap_or(0.0);
         let start = self.sh.info.lock().start;
         let pos = (self.written_pos - buffered - latency).max(start.min(self.written_pos));

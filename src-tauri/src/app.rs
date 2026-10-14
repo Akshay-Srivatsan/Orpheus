@@ -108,6 +108,7 @@ impl App {
         ];
         for d in &decks {
             d.set_keylock(settings.keylock);
+            d.set_stretch_engine(&settings.stretch_engine);
         }
         let outputs = Outputs::new(levels.clone());
         let (analysis_tx, analysis_rx) = unbounded();
@@ -208,6 +209,9 @@ impl App {
                 d.set_keylock(new.keylock);
             }
         }
+        for d in &self.decks {
+            d.set_stretch_engine(&new.stretch_engine);
+        }
         if serde_json::to_string(&old.midi)? != serde_json::to_string(&new.midi)? {
             let (m, enabled, auto) = self.current_mapping();
             if let Some(midi) = self.midi.get() {
@@ -305,6 +309,7 @@ impl App {
             master_channels: s.master_channels,
             cue_device: s.cue_device,
             cue_channels: s.cue_channels,
+            buffer_ms: s.buffer_ms,
         };
         let master_taps = self.decks.iter().map(|d| d.shared.master_tap.clone()).collect();
         let cue_taps = self.decks.iter().map(|d| d.shared.cue_tap.clone()).collect();
@@ -496,6 +501,18 @@ impl App {
         self.queue_analysis(id.clone(), true);
     }
 
+    /// Logs output underruns (frames played as silence) since the last call.
+    fn log_underruns(&self) {
+        for (i, d) in self.decks.iter().enumerate() {
+            for (name, tap) in [("room", &d.shared.master_tap), ("headphones", &d.shared.cue_tap)] {
+                let n = tap.underruns.swap(0, Ordering::Relaxed);
+                if n > 0 {
+                    log::warn!("deck {}: {n} frames of underrun on the {name} output", if i == 0 { "A" } else { "B" });
+                }
+            }
+        }
+    }
+
     pub fn queue_analysis(&self, id: Id, priority: bool) {
         let _ = self.analysis_tx.send((id, priority));
     }
@@ -529,6 +546,9 @@ impl App {
                     app.register_audible();
                     if tick % 5 == 0 {
                         app.auto_load();
+                    }
+                    if tick % 100 == 0 {
+                        app.log_underruns();
                     }
                     let snaps = app.deck_snapshots();
                     let key = serde_json::to_string(&snaps).unwrap_or_default();

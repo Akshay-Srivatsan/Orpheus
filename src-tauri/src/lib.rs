@@ -85,6 +85,8 @@ pub fn run() {
             commands::styles_get,
             commands::styles_save,
             commands::styles_rekey,
+            commands::tags_rekey,
+            commands::tag_set,
             commands::profiles_list,
             commands::profile_save,
             commands::profile_delete,
