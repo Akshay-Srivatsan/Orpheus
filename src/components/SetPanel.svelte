@@ -60,9 +60,9 @@
     app.inspectEntry = entry.id;
     const r = entry.versionId ? app.versionMap.get(entry.versionId) : undefined;
     app.inspectTrack = r?.track.id ?? null;
-    // Selecting an empty slot shows matching songs in the library.
+    // Selecting an empty slot filters the library to its style.
     if (!entry.versionId && entry.style) {
-      app.view = { kind: "style", key: entry.style };
+      app.styleFilter = [entry.style];
       app.selected = [];
     }
   }

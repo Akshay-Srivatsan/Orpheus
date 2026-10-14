@@ -18,6 +18,8 @@
   import TopBar from "./TopBar.svelte";
   import Transport from "./Transport.svelte";
   import Icon from "./Icon.svelte";
+  import SmartCrateDialog from "./SmartCrateDialog.svelte";
+  import { describe } from "../lib/smart";
 
   let ready = $state(false);
   let dragging = $state(false);
@@ -59,8 +61,6 @@
     const v = app.view;
     switch (v.kind) {
       case "all": return "All Songs";
-      case "style": return app.styleName(v.key);
-      case "unstyled": return "No Dance Style";
       case "crate": return app.crates.find((c) => c.id === v.id)?.name ?? "Crate";
       case "setlist": return app.setlists.find((s) => s.id === v.id)?.name ?? "Setlist";
       case "history": return "History";
@@ -69,7 +69,7 @@
       case "spotify-playlist": return v.name;
     }
   });
-  const viewStyle = $derived(app.view.kind === "style" ? app.style(app.view.key) : undefined);
+  const viewCrate = $derived(app.view.kind === "crate" ? app.crates.find((c) => c.id === (app.view as { id: string }).id) : undefined);
 
   function typing(e: KeyboardEvent) {
     const t = e.target as HTMLElement;
@@ -111,9 +111,12 @@
         {:else}
           <div class="bhead">
             <div class="vt">
-              {#if viewStyle}<span class="sdot" style:background={viewStyle.color}></span>{/if}
+              {#if viewCrate?.smart}<Icon name="auto" size={15} />{/if}
               {viewTitle}
-              {#if viewStyle?.sweet}<span class="faint small num">{viewStyle.sweet[0]}–{viewStyle.sweet[1]} BPM{#if viewStyle.extended} (ok {viewStyle.extended[0]}–{viewStyle.extended[1]}){/if}</span>{/if}
+              {#if viewCrate?.smart}
+                <span class="faint small" title={viewCrate.smart.conditions.map((c) => describe(c, app)).join(viewCrate.smart.match === "any" ? "\nor " : "\nand ")}>smart crate</span>
+                <button class="plain small" onclick={() => (app.smartEditor = viewCrate!.id)}>Edit Rules…</button>
+              {/if}
             </div>
             <div class="search">
               <Icon name="search" size={13} />
@@ -150,6 +153,7 @@
   </div>
   {#if app.settingsOpen}<SettingsDialog />{/if}
   {#if app.newSetlistOpen}<NewSetlistDialog />{/if}
+  {#if app.smartEditor}<SmartCrateDialog />{/if}
   {#if dragging}<div class="dropzone">Drop music files or folders to add them to your library</div>{/if}
 {:else}
   <div class="loading">Loading Orpheus…</div>
@@ -165,7 +169,6 @@
   .tablewrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .bhead { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
   .vt { flex: 1; display: flex; align-items: center; gap: 8px; font: 600 var(--fs-md) var(--font-display); min-width: 0; }
-  .sdot { width: 10px; height: 10px; border-radius: 50%; }
   .small { font-size: var(--fs-sm); font-weight: 400; }
   .search { display: flex; align-items: center; gap: 4px; color: var(--text-faint); }
   .search input { width: 220px; }

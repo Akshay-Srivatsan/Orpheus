@@ -1,11 +1,13 @@
 <script lang="ts">
   import { api } from "../lib/api";
-  import { addToSet, app, audition, loadDeck } from "../lib/state.svelte";
+  import { evaluate } from "../lib/smart";
+  import { NO_STYLE, addToSet, app, audition, loadDeck } from "../lib/state.svelte";
   import { bpmForStyle, fmtBpm, fmtPct, fmtTime, playback, playedDurationMs, tempoFit } from "../lib/tempo";
   import type { HistoryItem, Id, Row } from "../lib/types";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
   import Icon from "./Icon.svelte";
   import StyleBadge from "./StyleBadge.svelte";
+  import StyleFilterBar from "./StyleFilterBar.svelte";
 
   type SortKey = "position" | "title" | "artist" | "version" | "style" | "bpm" | "time" | "energy" | "plays" | "played";
   let sortKey = $state<SortKey>("artist");
@@ -26,7 +28,7 @@
     key: string;
     position?: number;
     playedAt?: number;
-    /** Not labelled with the viewed style, but its tempo fits. */
+    /** Not labelled with the filtered style, but its tempo fits. */
     suggested?: boolean;
   }
 
@@ -36,25 +38,11 @@
     switch (v.kind) {
       case "all":
         return app.rows.map((r) => mk(r));
-      case "style": {
-        const labelled = app.rows.filter((r) => r.version.style === v.key).map((r) => mk(r));
-        // Suggest unlabelled songs whose tempo fits this style.
-        const st = app.style(v.key);
-        const have = new Set(labelled.map((r) => r.track.id));
-        const suggested = st && (st.sweet || st.extended)
-          ? app.rows
-              .filter((r) => !r.version.style && !have.has(r.track.id) && r.track.bpm)
-              .filter((r) => tempoFit(bpmForStyle(r.track.bpm, st), st) !== "outside")
-              .map((r) => mk(r, { key: "s-" + r.version.id, suggested: true }))
-          : [];
-        return [...labelled, ...suggested];
-      }
-      case "unstyled":
-        return app.rows.filter((r) => !r.version.style).map((r) => mk(r));
       case "missing":
         return app.rows.filter((r) => r.track.missing).map((r) => mk(r));
       case "crate": {
         const c = app.crates.find((c) => c.id === v.id);
+        if (c?.smart) return evaluate(c.smart, app.rows, smartCtx).map((r) => mk(r));
         return (c?.versionIds ?? []).flatMap((id, i) => {
           const r = app.versionMap.get(id);
           return r ? [mk(r, { position: i + 1 })] : [];
@@ -77,11 +65,36 @@
     }
   });
 
+  const smartCtx = $derived({
+    profile: app.profile,
+    crates: app.crates,
+    library: app.rows,
+    fadeSeconds: app.fadeSeconds,
+    trimSilence: app.settings?.trimSilence ?? true,
+  });
+
+  /** The current view's rows narrowed by the dance-style filter. */
+  const styled = $derived.by((): ViewRow[] => {
+    const f = app.styleFilter;
+    if (!f.length) return baseRows;
+    const keys = new Set(f);
+    const labelled = baseRows.filter((r) => (r.version.style ? keys.has(r.version.style) : keys.has(NO_STYLE)));
+    // With one style chosen, also suggest unlabelled songs from this view whose tempo fits it.
+    const st = app.style(app.filterStyle);
+    if (!st || !app.suggestByTempo || !(st.sweet || st.extended)) return labelled;
+    const have = new Set(labelled.map((r) => r.track.id));
+    const suggested = baseRows
+      .filter((r) => !r.version.style && !have.has(r.track.id) && r.track.bpm)
+      .filter((r) => tempoFit(bpmForStyle(r.track.bpm, st), st) !== "outside")
+      .map((r) => ({ ...r, key: "s-" + r.key, suggested: true }));
+    return [...labelled, ...suggested];
+  });
+
   const filtered = $derived.by(() => {
     const q = app.search.trim().toLowerCase();
-    if (!q) return baseRows;
+    if (!q) return styled;
     const words = q.split(/\s+/);
-    return baseRows.filter((r) => {
+    return styled.filter((r) => {
       const hay = `${r.track.title} ${r.track.artist} ${r.track.album} ${r.version.name} ${r.version.comment ?? ""} ${app.styleName(r.version.style)} ${r.track.notes ?? ""}`.toLowerCase();
       return words.every((w) => hay.includes(w));
     });
@@ -95,7 +108,7 @@
   const sorted = $derived.by(() => {
     const rows = filtered.map((r) => ({ r, i: info(r) }));
     const dir = sortAsc ? 1 : -1;
-    const naturalOrder = app.view.kind === "crate" || app.view.kind === "setlist" || app.view.kind === "history";
+    const naturalOrder = !!plainCrate || app.view.kind === "setlist" || app.view.kind === "history";
     const key = naturalOrder && sortKey === "position" ? "position" : sortKey;
     const val = (x: (typeof rows)[number]): string | number => {
       switch (key) {
@@ -122,7 +135,7 @@
   $effect(() => {
     // Crates and setlists default to their own order.
     const k = app.view.kind;
-    if (k === "crate" || k === "setlist") { sortKey = "position"; sortAsc = true; }
+    if ((k === "crate" && plainCrate) || k === "setlist") { sortKey = "position"; sortAsc = true; }
     else if (sortKey === "position") { sortKey = "artist"; sortAsc = true; }
   });
 
@@ -130,7 +143,9 @@
   const end = $derived(Math.min(sorted.length, Math.ceil((scrollTop + viewH) / ROW_H) + 10));
   const visible = $derived(sorted.slice(start, end));
   const selSet = $derived(new Set(app.selected));
-  const styleView = $derived(app.view.kind === "style" ? app.style(app.view.key) : undefined);
+  const styleView = $derived(app.style(app.filterStyle));
+  const viewCrate = $derived(app.view.kind === "crate" ? app.crates.find((c) => c.id === (app.view as { id: Id }).id) : undefined);
+  const plainCrate = $derived(viewCrate && !viewCrate.smart ? viewCrate : undefined);
 
   function sortBy(k: SortKey) {
     if (sortKey === k) sortAsc = !sortAsc;
@@ -201,8 +216,8 @@
     if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
     else if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
     else if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) { const r = selectedRow(); if (r) preview(r); }
-    else if ((e.key === "Backspace" || e.key === "Delete") && app.view.kind === "crate" && app.selected.length) {
-      api.removeFromCrate(app.view.id, app.selected);
+    else if ((e.key === "Backspace" || e.key === "Delete") && plainCrate && app.selected.length) {
+      api.removeFromCrate(plainCrate.id, app.selected);
     }
   }
 
@@ -217,10 +232,16 @@
       { label: "Play Next", action: () => addToSet(ids, "next") },
       { label: "Add to End of Set", action: () => addToSet(ids, "end") },
       { separator: true },
-      ...app.crates.map((c) => ({ label: `Add to Crate “${c.name}”`, action: () => api.addToCrate(c.id, ids) })),
-      ...(app.view.kind === "crate"
-        ? [{ label: "Remove from Crate", action: () => api.removeFromCrate((app.view as { id: Id }).id, ids) }]
+      ...app.crates.filter((c) => !c.smart).map((c) => ({ label: `Add to Crate “${c.name}”`, action: () => api.addToCrate(c.id, ids) })),
+      ...(plainCrate ? [{ label: "Remove from Crate", action: () => api.removeFromCrate(plainCrate.id, ids) }] : []),
+      { separator: true },
+      ...(app.filterStyle && ids.some((id) => app.versionMap.get(id)?.version.style !== app.filterStyle)
+        ? [{ label: `Label as ${app.styleName(app.filterStyle)}`, action: () => app.run(api.styleAdd(app.filterStyle!, ids)) }]
         : []),
+      ...(ids.some((id) => app.versionMap.get(id)?.version.style)
+        ? [{ label: "Remove Dance Style", action: () => app.run(api.styleRemove(ids)) }]
+        : []),
+      { label: "Set Dance Style…", action: () => { app.inspectTrack = r.track.id; app.rightTab = "info"; } },
       { separator: true },
       { label: "New Version of This Song…", action: () => { app.inspectTrack = r.track.id; app.rightTab = "info"; } },
       { label: "Re-analyze", action: () => api.analyze([...new Set(ids.map((id) => app.versionMap.get(id)?.track.id).filter(Boolean) as Id[])]) },
@@ -245,9 +266,10 @@
     await app.run(api.deleteTracks(tids));
   }
 
-  const showPos = $derived(app.view.kind === "crate" || app.view.kind === "setlist");
+  const showPos = $derived(!!plainCrate || app.view.kind === "setlist");
 </script>
 
+<StyleFilterBar rows={baseRows} />
 <div class="table" role="grid" tabindex="0" onkeydown={keydown} aria-label="Library">
   <div class="thead">
     {#if showPos}<button class="c pos" onclick={() => sortBy("position")}>#</button>{/if}
@@ -271,7 +293,7 @@
           class:sel={selSet.has(r.version.id)}
           class:missing={r.track.missing}
           class:suggested={r.suggested}
-          title={r.suggested ? `Not labelled ${app.styleName((app.view as { key: string }).key)} yet — its tempo fits` : undefined}
+          title={r.suggested ? `Not labelled ${app.styleName(app.filterStyle)} yet — its tempo fits` : undefined}
           class:playing={app.decks.some((d) => d.versionId === r.version.id && d.onAir && d.status === "playing")}
           class:previewing={app.decks.some((d) => d.versionId === r.version.id && !(d.onAir && d.status === "playing"))}
           style:top="{idx * ROW_H}px"
@@ -318,8 +340,12 @@
           <button onclick={() => (app.settingsOpen = "library")}>Add Music Folder…</button>
         {:else if app.search}
           No songs match “{app.search}”.
-        {:else if app.view.kind === "style"}
-          No songs are labelled {app.styleName(app.view.key)} yet, and none of your unlabelled songs fit its tempo. Drag songs onto the style in the sidebar, or set the style in the Info tab.
+        {:else if app.filterStyle}
+          Nothing here is labelled {app.styleName(app.filterStyle)}{app.suggestByTempo ? ", and no unlabelled songs fit its tempo" : ""}. Drag songs onto the style above to label them.
+        {:else if app.styleFilter.length}
+          No songs here match the style filter.
+        {:else if viewCrate?.smart}
+          No songs match this smart crate's rules yet.
         {:else}
           Nothing here yet.
         {/if}
@@ -333,7 +359,7 @@
 {/if}
 
 <style>
-  .table { display: flex; flex-direction: column; min-height: 0; height: 100%; outline: none; }
+  .table { display: flex; flex-direction: column; min-height: 0; flex: 1; outline: none; }
   .thead, .tr { display: grid; grid-template-columns: var(--cols); align-items: center; column-gap: 8px; padding: 0 10px; }
   .table { --cols: minmax(160px, 2.2fr) minmax(110px, 1.4fr) minmax(60px, 0.8fr) 92px 92px 52px 34px 70px 52px; }
   .table:has(.pos) { --cols: 30px minmax(160px, 2.2fr) minmax(110px, 1.4fr) minmax(60px, 0.8fr) 92px 92px 52px 34px 70px 52px; }

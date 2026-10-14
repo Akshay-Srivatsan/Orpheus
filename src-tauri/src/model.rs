@@ -224,14 +224,26 @@ pub mod double_option {
     }
 }
 
-/// `crates/<id>.json`: a hand-picked collection of versions.
+/// `crates/<id>.json`: a collection of songs (versions).
+///
+/// Crates are the DJ's own groupings ("Waltzes", "Dancebreak classics",
+/// "Wedding requests") and may mix dance styles freely. Dance styles are not
+/// crates: they are labels on versions that any view can be filtered by.
+///
+/// A *smart* crate has `smart` rules instead of a hand-picked list: its songs
+/// are whatever in the library currently matches (rules are evaluated by the
+/// UI, see `src/lib/smart.ts`).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Crate {
     pub id: Id,
     pub name: String,
     pub position: i64,
+    /// Hand-picked members (empty for smart crates).
     pub version_ids: Vec<Id>,
+    /// Rules for a smart crate (`{ "match": "all" | "any", "conditions": [...] }`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub smart: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

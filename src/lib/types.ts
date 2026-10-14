@@ -84,11 +84,17 @@ export interface Row {
   version: Version;
 }
 
+/**
+ * A crate: the DJ's own collection of songs, mixing dance styles freely.
+ * Smart crates have rules instead of a hand-picked list (see lib/smart.ts).
+ */
 export interface Crate {
   id: Id;
   name: string;
   position: number;
+  /** Hand-picked members (empty for smart crates). */
   versionIds: Id[];
+  smart?: import("./smart").SmartRules | null;
 }
 
 export type SetlistMode = "live" | "preset";

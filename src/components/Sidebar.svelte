@@ -1,22 +1,18 @@
 <script lang="ts">
   import { api } from "../lib/api";
+  import { evaluate } from "../lib/smart";
   import { app, type SourceView } from "../lib/state.svelte";
-  import type { Id, SpotifyPlaylist } from "../lib/types";
+  import type { Crate, Id, SpotifyPlaylist } from "../lib/types";
+  import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
   import Icon from "./Icon.svelte";
 
-  const styleCounts = $derived.by(() => {
-    const m = new Map<string, number>();
-    for (const r of app.rows) if (r.version.style) m.set(r.version.style, (m.get(r.version.style) ?? 0) + 1);
-    return m;
-  });
-  const unstyled = $derived(app.libraryTracks.filter((t) => t.versions.every((v) => !v.style)).length);
   const missing = $derived(app.libraryTracks.filter((t) => t.missing).length);
-  const extraStyles = $derived([...styleCounts.keys()].filter((k) => !app.styleMap.has(k)));
 
   let playlists = $state<SpotifyPlaylist[] | null>(null);
   let loadingPlaylists = $state(false);
   let renaming = $state<Id | null>(null);
   let dropTarget = $state<string | null>(null);
+  let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
   $effect(() => {
     if (app.spotify?.connected && playlists === null && !loadingPlaylists) {
@@ -25,10 +21,21 @@
     }
   });
 
+  const smartCtx = $derived({
+    profile: app.profile,
+    crates: app.crates,
+    library: app.rows,
+    fadeSeconds: app.fadeSeconds,
+    trimSilence: app.settings?.trimSilence ?? true,
+  });
+
+  function count(c: Crate): number {
+    return c.smart ? evaluate(c.smart, app.rows, smartCtx).length : c.versionIds.length;
+  }
+
   function is(v: SourceView): boolean {
     const c = app.view;
     if (c.kind !== v.kind) return false;
-    if (c.kind === "style" && v.kind === "style") return c.key === v.key;
     if (c.kind === "crate" && v.kind === "crate") return c.id === v.id;
     if (c.kind === "setlist" && v.kind === "setlist") return c.id === v.id;
     if (c.kind === "spotify-playlist" && v.kind === "spotify-playlist") return c.uri === v.uri;
@@ -46,6 +53,31 @@
     if (id) renaming = id;
   }
 
+  function addMenu(e: MouseEvent) {
+    menu = {
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        { label: "New Crate", action: newCrate },
+        { label: "New Smart Crate…", action: () => (app.smartEditor = "new") },
+      ],
+    };
+  }
+
+  function crateMenu(e: MouseEvent, c: Crate) {
+    e.preventDefault();
+    menu = {
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        { label: "Rename", action: () => (renaming = c.id) },
+        ...(c.smart ? [{ label: "Edit Rules…", action: () => (app.smartEditor = c.id) }] : []),
+        { separator: true },
+        { label: "Delete Crate…", danger: true, action: () => confirm(`Delete the crate “${c.name}”? Its songs stay in your library.`) && api.deleteCrate(c.id) },
+      ],
+    };
+  }
+
   function versionsFromDrag(e: DragEvent): Id[] {
     try {
       return JSON.parse(e.dataTransfer?.getData("application/x-orpheus-versions") || "[]");
@@ -60,20 +92,6 @@
     const ids = versionsFromDrag(e);
     if (ids.length) await app.run(api.addToCrate(id, ids));
   }
-
-  async function assignStyle(e: DragEvent, key: string) {
-    e.preventDefault();
-    dropTarget = null;
-    // Dropping songs on a dance style labels them: unstyled versions get the
-    // style; styled ones get a new version for this style.
-    for (const vid of versionsFromDrag(e)) {
-      const r = app.versionMap.get(vid);
-      if (!r) continue;
-      if (!r.version.style) await app.run(api.updateVersion(vid, { style: key }));
-      else if (r.version.style !== key)
-        await app.run(api.createVersion(r.track.id, { name: app.styleName(key), style: key, comment: "" }));
-    }
-  }
 </script>
 
 <nav class="sidebar">
@@ -82,11 +100,6 @@
     <button class="item" class:sel={is({ kind: "all" })} onclick={() => go({ kind: "all" })}>
       <Icon name="music" size={14} /> All Songs <span class="count">{app.rows.length}</span>
     </button>
-    {#if unstyled}
-      <button class="item" class:sel={is({ kind: "unstyled" })} onclick={() => go({ kind: "unstyled" })}>
-        <Icon name="tag" size={14} /> No Dance Style <span class="count">{unstyled}</span>
-      </button>
-    {/if}
     <button class="item" class:sel={is({ kind: "history" })} onclick={() => go({ kind: "history" })}>
       <Icon name="history" size={14} /> History
     </button>
@@ -98,29 +111,7 @@
   </div>
 
   <div class="group">
-    <div class="section-title">Dance Styles</div>
-    {#each app.profile?.styles ?? [] as s (s.key)}
-      <button class="item" class:sel={is({ kind: "style", key: s.key })} class:zero={!styleCounts.get(s.key)}
-        class:drop={dropTarget === "s:" + s.key}
-        onclick={() => go({ kind: "style", key: s.key })}
-        ondragover={(e) => { e.preventDefault(); dropTarget = "s:" + s.key; }}
-        ondragleave={() => (dropTarget = null)}
-        ondrop={(e) => assignStyle(e, s.key)}
-        title="Drop songs here to label them {s.name}">
-        <span class="sdot" style:background={s.color}></span> {s.name}
-        <span class="count">{styleCounts.get(s.key) ?? ""}</span>
-      </button>
-    {/each}
-    {#each extraStyles as k}
-      <button class="item" class:sel={is({ kind: "style", key: k })} onclick={() => go({ kind: "style", key: k })}
-        title="Not defined in the current club profile">
-        <span class="sdot" style:background="#8e8e93"></span> {app.styleName(k)} <span class="count">{styleCounts.get(k)}</span>
-      </button>
-    {/each}
-  </div>
-
-  <div class="group">
-    <div class="section-title row">Crates <button class="plain icon add" title="New crate" onclick={newCrate}><Icon name="plus" size={13} /></button></div>
+    <div class="section-title row">Crates <button class="plain icon add" title="New crate or smart crate" onclick={addMenu}><Icon name="plus" size={13} /></button></div>
     {#each app.crates as c (c.id)}
       {#if renaming === c.id}
         <!-- svelte-ignore a11y_autofocus -->
@@ -130,17 +121,24 @@
             if (e.key === "Escape") renaming = null;
           }}
           onblur={(e) => { api.renameCrate(c.id, e.currentTarget.value); renaming = null; }} />
+      {:else if c.smart}
+        <button class="item" class:sel={is({ kind: "crate", id: c.id })}
+          onclick={() => go({ kind: "crate", id: c.id })} ondblclick={() => (app.smartEditor = c.id)}
+          oncontextmenu={(e) => crateMenu(e, c)} title="Smart crate — double-click to edit its rules">
+          <Icon name="auto" size={14} /> <span class="name">{c.name}</span> <span class="count">{count(c)}</span>
+        </button>
       {:else}
         <button class="item" class:sel={is({ kind: "crate", id: c.id })} class:drop={dropTarget === "c:" + c.id}
           onclick={() => go({ kind: "crate", id: c.id })} ondblclick={() => (renaming = c.id)}
+          oncontextmenu={(e) => crateMenu(e, c)}
           ondragover={(e) => { e.preventDefault(); dropTarget = "c:" + c.id; }}
           ondragleave={() => (dropTarget = null)}
           ondrop={(e) => dropOnCrate(e, c.id)}>
-          <Icon name="crate" size={14} /> {c.name} <span class="count">{c.versionIds.length}</span>
+          <Icon name="crate" size={14} /> <span class="name">{c.name}</span> <span class="count">{c.versionIds.length}</span>
         </button>
       {/if}
     {:else}
-      <div class="hint">Drag songs onto a crate to collect them.</div>
+      <div class="hint">Crates are your own collections (any mix of dance styles). Drag songs onto one to add them; smart crates fill themselves from rules.</div>
     {/each}
   </div>
 
@@ -178,6 +176,10 @@
   </div>
 </nav>
 
+{#if menu}
+  <ContextMenu x={menu.x} y={menu.y} items={menu.items} onclose={() => (menu = null)} />
+{/if}
+
 <style>
   .sidebar { overflow-y: auto; padding: 10px 6px; display: flex; flex-direction: column; gap: 14px; background: var(--bg-elev); border-right: 1px solid var(--border); }
   .group { display: flex; flex-direction: column; gap: 1px; }
@@ -188,13 +190,11 @@
   .item :global(svg) { color: var(--text-dim); flex: none; }
   .item:hover { background: var(--bg-hover); }
   .item.sel { background: var(--bg-selected); }
-  .item.zero { color: var(--text-faint); }
   .item.warn { color: var(--yellow); }
   .item.drop { outline: 2px solid var(--blue); outline-offset: -2px; }
   .item .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
   .count { margin-left: auto; color: var(--text-faint); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
   .cur { color: var(--green); font-size: 9px; }
-  .sdot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
   .hint { color: var(--text-faint); font-size: var(--fs-xs); padding: 2px 8px; }
   .rename { margin: 1px 4px; height: 24px; }
 </style>
