@@ -1,6 +1,6 @@
 <script module lang="ts">
   export type MenuItem =
-    | { label: string; action: () => void; danger?: boolean; disabled?: boolean; checked?: boolean; separator?: false }
+    | { label: string; action: () => unknown; danger?: boolean; disabled?: boolean; checked?: boolean; separator?: false }
     | { separator: true };
 </script>
 

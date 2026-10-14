@@ -703,6 +703,37 @@ pub async fn stems_delete(app: S<'_>, track_id: Id) -> Res<()> {
 
 /// Content hashes (of this track's files) that have prepared stems.
 #[tauri::command]
+pub async fn stems_delete_all(app: S<'_>) -> Res<()> {
+    app.stems.delete_all().map_err(ae)?;
+    crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn stems_remove_model(app: S<'_>) -> Res<()> {
+    app.stems.remove_model().map_err(ae)
+}
+
+/// Removes play-history items, given as `[playedAt, trackId]` pairs; `None` clears all.
+#[tauri::command]
+pub async fn history_remove(app: S<'_>, items: Option<Vec<(i64, Id)>>) -> Res<usize> {
+    let n = app.store.history_remove(items.as_deref()).map_err(ae)?;
+    crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
+    crate::app::emit(&app.handle, "history-changed", ());
+    Ok(n)
+}
+
+#[tauri::command]
+pub async fn spotify_cache_bytes(app: S<'_>) -> Res<u64> {
+    Ok(app.spotify.cache_bytes())
+}
+
+#[tauri::command]
+pub async fn spotify_clear_cache(app: S<'_>) -> Res<u64> {
+    app.spotify.clear_cache().map_err(ae)
+}
+
+#[tauri::command]
 pub async fn stems_ready(app: S<'_>) -> Res<Vec<Id>> {
     Ok(app
         .store

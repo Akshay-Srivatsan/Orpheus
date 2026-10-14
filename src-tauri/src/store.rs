@@ -672,14 +672,13 @@ impl Store {
         Ok(())
     }
 
+    fn history_file(&self, played_at: i64) -> PathBuf {
+        let (y, m, _) = civil_from_days((played_at / 1000).div_euclid(86400));
+        self.library_dir().join("history").join(format!("{y:04}-{m:02}.jsonl"))
+    }
+
     pub fn mark_played(&self, h: HistoryItem) -> Result<()> {
-        let month = {
-            let secs = h.played_at / 1000;
-            let days = secs.div_euclid(86400);
-            let (y, m, _) = civil_from_days(days);
-            format!("{y:04}-{m:02}")
-        };
-        let path = self.library_dir().join("history").join(format!("{month}.jsonl"));
+        let path = self.history_file(h.played_at);
         let mut f = fs::OpenOptions::new().create(true).append(true).open(&path)?;
         writeln!(f, "{}", serde_json::to_string(&h)?)?;
         let mut inner = self.inner.write();
@@ -690,6 +689,43 @@ impl Store {
 
     pub fn history(&self, limit: usize) -> Vec<HistoryItem> {
         self.inner.read().history.iter().rev().take(limit).cloned().collect()
+    }
+
+    /// Removes play-history items (matched by time and track); `None` clears all.
+    pub fn history_remove(&self, items: Option<&[(i64, Id)]>) -> Result<usize> {
+        let mut inner = self.inner.write();
+        let before = inner.history.len();
+        match items {
+            Some(items) => inner.history.retain(|h| !items.iter().any(|(t, id)| *t == h.played_at && *id == h.track_id)),
+            None => inner.history.clear(),
+        }
+        let removed = before - inner.history.len();
+        // Rewrite the monthly logs from what's left.
+        let dir = self.library_dir().join("history");
+        let mut by_file: BTreeMap<PathBuf, String> = BTreeMap::new();
+        if let Ok(rd) = fs::read_dir(&dir) {
+            for e in rd.filter_map(|e| e.ok()) {
+                if e.path().extension().and_then(|x| x.to_str()) == Some("jsonl") {
+                    by_file.insert(e.path(), String::new());
+                }
+            }
+        }
+        for h in &inner.history {
+            let line = serde_json::to_string(h)? + "\n";
+            by_file.entry(self.history_file(h.played_at)).or_default().push_str(&line);
+        }
+        for (path, text) in by_file {
+            if text.is_empty() {
+                let _ = fs::remove_file(&path);
+            } else {
+                write_atomic(&path, text.as_bytes())?;
+            }
+        }
+        inner.play_stats.clear();
+        for h in inner.history.clone() {
+            inner.add_play(&h);
+        }
+        Ok(removed)
     }
 
     // ---------------------------------------------------------------- versions
@@ -1187,6 +1223,26 @@ mod tests {
 
         store2.unassign_style(&va).unwrap();
         assert_eq!(store2.version(&va).unwrap().0.style, None);
+        let _ = fs::remove_dir_all(lib.parent().unwrap());
+    }
+
+    #[test]
+    fn history_items_can_be_removed() {
+        let (lib, local) = temp_dirs();
+        let store = Store::open(&lib, &local).unwrap();
+        let tid = store.insert_track(&NewTrack { title: "S".into(), ..Default::default() }, SourceRef { kind: "file".into(), key: "h".into() }).unwrap();
+        for t in [1_000, 2_000, 40 * 86_400_000] {
+            store.mark_played(HistoryItem { played_at: t, track_id: tid.clone(), version_id: None, style: None, bpm: None, setlist_id: None }).unwrap();
+        }
+        assert_eq!(store.track(&tid).unwrap().play_count, 3);
+        assert_eq!(store.history_remove(Some(&[(2_000, tid.clone())])).unwrap(), 1);
+        let store = Store::open(&lib, &local).unwrap();
+        assert_eq!(store.history(10).len(), 2);
+        assert_eq!(store.track(&tid).unwrap().play_count, 2);
+        store.history_remove(None).unwrap();
+        let store = Store::open(&lib, &local).unwrap();
+        assert!(store.history(10).is_empty());
+        assert_eq!(fs::read_dir(lib.join("history")).unwrap().count(), 0);
         let _ = fs::remove_dir_all(lib.parent().unwrap());
     }
 

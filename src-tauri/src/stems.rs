@@ -138,6 +138,32 @@ impl Stems {
         Ok(())
     }
 
+    /// Deletes every prepared stem.
+    pub fn delete_all(&self) -> Result<()> {
+        for e in std::fs::read_dir(&self.dir)?.filter_map(|e| e.ok()) {
+            if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                std::fs::remove_dir_all(e.path())?;
+            }
+        }
+        self.changed(None);
+        Ok(())
+    }
+
+    /// Deletes the downloaded separation model (stems already prepared still play).
+    pub fn remove_model(&self) -> Result<()> {
+        if self.inner.lock().running.is_some() {
+            return Err(anyhow!("Wait for stem preparation to finish first."));
+        }
+        let dir = stem_splitter_core::io::paths::models_cache_dir().map_err(|e| anyhow!("{e}"))?;
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir)?;
+        }
+        let _ = std::fs::remove_file(self.dir.join(".model-ready"));
+        self.inner.lock().model = ModelStatus::Missing;
+        self.changed(None);
+        Ok(())
+    }
+
     pub fn status(&self) -> StemsStatus {
         let i = self.inner.lock();
         StemsStatus {

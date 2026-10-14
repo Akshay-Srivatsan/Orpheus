@@ -1,8 +1,8 @@
 <script lang="ts">
   import { api } from "../lib/api";
   import { evaluate } from "../lib/smart";
-  import { app, type SourceView } from "../lib/state.svelte";
-  import type { Crate, Id, SpotifyPlaylist } from "../lib/types";
+  import { app, type SourceView, confirmAction } from "../lib/state.svelte";
+  import type { Crate, Id, SpotifyPlaylist, SetlistSummary } from "../lib/types";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
   import Icon from "./Icon.svelte";
 
@@ -73,7 +73,35 @@
         { label: "Rename", action: () => (renaming = c.id) },
         ...(c.smart ? [{ label: "Edit Rules…", action: () => (app.smartEditor = c.id) }] : []),
         { separator: true },
-        { label: "Delete Crate…", danger: true, action: () => confirm(`Delete the crate “${c.name}”? Its songs stay in your library.`) && api.deleteCrate(c.id) },
+        { label: "Delete Crate…", danger: true, action: () => confirmAction(`Delete the crate “${c.name}”? Its songs stay in your library.`).then((ok) => { if (ok) api.deleteCrate(c.id); }) },
+      ],
+    };
+  }
+
+  let renamingSet = $state<Id | null>(null);
+
+  function setlistMenu(e: MouseEvent, s: SetlistSummary) {
+    e.preventDefault();
+    const isOpen = app.perform?.setlistId === s.id;
+    menu = {
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        { label: isOpen ? "Close in Set Panel" : "Open in Set Panel", action: () => api.performOpen(isOpen ? null : s.id) },
+        { label: "Rename", action: () => (renamingSet = s.id) },
+        { label: "Duplicate", action: () => api.duplicateSetlist(s.id, `${s.name} (copy)`) },
+        { separator: true },
+        {
+          label: "Delete Setlist…",
+          danger: true,
+          disabled: isOpen && app.decks.some((d) => d.onAir && d.status === "playing" && !!d.entryId),
+          action: () =>
+            confirmAction(`Delete the setlist “${s.name}” (${s.entryCount} entries)? The songs stay in your library.`).then(async (ok) => {
+              if (!ok) return;
+              await app.run(api.deleteSetlist(s.id));
+              if (app.view.kind === "setlist" && app.view.id === s.id) app.view = { kind: "all" };
+            }),
+        },
       ],
     };
   }
@@ -145,13 +173,24 @@
   <div class="group">
     <div class="section-title row">Setlists <button class="plain icon add" title="New setlist" onclick={() => (app.newSetlistOpen = true)}><Icon name="plus" size={13} /></button></div>
     {#each app.setlists as s (s.id)}
-      <button class="item" class:sel={is({ kind: "setlist", id: s.id })} onclick={() => go({ kind: "setlist", id: s.id })}
-        ondblclick={() => api.performOpen(s.id)} title="Double-click to open in the set panel">
-        <Icon name="list" size={14} />
-        <span class="name">{s.name}</span>
-        {#if app.perform?.setlistId === s.id}<span class="cur" title="Open in the set panel">●</span>{/if}
-        <span class="count">{s.entryCount}</span>
-      </button>
+      {#if renamingSet === s.id}
+        <!-- svelte-ignore a11y_autofocus -->
+        <input class="rename" value={s.name} autofocus
+          onkeydown={(e) => {
+            if (e.key === "Enter") { api.updateSetlist(s.id, { name: e.currentTarget.value }); renamingSet = null; }
+            if (e.key === "Escape") renamingSet = null;
+          }}
+          onblur={(e) => { api.updateSetlist(s.id, { name: e.currentTarget.value }); renamingSet = null; }} />
+      {:else}
+        <button class="item" class:sel={is({ kind: "setlist", id: s.id })} onclick={() => go({ kind: "setlist", id: s.id })}
+          ondblclick={() => api.performOpen(s.id)} oncontextmenu={(e) => setlistMenu(e, s)}
+          title="Double-click to open in the set panel; right-click for more">
+          <Icon name="list" size={14} />
+          <span class="name">{s.name}</span>
+          {#if app.perform?.setlistId === s.id}<span class="cur" title="Open in the set panel">●</span>{/if}
+          <span class="count">{s.entryCount}</span>
+        </button>
+      {/if}
     {/each}
   </div>
 

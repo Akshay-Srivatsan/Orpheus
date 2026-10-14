@@ -3,7 +3,7 @@
   import { onMount } from "svelte";
   import { api } from "../lib/api";
   import { checkSetlist } from "../lib/rules";
-  import { app } from "../lib/state.svelte";
+  import { app, confirmAction } from "../lib/state.svelte";
   import Deck from "./Deck.svelte";
   import Inspector from "./Inspector.svelte";
   import LibraryTable from "./LibraryTable.svelte";
@@ -116,6 +116,11 @@
               {#if viewCrate?.smart}
                 <span class="faint small" title={viewCrate.smart.conditions.map((c) => describe(c, app)).join(viewCrate.smart.match === "any" ? "\nor " : "\nand ")}>smart crate</span>
                 <button class="plain small" onclick={() => (app.smartEditor = viewCrate!.id)}>Edit Rules…</button>
+              {/if}
+              {#if app.view.kind === "history"}
+                <button class="plain small" onclick={async () => {
+                  if (await confirmAction("Clear the whole play history? Play counts reset; setlists keep their played marks.", "Clear")) app.run(api.removeHistory());
+                }}>Clear History…</button>
               {/if}
             </div>
             <div class="search">

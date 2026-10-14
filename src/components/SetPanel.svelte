@@ -2,7 +2,7 @@
   import { save } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api";
   import type { CheckResult } from "../lib/rules";
-  import { addToSet, app, audition, spotifyVersions } from "../lib/state.svelte";
+  import { addToSet, app, audition, spotifyVersions, confirmAction } from "../lib/state.svelte";
   import { fmtBpm, fmtTime, playback, playedDurationMs, styleOf } from "../lib/tempo";
   import type { Id, SetlistEntry } from "../lib/types";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
@@ -181,13 +181,13 @@
     const items: MenuItem[] = [
       { label: "Rename", action: () => (renaming = true) },
       { label: "Duplicate", action: () => api.duplicateSetlist(s.id, `${s.name} (copy)`) },
-      { label: "Reset Played / Skipped", action: () => confirm("Mark every song in this set as not played?") && api.resetSetlist(s.id) },
+      { label: "Reset Played / Skipped", action: () => confirmAction("Mark every song in this set as not played?", "Reset").then((ok) => { if (ok) api.resetSetlist(s.id); }) },
       { separator: true },
       { label: "Export as CSV…", action: exportCsv },
       { label: "Print Setlist…", action: () => window.print() },
       { separator: true },
       { label: "Close Set", action: () => api.performOpen(null) },
-      { label: "Delete Set…", danger: true, action: () => confirm(`Delete “${s.name}”?`) && api.deleteSetlist(s.id) },
+      { label: "Delete Set…", danger: true, action: () => confirmAction(`Delete “${s.name}”?`).then((ok) => { if (ok) api.deleteSetlist(s.id); }) },
     ];
     menu = { x: ev.clientX, y: ev.clientY, items };
   }

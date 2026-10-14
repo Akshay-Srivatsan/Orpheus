@@ -228,6 +228,9 @@ struct State {
     /// Last message and the port it came from, to drop copies of the same
     /// event arriving through a second port (e.g. PipeWire's Midi-Bridge).
     last: Option<([u8; 3], std::time::Instant, String)>,
+    /// Recently sent LED messages: if one comes back in (a MIDI loopback),
+    /// it must not be treated as a button press.
+    sent: std::collections::VecDeque<([u8; 3], std::time::Instant)>,
 }
 
 pub struct Midi {
@@ -235,9 +238,15 @@ pub struct Midi {
     handler: Handler,
 }
 
-fn is_through_port(name: &str) -> bool {
+/// Client name Orpheus registers its MIDI ports under.
+const CLIENT: &str = "orpheus";
+
+/// Ports that must never be opened as inputs: system loopbacks, and Orpheus'
+/// own output port, which ALSA lists among the inputs. Listening to it would
+/// feed every LED message back in as a button press.
+fn is_ignored_port(name: &str) -> bool {
     let n = name.to_lowercase();
-    n.contains("midi through") || n.contains("through port")
+    n.contains("midi through") || n.contains("through port") || n.starts_with(&format!("{CLIENT}:")) || n.starts_with(&format!("{CLIENT}-"))
 }
 
 /// Identifies the physical device behind a port name, so the same controller
@@ -294,6 +303,7 @@ impl Midi {
                 learn: None,
                 enabled,
                 last: None,
+                sent: Default::default(),
             })),
             handler,
         });
@@ -330,12 +340,12 @@ impl Midi {
 
     pub fn ports(&self) -> Vec<PortInfo> {
         let st = self.state.lock();
-        let Ok(input) = MidiInput::new("orpheus-list") else { return vec![] };
+        let Ok(input) = MidiInput::new(CLIENT) else { return vec![] };
         input
             .ports()
             .iter()
             .filter_map(|p| input.port_name(p).ok())
-            .filter(|n| !is_through_port(n))
+            .filter(|n| !is_ignored_port(n))
             .map(|name| PortInfo { connected: st.inputs.contains_key(&name), name })
             .collect()
     }
@@ -344,7 +354,7 @@ impl Midi {
         if !self.state.lock().enabled {
             return true;
         }
-        let probe = match MidiInput::new("orpheus-probe") {
+        let probe = match MidiInput::new(CLIENT) {
             Ok(p) => p,
             Err(e) => {
                 log::warn!("MIDI unavailable: {e}");
@@ -355,7 +365,7 @@ impl Midi {
             .ports()
             .iter()
             .filter_map(|p| probe.port_name(p).ok())
-            .filter(|n| !is_through_port(n))
+            .filter(|n| !is_ignored_port(n))
             .collect();
         drop(probe);
         // One port per physical device; prefer direct ports over bridged copies.
@@ -380,7 +390,7 @@ impl Midi {
             if self.state.lock().inputs.contains_key(name) {
                 continue;
             }
-            let Ok(input) = MidiInput::new("orpheus") else { continue };
+            let Ok(input) = MidiInput::new(CLIENT) else { continue };
             let Some(port) = input.ports().into_iter().find(|p| input.port_name(p).ok().as_deref() == Some(name)) else {
                 continue;
             };
@@ -403,7 +413,7 @@ impl Midi {
     }
 
     fn connect_output(&self, input_name: &str) {
-        let Ok(out) = MidiOutput::new("orpheus") else { return };
+        let Ok(out) = MidiOutput::new(CLIENT) else { return };
         let want = base_name(input_name);
         let Some(port) = out.ports().into_iter().find(|p| out.port_name(p).map(|n| base_name(&n) == want).unwrap_or(false)) else {
             return;
@@ -437,6 +447,13 @@ impl Midi {
                 msgs.push([led.status, led.data1, if on { led.on } else { led.off }]);
             }
         }
+        let now = std::time::Instant::now();
+        for m in &msgs {
+            st.sent.push_back((*m, now));
+        }
+        while st.sent.len() > 64 {
+            st.sent.pop_front();
+        }
         for out in st.outputs.values_mut() {
             for m in &msgs {
                 let _ = out.send(m);
@@ -467,6 +484,12 @@ fn on_message(state: &Arc<Mutex<State>>, handler: &Handler, msg: &[u8], port: &s
         let mut st = state.lock();
         let now = std::time::Instant::now();
         let bytes = [status, d1, d2];
+        // Our own LED message coming back in: ignore it.
+        st.sent.retain(|(_, t)| now.duration_since(*t) < Duration::from_millis(250));
+        if let Some(i) = st.sent.iter().position(|(b, _)| *b == bytes) {
+            st.sent.remove(i);
+            return;
+        }
         if let Some((b, t, p)) = &st.last {
             if *b == bytes && p != port && now.duration_since(*t) < Duration::from_millis(8) {
                 return; // the same event delivered through another port
@@ -549,6 +572,37 @@ mod tests {
     }
 
     #[test]
+    fn own_ports_are_never_inputs() {
+        assert!(is_ignored_port("orpheus:orpheus-out 130:0"));
+        assert!(is_ignored_port("Midi Through:Midi Through Port-0 14:0"));
+        assert!(!is_ignored_port("DJ2GO2 Touch:DJ2GO2 Touch MIDI 1 24:0"));
+    }
+
+    #[test]
+    fn echoed_led_messages_are_ignored() {
+        let got: Arc<Mutex<Vec<(String, Value)>>> = Arc::default();
+        let g = got.clone();
+        let handler: Handler = Arc::new(move |a, v| g.lock().push((a.to_string(), v)));
+        let state = Arc::new(Mutex::new(State {
+            mapping: builtin_mappings().remove(0),
+            inputs: HashMap::new(),
+            outputs: HashMap::new(),
+            led_state: HashMap::new(),
+            learn: None,
+            enabled: true,
+            last: None,
+            sent: Default::default(),
+        }));
+        // The PLAY LED was just lit; the same bytes arriving must not press PLAY.
+        state.lock().sent.push_back(([0x90, 0x00, 0x7f], std::time::Instant::now()));
+        on_message(&state, &handler, &[0x90, 0x00, 0x7f], "loop");
+        assert!(got.lock().is_empty());
+        // A real press afterwards still works.
+        on_message(&state, &handler, &[0x90, 0x00, 0x7f], "dj2go2");
+        assert_eq!(got.lock().len(), 1);
+    }
+
+    #[test]
     fn bridged_ports_are_the_same_device() {
         let direct = "DJ2GO2 Touch:DJ2GO2 Touch MIDI 1 24:0";
         let bridged = "Midi-Bridge:DJ2GO2 Touch:(capture_0) DJ2GO2 Touch MIDI 1 14:1";
@@ -582,6 +636,7 @@ mod tests {
             learn: None,
             enabled: true,
             last: None,
+            sent: Default::default(),
         }));
         on_message(&state, &handler, &[0x90, 0x00, 0x7f], "a"); // deck A play press
         on_message(&state, &handler, &[0x90, 0x00, 0x7f], "bridge"); // same event via a 2nd port: dropped

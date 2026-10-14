@@ -428,6 +428,8 @@ export interface SpotifyStatus {
   username: string | null;
   error: string | null;
   hasCachedCredentials: boolean;
+  /** Search and playlists (Web API) are available; otherwise sign in again. */
+  webApi: boolean;
 }
 
 export interface SpotifyTrack {

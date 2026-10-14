@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { api } from "../lib/api";
+  import { api, on } from "../lib/api";
   import { evaluate } from "../lib/smart";
-  import { NO_STYLE, addToSet, app, audition, loadDeck } from "../lib/state.svelte";
+  import { NO_STYLE, addToSet, app, audition, confirmAction, loadDeck } from "../lib/state.svelte";
   import { bpmForStyle, fmtBpm, fmtPct, fmtTime, playback, playedDurationMs, tempoFit } from "../lib/tempo";
   import type { HistoryItem, Id, Row } from "../lib/types";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
@@ -13,6 +13,11 @@
   let sortKey = $state<SortKey>("artist");
   let sortAsc = $state(true);
   let history = $state<HistoryItem[]>([]);
+  let historyRev = $state(0);
+  $effect(() => {
+    const un = on("history-changed", () => historyRev++);
+    return () => { un.then((f) => f()); };
+  });
   let scroller: HTMLDivElement | undefined = $state();
   let scrollTop = $state(0);
   let viewH = $state(400);
@@ -21,6 +26,7 @@
   const ROW_H = 26;
 
   $effect(() => {
+    void historyRev;
     if (app.view.kind === "history") api.history(300).then((h) => (history = h));
   });
 
@@ -28,6 +34,8 @@
     key: string;
     position?: number;
     playedAt?: number;
+    /** Track id as recorded in the history (for removing the entry). */
+    historyTrackId?: Id;
     /** Not labelled with the filtered style, but its tempo fits. */
     suggested?: boolean;
   }
@@ -58,7 +66,7 @@
           const r = h.versionId ? app.versionMap.get(h.versionId) : undefined;
           const t = app.trackMap.get(h.trackId);
           const row = r ?? (t ? { track: t, version: t.versions[0] } : undefined);
-          return row ? [mk(row, { key: `${h.playedAt}-${i}`, playedAt: h.playedAt })] : [];
+          return row ? [mk(row, { key: `${h.playedAt}-${i}`, playedAt: h.playedAt, historyTrackId: h.trackId })] : [];
         });
       default:
         return [];
@@ -225,7 +233,16 @@
     e.preventDefault();
     if (!selSet.has(r.version.id)) select(e, idx);
     const ids = app.selected.slice();
+    const historyItems: MenuItem[] =
+      r.playedAt != null && r.historyTrackId
+        ? [
+            { label: "Remove from History", action: () => app.run(api.removeHistory([[r.playedAt!, r.historyTrackId!]])) },
+            { label: "Clear History…", danger: true, action: clearHistory },
+            { separator: true },
+          ]
+        : [];
     const items: MenuItem[] = [
+      ...historyItems,
       { label: "Preview in Headphones (free deck)", action: () => preview(r) },
       { label: "Load onto Deck A", disabled: app.decks[0].onAir && app.decks[0].status === "playing", action: () => loadDeck(0, r.version.id) },
       { label: "Load onto Deck B", disabled: app.decks[1].onAir && app.decks[1].status === "playing", action: () => loadDeck(1, r.version.id) },
@@ -254,15 +271,21 @@
     menu = { x: e.clientX, y: e.clientY, items };
   }
 
+  async function clearHistory() {
+    if (await confirmAction("Clear the whole play history? Play counts reset; setlists keep their played marks.", "Clear")) {
+      await app.run(api.removeHistory());
+    }
+  }
+
   async function mergeSelected(ids: Id[]) {
     const tids = [...new Set(ids.map((id) => app.versionMap.get(id)!.track.id))];
-    if (!confirm(`Merge ${tids.length} songs into one? Their sources and versions are combined; setlists keep working.`)) return;
+    if (!(await confirmAction(`Merge ${tids.length} songs into one? Their sources and versions are combined; setlists keep working.`, "Merge"))) return;
     await app.run(api.mergeTracks(tids[0], tids.slice(1)));
   }
 
   async function deleteSelected(ids: Id[]) {
     const tids = [...new Set(ids.map((id) => app.versionMap.get(id)!.track.id))];
-    if (!confirm(`Remove ${tids.length} song(s) and all their versions from the library? Your music files are not touched.`)) return;
+    if (!(await confirmAction(`Remove ${tids.length} song(s) and all their versions from the library? Your music files are not touched.`, "Remove"))) return;
     await app.run(api.deleteTracks(tids));
   }
 

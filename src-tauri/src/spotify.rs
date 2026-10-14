@@ -39,7 +39,6 @@ const SCOPES: &[&str] = &[
     "playlist-read-collaborative",
     "user-library-read",
 ];
-const WEB_SCOPES: &str = "user-read-private,playlist-read-private,playlist-read-collaborative,user-library-read";
 const SAMPLE_RATE: u32 = 44100;
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -50,6 +49,20 @@ pub struct SpotifyStatus {
     pub username: Option<String>,
     pub error: Option<String>,
     pub has_cached_credentials: bool,
+    /// Search and "your playlists" (Spotify Web API) are available.
+    pub web_api: bool,
+}
+
+/// OAuth token from the browser sign-in, used for the Web API (search,
+/// playlists). Stored on this computer only.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WebToken {
+    client_id: String,
+    access_token: String,
+    refresh_token: String,
+    /// Epoch ms.
+    expires_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -279,6 +292,7 @@ pub struct Spotify {
     conn: Mutex<Option<Connected>>,
     pub status: Mutex<SpotifyStatus>,
     http: reqwest::Client,
+    web_token: Mutex<Option<WebToken>>,
 }
 
 fn cover_url(images: &librespot_metadata::image::Images) -> Option<String> {
@@ -291,13 +305,35 @@ fn cover_url(images: &librespot_metadata::image::Images) -> Option<String> {
 impl Spotify {
     pub fn new(rt: tokio::runtime::Handle, dir: PathBuf) -> Self {
         let has = dir.join("credentials.json").exists();
-        Self {
+        let s = Self {
             rt,
             dir,
             conn: Mutex::new(None),
             status: Mutex::new(SpotifyStatus { has_cached_credentials: has, ..Default::default() }),
             http: reqwest::Client::new(),
+            web_token: Mutex::new(None),
+        };
+        *s.web_token.lock() = std::fs::read_to_string(s.web_token_path()).ok().and_then(|t| serde_json::from_str(&t).ok());
+        s
+    }
+
+    fn web_token_path(&self) -> PathBuf {
+        self.dir.join("web-token.json")
+    }
+
+    fn save_web_token(&self, t: &WebToken) {
+        let _ = std::fs::create_dir_all(&self.dir);
+        let path = self.web_token_path();
+        if let Ok(json) = serde_json::to_string(t) {
+            if crate::store::write_atomic(&path, json.as_bytes()).is_ok() {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+                }
+            }
         }
+        *self.web_token.lock() = Some(t.clone());
     }
 
     fn cache(&self) -> Result<Cache> {
@@ -308,6 +344,7 @@ impl Spotify {
     pub fn status(&self) -> SpotifyStatus {
         let mut s = self.status.lock().clone();
         s.has_cached_credentials = self.dir.join("credentials.json").exists();
+        s.web_api = self.web_token.lock().is_some();
         s
     }
 
@@ -361,6 +398,13 @@ impl Spotify {
                 .build()
                 .map_err(|e| anyhow!("{e}"))?;
             let token = client.get_access_token().map_err(|e| anyhow!("Spotify authorization failed: {e}"))?;
+            let left = token.expires_at.saturating_duration_since(std::time::Instant::now());
+            self.save_web_token(&WebToken {
+                client_id: cid.to_string(),
+                access_token: token.access_token.clone(),
+                refresh_token: token.refresh_token.clone(),
+                expires_at: crate::model::now_ms() + left.as_millis() as i64,
+            });
             self.rt.block_on(self.connect_with(Credentials::with_access_token(token.access_token), ""))
         })();
         if let Err(e) = &r {
@@ -371,11 +415,39 @@ impl Spotify {
         r
     }
 
+    /// Deletes Spotify audio downloaded for playback (it's re-downloaded as needed).
+    pub fn clear_cache(&self) -> Result<u64> {
+        let dir = self.dir.join("audio");
+        let size: u64 = walkdir::WalkDir::new(&dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter_map(|e| e.metadata().ok())
+            .filter(|m| m.is_file())
+            .map(|m| m.len())
+            .sum();
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir)?;
+        }
+        Ok(size)
+    }
+
+    pub fn cache_bytes(&self) -> u64 {
+        walkdir::WalkDir::new(self.dir.join("audio"))
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter_map(|e| e.metadata().ok())
+            .filter(|m| m.is_file())
+            .map(|m| m.len())
+            .sum()
+    }
+
     pub fn logout(&self) {
         if let Some(c) = self.conn.lock().take() {
             c.session.shutdown();
         }
         let _ = std::fs::remove_file(self.dir.join("credentials.json"));
+        let _ = std::fs::remove_file(self.web_token_path());
+        *self.web_token.lock() = None;
         *self.status.lock() = SpotifyStatus::default();
     }
 
@@ -444,10 +516,34 @@ impl Spotify {
         })
     }
 
+    /// A Web API access token from the browser sign-in, refreshed as needed.
+    /// (librespot's internal "keymaster" tokens are refused for these scopes.)
     async fn web_token(&self) -> Result<String> {
-        let session = self.session().ok_or_else(|| anyhow!("Spotify is not connected"))?;
-        let t = session.token_provider().get_token(WEB_SCOPES).await.map_err(|e| anyhow!("Spotify token: {e}"))?;
-        Ok(t.access_token)
+        let reauth = || anyhow!("Spotify search and playlists need you to sign in once more: Settings → Spotify → Sign In Again.");
+        let tok = self.web_token.lock().clone().ok_or_else(reauth)?;
+        if tok.expires_at > crate::model::now_ms() + 60_000 {
+            return Ok(tok.access_token);
+        }
+        if tok.refresh_token.is_empty() {
+            return Err(reauth());
+        }
+        let client = librespot_oauth::OAuthClientBuilder::new(&tok.client_id, REDIRECT_URI, SCOPES.to_vec())
+            .build()
+            .map_err(|e| anyhow!("{e}"))?;
+        let fresh = client.refresh_token_async(&tok.refresh_token).await.map_err(|e| {
+            log::warn!("Spotify token refresh failed: {e}");
+            reauth()
+        })?;
+        let left = fresh.expires_at.saturating_duration_since(std::time::Instant::now());
+        let t = WebToken {
+            client_id: tok.client_id,
+            access_token: fresh.access_token.clone(),
+            // Spotify may or may not rotate the refresh token.
+            refresh_token: if fresh.refresh_token.is_empty() { tok.refresh_token } else { fresh.refresh_token },
+            expires_at: crate::model::now_ms() + left.as_millis() as i64,
+        };
+        self.save_web_token(&t);
+        Ok(fresh.access_token)
     }
 
     async fn web_get(&self, url: &str) -> Result<serde_json::Value> {

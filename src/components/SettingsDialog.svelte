@@ -1,7 +1,7 @@
 <script lang="ts">
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api";
-  import { app } from "../lib/state.svelte";
+  import { app, confirmAction } from "../lib/state.svelte";
   import type { AudioDevice, MidiControl, MidiInfo, MidiMapping, Profile, Settings, StyleDef } from "../lib/types";
   import Icon from "./Icon.svelte";
 
@@ -15,11 +15,13 @@
   let devices = $state<AudioDevice[]>([]);
   let midi = $state<MidiInfo | null>(null);
   let learning = $state<number | null>(null);
+  let spotifyCache = $state<number | null>(null);
 
   $effect(() => {
     if (tab === "audio") api.audioDevices().then((d) => (devices = d));
     if (tab === "midi") api.midiInfo().then((m) => (midi = m));
     if (tab === "library") api.libraryInfo().then((l) => (app.library = l));
+    if (tab === "spotify") api.spotifyCacheBytes().then((b) => (spotifyCache = b));
   });
 
   function set<K extends keyof Settings>(k: K, v: Settings[K]) {
@@ -282,12 +284,22 @@
             {#each midi?.ports ?? [] as p}<span><span class="led" class:ok={p.connected}></span> {p.name}</span>{:else}<span class="faint">No MIDI devices found. Plug one in; it will connect automatically.</span>{/each}
           </span>
           <span class="l">Mapping</span>
-          <select value={mapping?.id} onchange={(e) => set("midi", { ...$state.snapshot(s.midi), mappingId: e.currentTarget.value })}>
-            {#each mappings as m}<option value={m.id}>{m.name}</option>{/each}
-          </select>
+          <span class="row">
+            <select value={mapping?.id} onchange={(e) => set("midi", { ...$state.snapshot(s.midi), mappingId: e.currentTarget.value })}>
+              {#each mappings as m}<option value={m.id}>{m.name}</option>{/each}
+            </select>
+            {#if mapping && !mapping.builtin}
+              <button class="danger" onclick={async () => {
+                if (!(await confirmAction(`Delete the mapping “${mapping.name}”?`))) return;
+                const custom = s.midi.customMappings.filter((x) => x.id !== mapping.id);
+                set("midi", { ...$state.snapshot(s.midi), customMappings: custom, mappingId: "numark-dj2go2" });
+                if (midi) midi = { ...midi, mappings: midi.mappings.filter((x) => x.id !== mapping.id) };
+              }}>Delete Mapping</button>
+            {/if}
+          </span>
         </div>
         {#if mapping}
-          <p class="dim small">Left = deck A, right = deck B. SYNC = Go Live. Pads: Cues mode = hot cues (hold PAD MODE to clear), Auto Loop = jump −15/−5/+5/+15 s, Manual Loop = set start / end / fade / clear, Sampler = Play Next / Fade / Skip / Auto. Faders and the crossfader use soft takeover. {mapping.builtin ? "Editing a built-in mapping creates a custom copy." : ""}</p>
+          <p class="dim small">Left = deck A, right = deck B. SYNC = Go Live (on the deck the room hears: fade out). Pads: Cues mode = hot cues (hold PAD MODE to clear), Sampler mode = stems (vocals / drums / bass / other). Faders and the crossfader use soft takeover. {mapping.builtin ? "Editing a built-in mapping creates a custom copy." : ""}</p>
           <table class="mtable">
             <thead><tr><th>Message</th><th>Kind</th><th>Action</th><th></th></tr></thead>
             <tbody>
@@ -331,7 +343,10 @@
           <span class="l">Separation model</span>
           <span class="col">
             {#if st?.model.state === "ready"}
-              <span>Ready</span>
+              <span class="row">Ready
+                <button class="plain small" disabled={jobs.some(([, j]) => j.state === "running")}
+                  onclick={async () => { if (await confirmAction("Delete the stem separation model (210 MB)? Prepared stems keep working; preparing new ones downloads it again.", "Delete")) app.run(api.stemsRemoveModel()); }}>Remove Model…</button>
+              </span>
             {:else if st?.model.state === "downloading"}
               <span class="num">Downloading… {st.model.total ? `${Math.round((st.model.done / st.model.total) * 100)}%` : ""}</span>
             {:else}
@@ -363,6 +378,8 @@
           <span class="col">
             <span class="num">{((st?.cacheBytes ?? 0) / 1e9).toFixed(2)} GB for {app.stemsReady.size} song(s) (about 85 MB per 3-minute song)</span>
             <code>{st?.cacheDir}</code>
+            <span><button class="danger" disabled={!app.stemsReady.size}
+              onclick={async () => { if (await confirmAction(`Delete the prepared stems of all ${app.stemsReady.size} song(s)?`)) { await app.run(api.stemsDeleteAll()); app.stemsReady = new Set(await api.stemsReady()); } }}>Delete All Stems…</button></span>
           </span>
         </div>
 
@@ -375,6 +392,10 @@
           <span class="col">
             {#if app.spotify?.connected}
               <span>Connected as <b>{app.spotify.username}</b></span>
+              {#if !app.spotify.webApi}
+                <span class="warn small">Sign in once more to enable Spotify search and your playlists.</span>
+                <span><button class="primary" onclick={() => app.run(api.spotifyLogin())}>Sign In Again…</button></span>
+              {/if}
               <span><button onclick={() => api.spotifyLogout()}>Disconnect</button></span>
             {:else}
               <span class="row">
@@ -384,6 +405,15 @@
               <span class="faint small">Opens your browser to sign in.</span>
             {/if}
             {#if app.spotify?.error}<span class="err small">{app.spotify.error}</span>{/if}
+          </span>
+          <span class="l">Downloaded audio</span>
+          <span class="row">
+            <span class="num">{spotifyCache == null ? "…" : `${(spotifyCache / 1e6).toFixed(0)} MB`}</span>
+            <button disabled={!spotifyCache} onclick={async () => {
+              if (!(await confirmAction("Delete Spotify audio cached on this computer? It is downloaded again when needed.", "Delete"))) return;
+              await app.run(api.spotifyClearCache());
+              spotifyCache = await api.spotifyCacheBytes();
+            }}>Clear Cache…</button>
           </span>
           <span class="l">Startup</span>
           <label><input type="checkbox" checked={s.spotify.autoConnect} onchange={(e) => set("spotify", { ...$state.snapshot(s.spotify), autoConnect: e.currentTarget.checked })} /> Reconnect automatically</label>
@@ -428,8 +458,8 @@
         <div class="row">
           <select bind:value={profileId}>{#each app.profiles as p}<option value={p.id}>{p.name}{p.modified ? " (modified)" : ""}</option>{/each}</select>
           <button onclick={duplicateProfile}><Icon name="copy" size={13} /> Duplicate…</button>
-          {#if profile?.modified}<button onclick={() => confirm("Discard your changes to this built-in profile?") && api.deleteProfile(profileId)}>Reset to Built-in</button>{/if}
-          {#if profile && !profile.builtin}<button class="danger" onclick={() => confirm(`Delete “${profile.name}”?`) && api.deleteProfile(profileId)}>Delete</button>{/if}
+          {#if profile?.modified}<button onclick={() => confirmAction("Discard your changes to this built-in profile?", "Discard").then((ok) => { if (ok) api.deleteProfile(profileId); })}>Reset to Built-in</button>{/if}
+          {#if profile && !profile.builtin}<button class="danger" onclick={() => confirmAction(`Delete “${profile.name}”?`).then((ok) => { if (ok) api.deleteProfile(profileId); })}>Delete</button>{/if}
           <span class="spacer"></span>
           <button class="primary" disabled={!dirty} onclick={saveProfile}>Save Profile</button>
         </div>

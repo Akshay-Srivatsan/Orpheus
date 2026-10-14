@@ -21,6 +21,8 @@ export const api = {
   importPaths: (paths: string[]) => call<void>("library_import", { paths }),
   scanProgress: () => call<T.ScanProgress>("scan_progress"),
   history: (limit: number) => call<T.HistoryItem[]>("history", { limit }),
+  /** Removes history items ([playedAt, trackId]); omit to clear the whole history. */
+  removeHistory: (items?: [number, T.Id][]) => call<number>("history_remove", { items: items ?? null }),
 
   // sources & versions
   linkSpotify: (trackId: T.Id, uri: string) => call<T.Track>("source_link_spotify", { trackId, uri }),
@@ -98,6 +100,10 @@ export const api = {
   stemsDelete: (trackId: T.Id) => call<void>("stems_delete", { trackId }),
   /** Tracks that have prepared stems on this computer. */
   stemsReady: () => call<T.Id[]>("stems_ready"),
+  stemsDeleteAll: () => call<void>("stems_delete_all"),
+  stemsRemoveModel: () => call<void>("stems_remove_model"),
+  spotifyCacheBytes: () => call<number>("spotify_cache_bytes"),
+  spotifyClearCache: () => call<number>("spotify_clear_cache"),
   deckSeek: (deck: 0 | 1, ms: number) => call<void>("deck_seek", { deck, ms: Math.round(ms) }),
   deckSet: (deck: 0 | 1, o: { tempo?: number; trimDb?: number; pfl?: boolean; fadeAtMs?: number | null }) =>
     call<void>("deck_set", {
@@ -164,6 +170,7 @@ export interface Events {
   "toast-info": string;
   "stems-status": T.StemsStatus;
   "open-settings": string;
+  "history-changed": null;
   toast: string;
   imported: T.Id[];
 }

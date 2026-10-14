@@ -1,6 +1,7 @@
 // Global reactive state for the main window (Svelte 5 runes).
 
-import { api, on } from "./api";
+import { ask } from "@tauri-apps/plugin-dialog";
+import { api, on, type Events } from "./api";
 import type {
   Crate, DeckState, Id, Levels, LibraryInfo, StemsStatus, OutputStatus, PerformState, Profile, Row, ScanProgress, Setlist,
   SetlistSummary, Settings, SpotifyStatus, StyleDef, Track, Version,
@@ -166,7 +167,15 @@ class AppState {
     }
   }
 
+  /** Event subscriptions; replaced (not duplicated) if `init` runs again, e.g. after a hot reload. */
+  private unlisten: Promise<() => void>[] = [];
+
+  private listen<K extends keyof Events>(event: K, cb: (payload: Events[K]) => void) {
+    this.unlisten.push(on(event, cb));
+  }
+
   async init() {
+    for (const u of this.unlisten.splice(0)) u.then((f) => f());
     const [tracks, crates, setlists, profiles, settings, perform, decks, scan, spotify, outputs, library] = await Promise.all([
       api.tracks(), api.crates(), api.setlists(), api.profiles(), api.settings(), api.performState(),
       api.deckStates(), api.scanProgress(), api.spotifyStatus(), api.audioStatus(), api.libraryInfo(),
@@ -175,31 +184,31 @@ class AppState {
     await this.reloadCurrent();
     if (library.loadErrors.length) this.toast(`${library.loadErrors.length} library file(s) could not be read — see Settings → Library`);
 
-    on("deck-state", (d) => (this.decks = d));
-    on("levels", (l) => (this.levels = l));
-    on("perform-state", async (p) => {
+    this.listen("deck-state", (d) => (this.decks = d));
+    this.listen("levels", (l) => (this.levels = l));
+    this.listen("perform-state", async (p) => {
       const changed = p.setlistId !== this.perform?.setlistId;
       this.perform = p;
       if (changed) await this.reloadCurrent();
     });
-    on("library-changed", (ids) => this.reloadTracks(ids));
-    on("setlist-changed", async (id) => {
+    this.listen("library-changed", (ids) => this.reloadTracks(ids));
+    this.listen("setlist-changed", async (id) => {
       if (id === this.current?.id) await this.reloadCurrent();
       if (this.view.kind === "setlist" && this.view.id === id) await this.reloadBrowsed();
       this.setlists = await api.setlists();
     });
-    on("setlists-changed", async () => (this.setlists = await api.setlists()));
-    on("crates-changed", async () => (this.crates = await api.crates()));
-    on("profiles-changed", async () => (this.profiles = await api.profiles()));
-    on("settings-changed", (s) => (this.settings = s));
-    on("scan-progress", (s) => (this.scan = s));
-    on("spotify-status", (s) => (this.spotify = s));
-    on("output-status", (s) => (this.outputs = s));
-    on("toast", (t) => this.toast(t));
-    on("toast-info", (t) => this.toast(t, "info"));
-    on("open-settings", (tab) => (this.settingsOpen = tab));
+    this.listen("setlists-changed", async () => (this.setlists = await api.setlists()));
+    this.listen("crates-changed", async () => (this.crates = await api.crates()));
+    this.listen("profiles-changed", async () => (this.profiles = await api.profiles()));
+    this.listen("settings-changed", (s) => (this.settings = s));
+    this.listen("scan-progress", (s) => (this.scan = s));
+    this.listen("spotify-status", (s) => (this.spotify = s));
+    this.listen("output-status", (s) => (this.outputs = s));
+    this.listen("toast", (t) => this.toast(t));
+    this.listen("toast-info", (t) => this.toast(t, "info"));
+    this.listen("open-settings", (tab) => (this.settingsOpen = tab));
     let lastJobs = "";
-    on("stems-status", async (s) => {
+    this.listen("stems-status", async (s) => {
       this.stems = s;
       // Refresh the "has stems" set when a job finishes.
       const jobs = Object.keys(s.jobs).sort().join(",");
@@ -210,7 +219,7 @@ class AppState {
     });
     this.stems = await api.stemsStatus();
     this.stemsReady = new Set(await api.stemsReady());
-    on("midi-ui", (m) => (this.midiNav = { ...m, n: this.midiNav.n + 1 }));
+    this.listen("midi-ui", (m) => (this.midiNav = { ...m, n: this.midiNav.n + 1 }));
   }
 
   async saveSettings(patch: Partial<Settings>) {
@@ -294,4 +303,13 @@ export async function audition(versionId: Id, entryId?: Id | null) {
 /** Loads a version onto a specific deck (paused). */
 export async function loadDeck(deck: 0 | 1, versionId: Id, entryId?: Id | null) {
   await app.run(api.deckLoad(deck, versionId, { entryId, play: false }));
+}
+
+/** Native confirmation dialog for destructive actions. */
+export async function confirmAction(message: string, okLabel = "Delete"): Promise<boolean> {
+  try {
+    return await ask(message, { title: "Orpheus", kind: "warning", okLabel, cancelLabel: "Cancel" });
+  } catch {
+    return window.confirm(message);
+  }
 }

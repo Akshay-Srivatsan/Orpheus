@@ -2,7 +2,7 @@
   // Info tab: the selected track (recording), its versions, and — when a set
   // entry is selected — that entry's per-setlist overrides.
   import { api } from "../lib/api";
-  import { app, audition } from "../lib/state.svelte";
+  import { app, audition, confirmAction } from "../lib/state.svelte";
   import { fmtBpm, fmtTime, foldBpm, playback, rateToFit, resolveSettings, styleCenter } from "../lib/tempo";
   import type { Id, Overrides, Track, Version } from "../lib/types";
   import Icon from "./Icon.svelte";
@@ -196,7 +196,7 @@
               <button class="plain icon" title="Preview this version on the free deck" onclick={() => audition(v.id)}><Icon name="headphones" size={13} /></button>
               <button class="plain icon" title="Duplicate" onclick={() => duplicateVersion(v)}><Icon name="copy" size={13} /></button>
               <button class="plain icon danger" title="Delete version" disabled={track.versions.length < 2}
-                onclick={() => confirm(`Delete version “${v.name}”?`) && app.run(api.deleteVersion(v.id))}><Icon name="trash" size={13} /></button>
+                onclick={() => confirmAction(`Delete version “${v.name}”?`).then((ok) => { if (ok) app.run(api.deleteVersion(v.id)); })}><Icon name="trash" size={13} /></button>
             </div>
             <div class="grid">
               <span class="lbl">Style</span>
