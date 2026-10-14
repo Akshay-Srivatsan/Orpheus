@@ -8,8 +8,6 @@ import type {
 
 export type SourceView =
   | { kind: "all" }
-  | { kind: "style"; key: string }
-  | { kind: "unstyled" }
   | { kind: "crate"; id: Id }
   | { kind: "setlist"; id: Id }
   | { kind: "history" }
@@ -22,6 +20,9 @@ export interface Toast {
   text: string;
   kind: "error" | "info";
 }
+
+/** Style-filter value matching songs that have no dance style. */
+export const NO_STYLE = "__none";
 
 const emptyDeck = (deck: 0 | 1): DeckState => ({
   deck, status: "empty", trackId: null, versionId: null, entryId: null, positionMs: 0, durationMs: 0, startMs: 0,
@@ -51,6 +52,13 @@ class AppState {
   // UI state
   view = $state<SourceView>({ kind: "all" });
   search = $state("");
+  /**
+   * Dance-style filter applied to every view (library, crates, setlists...).
+   * Style keys; `NO_STYLE` matches songs without a style. Empty = no filter.
+   */
+  styleFilter = $state<string[]>([]);
+  /** With a single style filtered, also list unlabelled songs whose tempo fits it. */
+  suggestByTempo = $state(true);
   /** Selected library rows (version ids). */
   selected = $state<Id[]>([]);
   /** Selected set entries. */
@@ -62,6 +70,8 @@ class AppState {
   rightTab = $state<"set" | "checks" | "info">("set");
   settingsOpen = $state<false | string>(false);
   newSetlistOpen = $state(false);
+  /** Smart crate being edited: its id, or "new". */
+  smartEditor = $state<string | false>(false);
   /** Bumped by MIDI browse actions; the library table reacts. */
   midiNav = $state<{ action: string; delta?: number; deck?: 0 | 1; n: number }>({ action: "", n: 0 });
 
@@ -96,6 +106,9 @@ class AppState {
   styleColor(key: string | null | undefined): string {
     return (key && this.styleMap.get(key)?.color) || "#8e8e93";
   }
+
+  /** The single style being filtered on, if exactly one is. */
+  filterStyle = $derived(this.styleFilter.length === 1 && this.styleFilter[0] !== NO_STYLE ? this.styleFilter[0] : null);
 
   /** The deck the room heard last, and the free (cueing) deck. */
   liveDeck = $derived<0 | 1>(this.perform?.liveDeck ?? 0);
@@ -235,7 +248,8 @@ export async function addToSet(versionIds: Id[], where: "next" | "end" | number)
   }
   const entries = versionIds.map((id) => {
     const v = app.versionMap.get(id)?.version;
-    return { versionId: id, style: v?.style ? undefined : app.view.kind === "style" ? app.view.key : undefined };
+    // An unlabelled song added while filtering on a style is danced as that style.
+    return { versionId: id, style: v?.style ? undefined : (app.filterStyle ?? undefined) };
   });
   await app.run(api.insertEntries(set.id, entries, position));
 }

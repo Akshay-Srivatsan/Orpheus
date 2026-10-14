@@ -272,8 +272,8 @@ pub async fn crates_list(app: S<'_>) -> Res<Vec<Crate>> {
 }
 
 #[tauri::command]
-pub async fn crate_create(app: S<'_>, name: String) -> Res<Id> {
-    let id = app.store.crate_create(&name).map_err(ae)?;
+pub async fn crate_create(app: S<'_>, name: String, smart: Option<serde_json::Value>) -> Res<Id> {
+    let id = app.store.crate_create(&name, smart).map_err(ae)?;
     crate::app::emit(&app.handle, "crates-changed", ());
     Ok(id)
 }
@@ -293,10 +293,50 @@ pub async fn crate_delete(app: S<'_>, id: Id) -> Res<()> {
     Ok(())
 }
 
+/// Name for a version created when a styled song joins another style.
+fn style_version_name(app: &App, style: Option<&str>) -> String {
+    style.map(|s| app.active_profile().style_name(s)).unwrap_or_else(|| "New version".into())
+}
+
 #[tauri::command]
 pub async fn crate_add(app: S<'_>, id: Id, version_ids: Vec<Id>) -> Res<()> {
     app.store.crate_add(&id, &version_ids).map_err(ae)?;
     crate::app::emit(&app.handle, "crates-changed", ());
+    Ok(())
+}
+
+/// Sets a smart crate's rules (`None` makes it a plain crate).
+#[tauri::command]
+pub async fn crate_set_smart(app: S<'_>, id: Id, smart: Option<serde_json::Value>) -> Res<()> {
+    app.store.crate_set_smart(&id, smart).map_err(ae)?;
+    crate::app::emit(&app.handle, "crates-changed", ());
+    Ok(())
+}
+
+/// Labels songs with a dance style. Songs that already have another style get
+/// a version for this one (a song can be danced as several styles). Returns
+/// the version ids that carry the style.
+#[tauri::command]
+pub async fn style_add(app: S<'_>, style: String, version_ids: Vec<Id>) -> Res<Vec<Id>> {
+    let name = style_version_name(&app, Some(&style));
+    let ids = version_ids
+        .iter()
+        .map(|v| app.store.assign_style(v, &style, &name))
+        .collect::<anyhow::Result<Vec<_>>>()
+        .map_err(ae)?;
+    crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
+    app.emit_perform();
+    Ok(ids)
+}
+
+/// Removes the dance-style label from versions (the versions are kept).
+#[tauri::command]
+pub async fn style_remove(app: S<'_>, version_ids: Vec<Id>) -> Res<()> {
+    for v in &version_ids {
+        app.store.unassign_style(v).map_err(ae)?;
+    }
+    crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
+    app.emit_perform();
     Ok(())
 }
 

@@ -804,9 +804,10 @@ impl Store {
         v
     }
 
-    pub fn crate_create(&self, name: &str) -> Result<Id> {
+    /// Creates a crate; with `smart` rules it's a smart crate.
+    pub fn crate_create(&self, name: &str, smart: Option<serde_json::Value>) -> Result<Id> {
         let pos = self.inner.read().crates.values().map(|c| c.position).max().unwrap_or(0) + 1;
-        let c = Crate { id: new_id(), name: name.into(), position: pos, version_ids: vec![] };
+        let c = Crate { id: new_id(), name: name.into(), position: pos, version_ids: vec![], smart };
         self.save_crate(&c)?;
         let id = c.id.clone();
         self.inner.write().crates.insert(id.clone(), c);
@@ -823,6 +824,11 @@ impl Store {
         Ok(())
     }
 
+    /// Replaces a smart crate's rules (or turns a smart crate into a plain one with `None`).
+    pub fn crate_set_smart(&self, id: &str, smart: Option<serde_json::Value>) -> Result<()> {
+        self.with_crate(id, |c| c.smart = smart)
+    }
+
     pub fn crate_add(&self, id: &str, version_ids: &[Id]) -> Result<()> {
         self.with_crate(id, |c| {
             for v in version_ids {
@@ -831,6 +837,44 @@ impl Store {
                 }
             }
         })
+    }
+
+    /// Labels a song with a dance style and returns the version that carries
+    /// it: the given version if it has no style (or already this one), else an
+    /// existing version of the same track with that style, else a new version
+    /// (copying the original's cue points and settings) named `version_name`.
+    pub fn assign_style(&self, version_id: &str, style: &str, version_name: &str) -> Result<Id> {
+        let (v, tid) = self.version(version_id)?;
+        if v.style.as_deref() == Some(style) {
+            return Ok(v.id);
+        }
+        if v.style.is_none() {
+            self.version_update(&v.id, &VersionPatch { style: Some(Some(style.to_string())), ..Default::default() })?;
+            return Ok(v.id);
+        }
+        let track = self.track(&tid)?;
+        if let Some(existing) = track.rec.versions.iter().find(|x| x.style.as_deref() == Some(style)) {
+            return Ok(existing.id.clone());
+        }
+        let nv = self.version_create(
+            &tid,
+            Version {
+                id: String::new(),
+                name: version_name.to_string(),
+                style: Some(style.to_string()),
+                settings: v.settings.clone(),
+                comment: String::new(),
+                tags: vec![],
+            },
+        )?;
+        Ok(nv.id)
+    }
+
+    /// Removes a song from a dance style (clears that version's style). The
+    /// version is kept, so setlists that use it keep working.
+    pub fn unassign_style(&self, version_id: &str) -> Result<()> {
+        self.version_update(version_id, &VersionPatch { style: Some(None), ..Default::default() })?;
+        Ok(())
     }
 
     pub fn crate_remove(&self, id: &str, version_ids: &[Id]) -> Result<()> {
@@ -1099,6 +1143,50 @@ mod tests {
         assert_eq!(store.prune_unused(&[id.clone()]).unwrap(), 0, "protected while on a deck");
         assert_eq!(store.prune_unused(&[]).unwrap(), 1);
         assert!(store.track(&id).is_err());
+        let _ = fs::remove_dir_all(lib.parent().unwrap());
+    }
+
+    #[test]
+    fn styles_are_labels_and_crates_mix_styles() {
+        let (lib, local) = temp_dirs();
+        let store = Store::open(&lib, &local).unwrap();
+        let src = |k: &str| SourceRef { kind: "file".into(), key: k.into() };
+        let a = store.insert_track(&NewTrack { title: "A".into(), ..Default::default() }, src("a")).unwrap();
+        let b = store.insert_track(&NewTrack { title: "B".into(), ..Default::default() }, src("b")).unwrap();
+        let va = store.track(&a).unwrap().rec.versions[0].id.clone();
+        let vb = store.track(&b).unwrap().rec.versions[0].id.clone();
+
+        // Labelling an unstyled version sets its style in place...
+        assert_eq!(store.assign_style(&va, "cross-step-waltz", "Cross-Step Waltz").unwrap(), va);
+        assert_eq!(store.version(&va).unwrap().0.style.as_deref(), Some("cross-step-waltz"));
+        // ...a version that already has another style gets a new version...
+        let va2 = store.assign_style(&va, "rotary-waltz", "Rotary Waltz").unwrap();
+        assert_ne!(va2, va);
+        let (v2, tid) = store.version(&va2).unwrap();
+        assert_eq!((v2.style.as_deref(), v2.name.as_str(), tid.as_str()), (Some("rotary-waltz"), "Rotary Waltz", a.as_str()));
+        // ...and labelling again reuses it.
+        assert_eq!(store.assign_style(&va, "rotary-waltz", "Rotary Waltz").unwrap(), va2);
+        assert_eq!(store.track(&a).unwrap().rec.versions.len(), 2);
+
+        // One "Waltzes" crate can hold both styles.
+        let waltzes = store.crate_create("Waltzes", None).unwrap();
+        store.crate_add(&waltzes, &[va.clone(), va2.clone(), vb.clone()]).unwrap();
+        assert_eq!(store.crates()[0].version_ids.len(), 3);
+
+        // Smart crates keep their rules (opaque to the backend) on disk.
+        let rules = serde_json::json!({ "match": "all", "conditions": [{ "field": "style", "op": "is", "value": "rotary-waltz" }] });
+        let smart = store.crate_create("Rotary (smart)", Some(rules.clone())).unwrap();
+        fs::write(lib.join("crates").join("old.json"), r#"{"id":"old","name":"Old","position":9,"versionIds":["x"]}"#).unwrap();
+        let store2 = Store::open(&lib, &local).unwrap();
+        assert!(store2.load_errors().is_empty(), "{:?}", store2.load_errors());
+        let crates = store2.crates();
+        assert_eq!(crates.iter().find(|c| c.id == smart).unwrap().smart.as_ref(), Some(&rules));
+        assert_eq!(crates.iter().find(|c| c.id == "old").unwrap().version_ids, vec!["x".to_string()]);
+        store2.crate_set_smart(&smart, None).unwrap();
+        assert!(store2.crates().iter().find(|c| c.id == smart).unwrap().smart.is_none());
+
+        store2.unassign_style(&va).unwrap();
+        assert_eq!(store2.version(&va).unwrap().0.style, None);
         let _ = fs::remove_dir_all(lib.parent().unwrap());
     }
 

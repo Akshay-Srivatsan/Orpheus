@@ -50,7 +50,7 @@
 
   async function newVersion() {
     if (!track) return;
-    const style = app.view.kind === "style" ? app.view.key : null;
+    const style = app.filterStyle;
     const v = await app.run(api.createVersion(track.id, { name: style ? app.styleName(style) : "New version", style }));
     if (v) app.selected = [v.id];
   }

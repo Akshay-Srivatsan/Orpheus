@@ -32,7 +32,12 @@ export const api = {
 
   // crates
   crates: () => call<T.Crate[]>("crates_list"),
-  createCrate: (name: string) => call<T.Id>("crate_create", { name }),
+  createCrate: (name: string, smart: import("./smart").SmartRules | null = null) => call<T.Id>("crate_create", { name, smart }),
+  setCrateSmart: (id: T.Id, smart: import("./smart").SmartRules | null) => call<void>("crate_set_smart", { id, smart }),
+  /** Labels songs with a dance style; returns the versions that carry it (new ones for already-styled songs). */
+  styleAdd: (style: string, versionIds: T.Id[]) => call<T.Id[]>("style_add", { style, versionIds }),
+  /** Removes the dance-style label from versions. */
+  styleRemove: (versionIds: T.Id[]) => call<void>("style_remove", { versionIds }),
   renameCrate: (id: T.Id, name: string) => call<void>("crate_rename", { id, name }),
   deleteCrate: (id: T.Id) => call<void>("crate_delete", { id }),
   addToCrate: (id: T.Id, versionIds: T.Id[]) => call<void>("crate_add", { id, versionIds }),

@@ -44,6 +44,9 @@ Runs on macOS, Linux and Windows (Tauri 2, Rust and Svelte).
 | **Track** | A recording: title, artist, BPM, loudness and waveform. |
 | **Source** | Where a track's audio comes from: a local file or a Spotify track. A track can have both. |
 | **Version** | A playable configuration of a track: dance style, tempo, start, end and fade points, gain, stem defaults, comments and tags. One song can be a Rotary Waltz at 150 BPM and a Fast Waltz at 168 BPM. You can also add a slowed "teaching" version. |
+| **Dance style** | A label on a version, not a place in the library. Every view (all songs, a crate, a setlist, history) has a style filter bar: click a style to narrow the view, ⌘/Shift-click to combine styles. With one style chosen, unlabelled songs whose tempo fits it are suggested too, so a mixed "Waltzes" crate can be split into cross-step and rotary by tempo. Drop songs on a style to label them; a song that already has another style gets a new version for this one. |
+| **Crate** | Your own collection of songs: "Waltzes", "Dancebreak classics", "Pre-approved rotary waltzes", "Wedding requests". Crates can mix styles freely. Drag songs onto a crate to add them. |
+| **Smart crate** | A crate defined by rules instead of a hand-picked list, e.g. "in *Waltzes* and tempo fits Rotary Waltz", "Lindy Hop, not played in the last 30 days", "longer than 4:30". It updates as the library changes. |
 | **Setlist** | An ordered list of versions, or of **style slots** ("a West Coast Swing goes here") that you fill live. Each entry can override its version's settings for that set only. |
 | **Club profile** | Dance styles, tempo ranges, pause length, fade length, tags (e.g. "Dance with a Stranger", "Jam"), announcements and **setlist rules**. Rules include song count, song length limits, per-style minimums that depend on the lesson, tempo exceptions, and required closing sequences. The **Checks** tab tests a setlist against them. |
 
