@@ -316,6 +316,8 @@ export interface DeckState {
   cueMs: number;
   /** The room can hear this deck (crossfader). */
   onAir: boolean;
+  /** On/off per stem (vocals, drums, bass, other) when playing from stems. */
+  stems: [boolean, boolean, boolean, boolean] | null;
   fading: boolean;
   /** Playback rate (1 = original tempo). */
   tempo: number;
@@ -452,4 +454,20 @@ export interface MonitorInfo {
   width: number;
   height: number;
   primary: boolean;
+}
+
+export const STEMS = ["vocals", "drums", "bass", "other"] as const;
+export type StemName = (typeof STEMS)[number];
+
+export type StemJob = { state: "queued" } | { state: "running"; percent: number } | { state: "failed"; message: string };
+
+export interface StemsStatus {
+  model:
+    | { state: "missing" }
+    | { state: "downloading"; done: number; total: number }
+    | { state: "ready" }
+    | { state: "error"; message: string };
+  jobs: Record<Id, StemJob>;
+  cacheBytes: number;
+  cacheDir: string;
 }

@@ -13,6 +13,7 @@ pub mod model;
 pub mod perform;
 pub mod settings;
 pub mod spotify;
+pub mod stems;
 
 use std::sync::Arc;
 use tauri::{Manager, RunEvent};
@@ -101,6 +102,12 @@ pub fn run() {
             commands::deck_set_point,
             commands::deck_set,
             commands::deck_tempo_reset,
+            commands::deck_stem,
+            commands::stems_status,
+            commands::stems_download_model,
+            commands::stems_prepare,
+            commands::stems_delete,
+            commands::stems_ready,
             commands::levels_set,
             commands::perform_open,
             commands::perform_state,

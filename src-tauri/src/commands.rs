@@ -627,6 +627,52 @@ pub async fn deck_set(
     Ok(())
 }
 
+/// Stem toggle (`index` in vocals, drums, bass, other order); prepares stems if missing.
+#[tauri::command]
+pub async fn deck_stem(app: S<'_>, deck: usize, index: usize) -> Res<()> {
+    app.deck_stem_toggle(deck.min(1), index.min(3)).map_err(ae)
+}
+
+#[tauri::command]
+pub async fn stems_status(app: S<'_>) -> Res<crate::stems::StemsStatus> {
+    Ok(app.stems.status())
+}
+
+#[tauri::command]
+pub async fn stems_download_model(app: S<'_>) -> Res<()> {
+    app.stems.download_model();
+    Ok(())
+}
+
+/// Queues stem separation; returns how many songs were queued.
+#[tauri::command]
+pub async fn stems_prepare(app: S<'_>, track_ids: Vec<Id>) -> Res<usize> {
+    app.prepare_stems(&track_ids).map_err(ae)
+}
+
+#[tauri::command]
+pub async fn stems_delete(app: S<'_>, track_id: Id) -> Res<()> {
+    let t = app.store.track(&track_id).map_err(ae)?;
+    for s in t.rec.sources.iter().filter(|s| s.kind == "file") {
+        app.stems.delete(&s.key).map_err(ae)?;
+    }
+    crate::app::emit(&app.handle, "stems-status", app.stems.status());
+    crate::app::emit(&app.handle, "library-changed", vec![track_id]);
+    Ok(())
+}
+
+/// Content hashes (of this track's files) that have prepared stems.
+#[tauri::command]
+pub async fn stems_ready(app: S<'_>) -> Res<Vec<Id>> {
+    Ok(app
+        .store
+        .all_tracks()
+        .into_iter()
+        .filter(|t| t.rec.sources.iter().any(|s| s.kind == "file" && app.stems.files(&s.key).is_some()))
+        .map(|t| t.rec.id)
+        .collect())
+}
+
 #[tauri::command]
 pub async fn deck_tempo_reset(app: S<'_>, deck: usize) -> Res<()> {
     app.deck_tempo_reset(deck.min(1));

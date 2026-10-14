@@ -41,8 +41,18 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 futures-util = "0.3"
 rayon = "1"
 rustfft = "6"
+hound = "3"
+thread-priority = "3"
+stem-splitter-core = { version = "1.2", default-features = false }
 base64 = "0.22"
 open = "5"
+
+# Hardware-accelerated stem separation where the platform provides it.
+[target.'cfg(target_os = "macos")'.dependencies]
+stem-splitter-core = { version = "1.2", default-features = false, features = ["coreml"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+stem-splitter-core = { version = "1.2", default-features = false, features = ["directml"] }
 
 # Keep audio DSP and analysis fast in debug builds.
 [profile.dev]

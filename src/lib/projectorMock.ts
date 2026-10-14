@@ -148,6 +148,7 @@ export function mockDeck(): DeckState {
     fadeAtMs: null,
     cueMs: 230,
     onAir: true,
+    stems: null,
     fading: false,
     tempo: 1,
     keylock: true,

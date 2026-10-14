@@ -255,6 +255,83 @@ impl App {
         }
     }
 
+    // ------------------------------------------------------------ stems
+
+    /// Queues stem separation for tracks with a local file.
+    pub fn prepare_stems(&self, track_ids: &[Id]) -> Result<usize> {
+        let mut queued = 0;
+        for id in track_ids {
+            let t = self.store.track(id)?;
+            let Some(path) = crate::library::resolve_path(&self.store, &t.rec.id) else {
+                if track_ids.len() == 1 {
+                    return Err(anyhow!("Stems need a local file; “{}” is only on Spotify.", t.rec.title));
+                }
+                continue;
+            };
+            let Some(hash) = self.store.file_info(&path.to_string_lossy()).map(|f| f.hash) else { continue };
+            self.stems.request(&t.rec.id, &hash, path)?;
+            queued += 1;
+        }
+        Ok(queued)
+    }
+
+    /// Stem pad: toggles a stem, or starts preparing stems if the song has none.
+    pub fn deck_stem_toggle(&self, deck: usize, index: usize) -> Result<()> {
+        let d = &self.decks[deck];
+        self.require_loaded(deck)?;
+        if d.has_stems() {
+            d.set_stem(index, !d.stem_on(index));
+            return Ok(());
+        }
+        let tid = d.track_id().ok_or_else(|| anyhow!("Deck is empty"))?;
+        if matches!(self.stems.job(&tid), Some(crate::stems::JobStatus::Queued | crate::stems::JobStatus::Running { .. })) {
+            return Err(anyhow!("Stems for this song are still being prepared."));
+        }
+        if !self.stems.model_ready() {
+            emit(&self.handle, "open-settings", "stems");
+            return Err(anyhow!("Stems need the separation model (about 210 MB). Download it in Settings → Stems."));
+        }
+        self.prepare_stems(&[tid.clone()])?;
+        let title = self.store.track(&tid).map(|t| t.rec.title).unwrap_or_default();
+        emit(&self.handle, "toast-info", format!("Preparing stems for “{title}” (about a minute)…"));
+        Ok(())
+    }
+
+    /// Called when a stem job or the model changes state.
+    pub fn on_stems_changed(&self, track: Option<Id>) {
+        emit(&self.handle, "stems-status", self.stems.status());
+        let Some(tid) = track else { return };
+        if self.stems.job(&tid).is_some() {
+            return; // still running (or failed)
+        }
+        // Newly ready: switch decks with this song onto its stems, unless the room hears them.
+        for deck in 0..2 {
+            let d = &self.decks[deck];
+            if d.track_id().as_deref() == Some(&tid) && !d.has_stems() && !self.audible(deck) {
+                if let Err(e) = self.reload_deck(deck) {
+                    log::warn!("reloading deck with stems: {e:#}");
+                }
+            }
+        }
+        emit(&self.handle, "library-changed", vec![tid]);
+    }
+
+    /// Reloads a deck's song in place (position, play state, tempo and cue kept).
+    fn reload_deck(&self, deck: usize) -> Result<()> {
+        let d = &self.decks[deck];
+        let vid = d.version_id().ok_or_else(|| anyhow!("Deck is empty"))?;
+        let (version, track_id) = self.store.version(&vid)?;
+        let track = self.store.track(&track_id)?;
+        let entry = d.entry_id().and_then(|id| self.store.entry(&id).ok()).map(|(e, _)| e);
+        let (pos, tempo, cue, playing) = (d.position_secs(), d.tempo(), d.cue_secs(), d.status() == "playing");
+        let mut req = self.load_request(deck, &track, &version, entry.as_ref(), playing)?;
+        req.tempo = tempo;
+        req.cue_secs = Some(cue);
+        d.load(req);
+        d.seek(pos);
+        Ok(())
+    }
+
     pub fn deck_set_pfl(&self, deck: usize, on: bool) {
         self.decks[deck].set_pfl(on);
         self.update_routing();
@@ -309,7 +386,19 @@ impl App {
                 ("playPause", Value::Press) => self.deck_play_pause(deck),
                 ("cue", Value::Press) => self.deck_cue(deck, true),
                 ("cue", Value::Release) => self.deck_cue(deck, false),
-                ("goLive", Value::Press) => result = self.go_live(deck).map(|_| ()),
+                // SYNC: Go Live; on the deck the room is hearing, fade out (again: cancel).
+                ("goLive", Value::Press) => {
+                    if self.audible(deck) && d.status() == "playing" {
+                        if d.is_fading() {
+                            d.cancel_fade();
+                            self.perform.lock().pending = None;
+                        } else {
+                            d.fade_out(self.fade_secs());
+                        }
+                    } else {
+                        result = self.go_live(deck).map(|_| ());
+                    }
+                }
                 ("pfl", Value::Press) => self.deck_set_pfl(deck, !d.pfl()),
                 ("load", Value::Press) => {
                     emit(&self.handle, "midi-ui", serde_json::json!({ "action": "deck.load", "deck": deck }));
@@ -341,6 +430,13 @@ impl App {
                 ("setEnd", Value::Press) => result = self.deck_set_point(deck, "end"),
                 ("setFade", Value::Press) => result = self.deck_set_point(deck, "fade"),
                 ("clearPoints", Value::Press) => result = self.deck_set_point(deck, "clear"),
+                (c, Value::Press) if c.starts_with("stem") => {
+                    if let Ok(n) = c["stem".len()..].parse::<usize>() {
+                        if (1..=4).contains(&n) {
+                            result = self.deck_stem_toggle(deck, n - 1);
+                        }
+                    }
+                }
                 (c, Value::Press) if c.starts_with("hotcueClear") => {
                     if let Ok(n) = c["hotcueClear".len()..].parse::<u8>() {
                         result = self.deck_hotcue_clear(deck, n);
@@ -422,6 +518,19 @@ impl App {
                 .unwrap_or_default();
             for n in 1..=4u8 {
                 st.insert(format!("deck{i}.hotcue{n}"), cues.iter().any(|c| c.slot == n));
+            }
+            // Stem pads: lit while the stem is on; blinking while stems are prepared.
+            let preparing = snap
+                .track_id
+                .as_ref()
+                .map(|t| matches!(self.stems.job(t), Some(crate::stems::JobStatus::Queued | crate::stems::JobStatus::Running { .. })))
+                .unwrap_or(false);
+            for n in 0..4 {
+                let on = match snap.stems {
+                    Some(s) => s[n],
+                    None => preparing && blink,
+                };
+                st.insert(format!("deck{i}.stem{}", n + 1), on);
             }
         }
         let _ = Ordering::Relaxed;

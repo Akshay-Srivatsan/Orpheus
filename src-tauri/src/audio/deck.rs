@@ -27,6 +27,12 @@ pub struct LoadRequest {
     pub tempo: f64,
     pub gain_db: f64,
     pub play: bool,
+    /// Main cue point (defaults to `start_secs`).
+    pub cue_secs: Option<f64>,
+    /// The source mixes separated stems (gains in `DeckShared::stem_gains`).
+    pub has_stems: bool,
+    /// Initial on/off state of each stem (`stems::STEMS` order).
+    pub stems_on: [bool; 4],
 }
 
 enum Cmd {
@@ -66,6 +72,8 @@ pub struct DeckSnapshot {
     /// This deck plays to the room.
     pub on_air: bool,
     pub fading: bool,
+    /// On/off per stem (`stems::STEMS` order), when the track is playing from stems.
+    pub stems: Option<[bool; 4]>,
     pub tempo: f64,
     pub keylock: bool,
     pub gain_db: f64,
@@ -103,6 +111,9 @@ pub struct DeckShared {
     pub on_air: AtomicBool,
     /// Pace the deck by the headphone output (no master device available).
     pub clock_cue: Arc<AtomicBool>,
+    /// Stem gains read by `StemSource` (1 = on, 0 = muted).
+    pub stem_gains: Arc<[super::AtomicF32; 4]>,
+    pub has_stems: AtomicBool,
     /// Engine output rate (Hz).
     pub rate: Arc<AtomicU32>,
     pub buffer_ms: Arc<AtomicU32>,
@@ -139,6 +150,8 @@ impl Deck {
             pfl: AtomicBool::new(false),
             on_air: AtomicBool::new(false),
             clock_cue,
+            stem_gains: Arc::new(std::array::from_fn(|_| super::AtomicF32::new(1.0))),
+            has_stems: AtomicBool::new(false),
             rate,
             buffer_ms,
             master_tap: Tap::new(playing.clone(), 0.0),
@@ -156,6 +169,10 @@ impl Deck {
 
     pub fn load(&self, req: LoadRequest) {
         self.shared.playing.store(false, Ordering::SeqCst);
+        for (g, on) in self.shared.stem_gains.iter().zip(req.stems_on) {
+            g.set(if on { 1.0 } else { 0.0 });
+        }
+        self.shared.has_stems.store(false, Ordering::SeqCst);
         self.shared.load_gen.fetch_add(1, Ordering::SeqCst);
         {
             let mut i = self.shared.info.lock();
@@ -297,6 +314,24 @@ impl Deck {
         self.shared.load_gen.load(Ordering::SeqCst)
     }
 
+    /// Turns a stem on or off (`stems::STEMS` order). Returns false if the
+    /// loaded track isn't playing from stems.
+    pub fn set_stem(&self, index: usize, on: bool) -> bool {
+        if !self.shared.has_stems.load(Ordering::SeqCst) || index >= 4 {
+            return false;
+        }
+        self.shared.stem_gains[index].set(if on { 1.0 } else { 0.0 });
+        true
+    }
+
+    pub fn stem_on(&self, index: usize) -> bool {
+        self.shared.stem_gains.get(index).map(|g| g.get() > 0.5).unwrap_or(false)
+    }
+
+    pub fn has_stems(&self) -> bool {
+        self.shared.has_stems.load(Ordering::SeqCst)
+    }
+
     pub fn loaded(&self) -> bool {
         !matches!(self.status().as_str(), "empty" | "error")
     }
@@ -320,6 +355,10 @@ impl Deck {
             end_ms: i.end.map(|e| (e * 1000.0) as i64),
             fade_at_ms: i.fade_at.map(|e| (e * 1000.0) as i64),
             cue_ms: (i.cue * 1000.0) as i64,
+            stems: s
+                .has_stems
+                .load(Ordering::Relaxed)
+                .then(|| std::array::from_fn(|k| s.stem_gains[k].get() > 0.5)),
             on_air: s.on_air.load(Ordering::Relaxed),
             fading: i.fading,
             tempo: s.tempo.get(),
@@ -484,6 +523,7 @@ impl Worker {
                 self.stretch = None;
                 self.clear_rings();
                 self.track_id = None;
+                self.sh.has_stems.store(false, Ordering::SeqCst);
                 let mut i = self.sh.info.lock();
                 *i = Info { status: "empty".into(), ..Default::default() };
                 self.sh.position.set(0.0);
@@ -546,7 +586,7 @@ impl Worker {
             let mut i = self.sh.info.lock();
             i.duration = duration;
             i.start = req.start_secs;
-            i.cue = req.start_secs;
+            i.cue = req.cue_secs.unwrap_or(req.start_secs);
             i.end = self.end;
             i.fade_at = self.fade_at;
             i.fading = false;
@@ -554,6 +594,7 @@ impl Worker {
             i.status = if req.play { "playing" } else { "paused" }.into();
         }
         self.sh.playing.store(req.play, Ordering::SeqCst);
+        self.sh.has_stems.store(req.has_stems, Ordering::SeqCst);
         let _ = self.events.send(DeckEvent::Loaded { deck: self.sh.index, track_id: req.track_id.clone() });
     }
 

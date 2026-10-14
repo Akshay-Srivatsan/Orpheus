@@ -233,6 +233,21 @@
               <span class="row"><input type="number" step="0.5" placeholder="song" value={v.gainDb ?? ""}
                 onchange={(e) => patchVersion(v, { gainDb: e.currentTarget.value ? +e.currentTarget.value : null })} /> dB</span>
             </div>
+            {#if app.stemsReady.has(track.id)}
+              <div class="row small">
+                <span class="lbl">Stems</span>
+                {#each ["vocals", "drums", "bass", "other"] as stem}
+                  {@const on = v.stems?.[stem] !== false}
+                  <label title="Start this version with the {stem} stem {on ? 'on' : 'muted'}">
+                    <input type="checkbox" checked={on} onchange={(e) => {
+                      const next: Record<string, boolean> = { ...(v.stems ?? {}) };
+                      if (e.currentTarget.checked) delete next[stem]; else next[stem] = false;
+                      patchVersion(v, { stems: Object.keys(next).length ? next : null });
+                    }} /> {stem}
+                  </label>
+                {/each}
+              </div>
+            {/if}
             <textarea rows="1" placeholder="Comment (e.g. slowed for teaching)" value={v.comment ?? ""}
               onchange={(e) => patchVersion(v, { comment: e.currentTarget.value })}></textarea>
           </div>
@@ -276,6 +291,20 @@
               <button class:on={preferred !== "spotify"} onclick={() => patchTrack({ preferredSource: null })}>File</button>
               <button class:on={preferred === "spotify"} onclick={() => patchTrack({ preferredSource: "spotify" })}>Spotify</button>
             </div>
+          </div>
+        {/if}
+        {#if track.files.length}
+          {@const job = app.stems?.jobs[track.id]}
+          <div class="row small">
+            {#if app.stemsReady.has(track.id)}
+              Stems ready
+              <button class="plain small" onclick={() => app.run(api.stemsDelete(track.id))}>Delete stems</button>
+            {:else if job && job.state !== "failed"}
+              <span class="num">Preparing stems… {job.state === "running" ? `${Math.round(job.percent)}%` : "(queued)"}</span>
+            {:else}
+              <button class="small" onclick={() => app.run(api.stemsPrepare([track.id]))}>Prepare Stems</button>
+              {#if job?.state === "failed"}<span class="warn">{job.message}</span>{/if}
+            {/if}
           </div>
         {/if}
         <div class="row small faint">

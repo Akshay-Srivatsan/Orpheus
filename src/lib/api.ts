@@ -85,6 +85,14 @@ export const api = {
   deckGoLive: (deck: 0 | 1) => call<string>("deck_go_live", { deck }),
   deckSetPoint: (deck: 0 | 1, kind: "start" | "end" | "fade" | "clear") => call<void>("deck_set_point", { deck, kind }),
   deckTempoReset: (deck: 0 | 1) => call<void>("deck_tempo_reset", { deck }),
+  /** Toggles a stem (0 vocals, 1 drums, 2 bass, 3 other); starts preparing stems if the song has none. */
+  deckStem: (deck: 0 | 1, index: number) => call<void>("deck_stem", { deck, index }),
+  stemsStatus: () => call<T.StemsStatus>("stems_status"),
+  stemsDownloadModel: () => call<void>("stems_download_model"),
+  stemsPrepare: (trackIds: T.Id[]) => call<number>("stems_prepare", { trackIds }),
+  stemsDelete: (trackId: T.Id) => call<void>("stems_delete", { trackId }),
+  /** Tracks that have prepared stems on this computer. */
+  stemsReady: () => call<T.Id[]>("stems_ready"),
   deckSeek: (deck: 0 | 1, ms: number) => call<void>("deck_seek", { deck, ms: Math.round(ms) }),
   deckSet: (deck: 0 | 1, o: { tempo?: number; trimDb?: number; pfl?: boolean; fadeAtMs?: number | null }) =>
     call<void>("deck_set", {
@@ -149,6 +157,8 @@ export interface Events {
   "output-status": T.OutputStatus;
   "midi-ui": { action: string; delta?: number; deck?: 0 | 1 };
   "toast-info": string;
+  "stems-status": T.StemsStatus;
+  "open-settings": string;
   toast: string;
   imported: T.Id[];
 }

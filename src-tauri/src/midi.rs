@@ -96,6 +96,9 @@ pub fn actions() -> Vec<(String, String, String)> {
         for (s, l) in [("-15", "back 15 s"), ("-5", "back 5 s"), ("+5", "forward 5 s"), ("+15", "forward 15 s")] {
             dk(&format!("jump{s}"), &format!("jump {l}"), "button");
         }
+        for (n, s) in crate::stems::STEMS.iter().enumerate() {
+            dk(&format!("stem{}", n + 1), &format!("{s} stem on/off"), "button");
+        }
         dk("setStart", "set the version's start here", "button");
         dk("setEnd", "set the version's end here", "button");
         dk("setFade", "set the version's fade-out here", "button");
@@ -107,7 +110,10 @@ pub fn actions() -> Vec<(String, String, String)> {
 pub fn led_states() -> Vec<String> {
     let mut v: Vec<String> = vec!["perform.nextReady".into(), "perform.autoAdvance".into()];
     for d in 0..2 {
-        for s in ["playing", "onAir", "sync", "pfl", "cueReady", "hotcue1", "hotcue2", "hotcue3", "hotcue4"] {
+        for s in [
+            "playing", "onAir", "sync", "pfl", "cueReady", "hotcue1", "hotcue2", "hotcue3", "hotcue4", "stem1", "stem2",
+            "stem3", "stem4",
+        ] {
             v.push(format!("deck{d}.{s}"));
         }
     }
@@ -146,22 +152,11 @@ pub fn builtin_mappings() -> Vec<Mapping> {
             controls.push(c(pad, 0x08 + n, &p(&format!("hotcueClear{n}")), "button"));
             leds.push(led(pad, n, &p(&format!("hotcue{n}"))));
         }
-        // Auto Loop mode: quick jumps for auditioning.
-        for (n, j) in [(0x11u8, "-15"), (0x12, "-5"), (0x13, "+5"), (0x14, "+15")] {
-            controls.push(c(pad, n, &p(&format!("jump{j}")), "button"));
+        // Sampler mode: stems (vocals, drums, bass, other).
+        for n in 1..=4u8 {
+            controls.push(c(pad, 0x30 + n, &p(&format!("stem{n}")), "button"));
+            leds.push(led(pad, 0x30 + n, &p(&format!("stem{n}"))));
         }
-        // Manual Loop mode: edit points of the loaded version.
-        controls.push(c(pad, 0x21, &p("setStart"), "button"));
-        controls.push(c(pad, 0x22, &p("setEnd"), "button"));
-        controls.push(c(pad, 0x23, &p("setFade"), "button"));
-        controls.push(c(pad, 0x24, &p("clearPoints"), "button"));
-        // Sampler mode: performance controls (same on both sides).
-        controls.push(c(pad, 0x31, "perform.playNext", "button"));
-        controls.push(c(pad, 0x32, "perform.fadeOut", "button"));
-        controls.push(c(pad, 0x33, "perform.skipNext", "button"));
-        controls.push(c(pad, 0x34, "perform.toggleAutoAdvance", "button"));
-        leds.push(led(pad, 0x31, "perform.nextReady"));
-        leds.push(led(pad, 0x34, "perform.autoAdvance"));
         leds.push(led(note, 0x00, &p("playing")));
         leds.push(led(note, 0x01, &p("cueReady")));
         leds.push(led(note, 0x02, &p("sync")));

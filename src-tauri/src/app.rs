@@ -42,6 +42,7 @@ pub struct App {
     pub rate: Arc<AtomicU32>,
     pub buffer_ms: Arc<AtomicU32>,
     pub spotify: Arc<Spotify>,
+    pub stems: Arc<crate::stems::Stems>,
     pub midi: OnceLock<Arc<Midi>>,
     pub perform: Mutex<Perform>,
     pub scan_progress: Mutex<crate::library::ScanProgress>,
@@ -91,6 +92,7 @@ impl App {
         let store = Arc::new(Store::open(&library_dir, &data_dir)?);
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build()?;
         let spotify = Arc::new(Spotify::new(rt.handle().clone(), data_dir.join("spotify")));
+        let stems = crate::stems::Stems::new(&data_dir);
         let levels = Arc::new(Levels::default());
         let rate = Arc::new(AtomicU32::new(48000));
         let buffer_ms = Arc::new(AtomicU32::new(settings.audio.buffer_ms));
@@ -117,6 +119,7 @@ impl App {
             rate,
             buffer_ms,
             spotify,
+            stems,
             midi: OnceLock::new(),
             perform: Mutex::new(Perform::default()),
             scan_progress: Mutex::new(Default::default()),
@@ -135,6 +138,12 @@ impl App {
         let handler: midi::Handler = Arc::new(move |action, value| {
             if let Some(app) = weak.upgrade() {
                 app.on_midi(action, value);
+            }
+        });
+        let weak = Arc::downgrade(&app);
+        app.stems.set_on_change(move |track| {
+            if let Some(app) = weak.upgrade() {
+                app.on_stems_changed(track);
             }
         });
         let (mapping, enabled) = app.current_mapping();
@@ -325,14 +334,34 @@ impl App {
             }
         }
         let (kind, key) = self.choose_source(track)?;
+        // Stem defaults: version / entry settings, e.g. {"vocals": false}.
+        let stems_on: [bool; 4] = std::array::from_fn(|i| {
+            r.stems
+                .as_ref()
+                .and_then(|m| m.get(crate::stems::STEMS[i]))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true)
+        });
+        let mut has_stems = false;
         let open: crate::audio::deck::SourceOpener = if kind == "spotify" {
             let dp = self.spotify.deck_player(deck)?;
             let dur = track.rec.duration_ms;
             let start = start_ms as f64 / 1000.0;
             Box::new(move || Ok(Box::new(SpotifySource::open(dp, &key, dur, start)?) as Box<dyn Source>))
         } else {
+            let stem_files = self.store.file_info(&key).and_then(|f| self.stems.files(&f.hash));
             let path = PathBuf::from(key);
-            Box::new(move || Ok(Box::new(LocalSource::open(&path)?) as Box<dyn Source>))
+            match stem_files {
+                Some(files) => {
+                    has_stems = true;
+                    let gains = self.decks[deck].shared.stem_gains.clone();
+                    Box::new(move || {
+                        let main = Box::new(LocalSource::open(&path)?) as Box<dyn Source>;
+                        Ok(Box::new(crate::audio::source::StemSource::open(main, &files.paths, gains)?) as Box<dyn Source>)
+                    })
+                }
+                None => Box::new(move || Ok(Box::new(LocalSource::open(&path)?) as Box<dyn Source>)),
+            }
         };
         Ok(LoadRequest {
             track_id: Some(track.rec.id.clone()),
@@ -346,6 +375,9 @@ impl App {
             tempo,
             gain_db: gain,
             play,
+            cue_secs: None,
+            has_stems,
+            stems_on,
         })
     }
 
@@ -362,6 +394,9 @@ impl App {
             tempo: 1.0,
             gain_db: 0.0,
             play: true,
+            cue_secs: None,
+            has_stems: false,
+            stems_on: [true; 4],
         };
         if self.audible(deck) {
             return;

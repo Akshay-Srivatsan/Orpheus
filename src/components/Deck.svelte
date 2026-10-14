@@ -43,6 +43,9 @@
   const nearEnd = $derived(audible && remaining < 15000 && !d.fading);
   const hotCues = $derived(track?.hotCues ?? []);
   const atCue = $derived(loaded && !playing && Math.abs(d.positionMs - d.cueMs) < 60);
+  const STEM_LABELS = [["Vox", "Vocals", "#ff6482"], ["Drm", "Drums", "#ffd60a"], ["Bas", "Bass", "#30d158"], ["Oth", "Other (melody, instruments)", "#64d2ff"]] as const;
+  const stemJob = $derived(track ? app.stems?.jobs[track.id] : undefined);
+  const canStem = $derived(!!track && track.files.length > 0);
 
   let tempoDraft = $state<number | null>(null);
   const tempoShown = $derived(tempoDraft ?? d.tempo);
@@ -245,6 +248,25 @@
   </div>
 
   <div class="tempo">
+    {#if canStem}
+      <div class="stems" role="group" aria-label="Stems">
+        {#if d.stems}
+          {#each STEM_LABELS as [short, long, c], i}
+            <button class="stem" class:off={!d.stems[i]} style:--sc={c}
+              title="{long}: {d.stems[i] ? 'on — click to mute' : 'muted — click to turn on'}"
+              onclick={() => app.run(api.deckStem(deck, i))}>{short}</button>
+          {/each}
+        {:else if stemJob?.state === "running" || stemJob?.state === "queued"}
+          <span class="stem-prep num" title="Separating vocals, drums, bass and other">
+            Stems {stemJob.state === "running" ? `${Math.round(stemJob.percent)}%` : "queued"}
+          </span>
+        {:else}
+          <button class="plain small stem-prep" disabled={!loaded}
+            title={stemJob?.state === "failed" ? `Failed: ${stemJob.message}` : "Separate this song into vocals, drums, bass and other (takes a minute or two)"}
+            onclick={() => app.run(api.deckStem(deck, 0))}>{stemJob?.state === "failed" ? "Stems failed — retry" : "Prepare stems"}</button>
+        {/if}
+      </div>
+    {/if}
     <div class="bpm num" class:outside={fit === "outside"} class:sweet={fit === "sweet"}
       title={style?.sweet ? `${style.name}: ${style.sweet[0]}–${style.sweet[1]} BPM` : ""}>
       <strong>{fmtBpm(liveBpm)}</strong> <span class="dim">BPM</span>
@@ -303,6 +325,11 @@
   .pad.set { background: color-mix(in srgb, var(--pc) 30%, var(--bg-elev-3)); border-color: color-mix(in srgb, var(--pc) 70%, transparent); color: white; }
   .golive { font-weight: 600; }
   .tempo { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .stems { display: flex; gap: 2px; flex: none; margin-right: 4px; }
+  .stem { width: 34px; height: 22px; padding: 0; font-size: 10px; font-weight: 700; letter-spacing: 0.03em;
+    background: color-mix(in srgb, var(--sc) 28%, var(--bg-elev-3)); border-color: color-mix(in srgb, var(--sc) 60%, transparent); color: white; }
+  .stem.off { background: var(--bg-elev-2); border-color: var(--border); color: var(--text-faint); text-decoration: line-through; }
+  .stem-prep { font-size: var(--fs-xs); color: var(--text-dim); white-space: nowrap; }
   .tempo input { flex: 1; min-width: 40px; }
   .bpm { font-size: var(--fs); white-space: nowrap; }
   .bpm strong { font-size: var(--fs-md); }

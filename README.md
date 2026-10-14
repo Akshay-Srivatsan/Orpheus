@@ -111,9 +111,8 @@ Machine-specific state stays in the app data folder:
     | Browse knob | Scrolls; press auditions on the free deck |
     | Jog wheels | Scrub (touch = fine, edge = fast) |
     | Pads, Cues mode | Hot cues (hold PAD MODE to clear) |
-    | Pads, Auto Loop mode | Jump −15 / −5 / +5 / +15 s |
-    | Pads, Manual Loop mode | Set the version's start / end / fade, or clear |
-    | Pads, Sampler mode | Play Next / Fade / Skip / Auto-advance |
+    | Pads, Sampler mode | Stems on/off: vocals / drums / bass / other |
+    | SYNC on the on-air deck | Fade out (press again to cancel) |
 
     Faders and the crossfader use soft takeover.
   - Any other controller works through MIDI Learn (Settings → Controllers).
@@ -124,6 +123,17 @@ Machine-specific state stays in the app data folder:
   BPM is detected automatically. The Info tab adds tap tempo and ½ / ⅔ /
   1½ / 2× fixes for octave and triple-meter mistakes. After editing a BPM,
   **↺ Analysed** or **↺ File tag** puts back the detected or tagged value.
+- **Stems:** songs can be split into vocals, drums, bass and other
+  (HT-Demucs via [stem-splitter-core](https://github.com/gentij/stem-splitter-core)),
+  e.g. to mute the vocals of a teaching track.
+  - Separation takes a minute or two per song. It runs in the background at
+    low priority, needs a one-time 210 MB model download and an internet
+    connection while preparing.
+  - Prepared stems are cached on this computer (about 85 MB per 3-minute
+    song) and work offline.
+  - With every stem on you hear the untouched original. Each version (or
+    setlist entry) can set which stems start muted.
+  - Local files only.
 - **Silence and levels:** silence at the start and end of songs is skipped,
   and there is optional automatic loudness levelling.
 
@@ -194,6 +204,7 @@ src-tauri/src/
   analysis.rs   BPM, 3-band waveform, loudness, silence detection
   audio/        engine: decks (stretch + SRC + fades) → lock-free rings → device mixer (cpal)
   spotify.rs    librespot session, per-deck players, metadata, Web API search
+  stems.rs      background stem separation and cache
   midi.rs       midir hot-plug, mappings (DJ2GO2 built in), learn, LEDs
   commands.rs   Tauri commands
   profiles/     built-in club profiles (Dancebreak, Powers' DJ tips)

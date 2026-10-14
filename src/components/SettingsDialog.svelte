@@ -7,7 +7,7 @@
 
   const tabs = [
     ["general", "General"], ["library", "Library"], ["audio", "Audio"], ["midi", "Controllers"],
-    ["spotify", "Spotify"], ["projector", "Projector"], ["profiles", "Club Profiles"],
+    ["stems", "Stems"], ["spotify", "Spotify"], ["projector", "Projector"], ["profiles", "Club Profiles"],
   ] as const;
   let tab = $state<string>(typeof app.settingsOpen === "string" ? app.settingsOpen : "general");
   const s = $derived(app.settings!);
@@ -318,6 +318,53 @@
             {#if learning != null}<button class="plain" onclick={() => api.midiLearnCancel()}>Cancel</button>{/if}
           </div>
         {/if}
+
+      {:else if tab === "stems"}
+        {@const st = app.stems}
+        {@const jobs = Object.entries(st?.jobs ?? {})}
+        <h2>Stems</h2>
+        <p class="dim">Orpheus can split songs into vocals, drums, bass and other (HT-Demucs), so you can mute parts of a song,
+          e.g. drop the vocals for a teaching track. Separation takes a minute or two per song and runs in the background;
+          prepared stems are stored on this computer and work offline. On a controller, pads in Sampler mode toggle stems.
+          Only local files can be separated (not Spotify songs).</p>
+        <div class="form">
+          <span class="l">Separation model</span>
+          <span class="col">
+            {#if st?.model.state === "ready"}
+              <span>Ready</span>
+            {:else if st?.model.state === "downloading"}
+              <span class="num">Downloading… {st.model.total ? `${Math.round((st.model.done / st.model.total) * 100)}%` : ""}</span>
+            {:else}
+              <span class="row">
+                <button class="primary" onclick={() => api.stemsDownloadModel()}>Download Model (about 210 MB)</button>
+              </span>
+              {#if st?.model.state === "error"}<span class="err small">{st.model.message}</span>{/if}
+            {/if}
+          </span>
+          <span class="l">Prepare</span>
+          <span class="col">
+            <span class="row">
+              <button disabled={st?.model.state !== "ready" || !app.current}
+                onclick={async () => {
+                  const ids = [...new Set((app.current?.entries ?? []).map((e) => (e.versionId ? app.versionMap.get(e.versionId)?.track.id : undefined)).filter(Boolean) as string[])];
+                  const n = await app.run(api.stemsPrepare(ids.filter((id) => !app.stemsReady.has(id))));
+                  if (n != null) app.toast(`Preparing stems for ${n} song(s) in “${app.current?.name}”`, "info");
+                }}>Prepare Stems for the Current Set</button>
+            </span>
+            {#if jobs.length}
+              <span class="small">{jobs.filter(([, j]) => j.state !== "failed").length} song(s) in progress</span>
+              {#each jobs.filter(([, j]) => j.state === "failed") as [id, j]}
+                <span class="err small">{app.trackMap.get(id)?.title ?? id}: {j.state === "failed" ? j.message : ""}</span>
+              {/each}
+            {/if}
+            <span class="faint small">Separation uses a lot of CPU; Orpheus runs it at low priority, but preparing ahead of an event is best.</span>
+          </span>
+          <span class="l">Storage</span>
+          <span class="col">
+            <span class="num">{((st?.cacheBytes ?? 0) / 1e9).toFixed(2)} GB for {app.stemsReady.size} song(s) (about 85 MB per 3-minute song)</span>
+            <code>{st?.cacheDir}</code>
+          </span>
+        </div>
 
       {:else if tab === "spotify"}
         <h2>Spotify</h2>

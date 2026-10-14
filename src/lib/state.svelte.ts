@@ -2,7 +2,7 @@
 
 import { api, on } from "./api";
 import type {
-  Crate, DeckState, Id, Levels, LibraryInfo, OutputStatus, PerformState, Profile, Row, ScanProgress, Setlist,
+  Crate, DeckState, Id, Levels, LibraryInfo, StemsStatus, OutputStatus, PerformState, Profile, Row, ScanProgress, Setlist,
   SetlistSummary, Settings, SpotifyStatus, StyleDef, Track, Version,
 } from "./types";
 
@@ -25,7 +25,7 @@ export interface Toast {
 
 const emptyDeck = (deck: 0 | 1): DeckState => ({
   deck, status: "empty", trackId: null, versionId: null, entryId: null, positionMs: 0, durationMs: 0, startMs: 0,
-  endMs: null, fadeAtMs: null, cueMs: 0, onAir: deck === 0, fading: false, tempo: 1, keylock: true, gainDb: 0, trimDb: 0,
+  endMs: null, fadeAtMs: null, cueMs: 0, onAir: deck === 0, stems: null, fading: false, tempo: 1, keylock: true, gainDb: 0, trimDb: 0,
   pfl: deck === 1, error: null,
 });
 
@@ -46,6 +46,9 @@ class AppState {
   spotify = $state<SpotifyStatus | null>(null);
   outputs = $state<OutputStatus | null>(null);
   library = $state<LibraryInfo | null>(null);
+  stems = $state<StemsStatus | null>(null);
+  /** Tracks with prepared stems on this computer. */
+  stemsReady = $state<Set<Id>>(new Set());
   toasts = $state<Toast[]>([]);
 
   // UI state
@@ -181,6 +184,19 @@ class AppState {
     on("output-status", (s) => (this.outputs = s));
     on("toast", (t) => this.toast(t));
     on("toast-info", (t) => this.toast(t, "info"));
+    on("open-settings", (tab) => (this.settingsOpen = tab));
+    let lastJobs = "";
+    on("stems-status", async (s) => {
+      this.stems = s;
+      // Refresh the "has stems" set when a job finishes.
+      const jobs = Object.keys(s.jobs).sort().join(",");
+      if (jobs !== lastJobs) {
+        lastJobs = jobs;
+        this.stemsReady = new Set(await api.stemsReady());
+      }
+    });
+    this.stems = await api.stemsStatus();
+    this.stemsReady = new Set(await api.stemsReady());
     on("midi-ui", (m) => (this.midiNav = { ...m, n: this.midiNav.n + 1 }));
   }
 

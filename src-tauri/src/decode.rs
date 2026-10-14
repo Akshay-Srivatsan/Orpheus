@@ -172,6 +172,8 @@ impl LocalDecoder {
                     log::debug!("decode error (skipping packet): {e}");
                     continue;
                 }
+                // A truncated final frame: treat as the end of the stream.
+                Err(SymError::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(false),
                 Err(e) => return Err(e.into()),
             };
             Self::push_decoded(
