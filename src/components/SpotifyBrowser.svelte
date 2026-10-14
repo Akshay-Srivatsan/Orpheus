@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { api } from "../lib/api";
   import { app, spotifyVersions } from "../lib/state.svelte";
   import type { SpotifyTrack } from "../lib/types";
@@ -15,6 +16,7 @@
   $effect(() => {
     const pl = playlist;
     if (!pl) return;
+    searched = "";
     loading = true;
     error = null;
     results = [];
@@ -24,9 +26,13 @@
       .finally(() => (loading = false));
   });
 
+  /** The query being searched / last searched, so a search is never repeated. */
+  let searched = "";
+
   async function search() {
     const q = query.trim();
-    if (!q) return;
+    if (!q || q === searched) return;
+    searched = q;
     loading = true;
     error = null;
     try {
@@ -34,13 +40,16 @@
       results = isLink ? await api.spotifyResolve(q) : await api.spotifySearch(q);
     } catch (e) {
       error = String(e);
+      // Allow trying the same query again (e.g. after a rate limit).
+      searched = "";
     } finally {
       loading = false;
     }
   }
 
-  $effect(() => {
-    if (!playlist && query.trim() && !results.length) search();
+  // Search once for what was typed in the library search when this view opens.
+  onMount(() => {
+    if (!playlist && query.trim()) search();
   });
 
   async function newSetFromPlaylist() {

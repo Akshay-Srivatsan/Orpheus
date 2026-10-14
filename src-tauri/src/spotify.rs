@@ -4,9 +4,10 @@
 //! into the deck's pipeline, so Spotify tracks get the same tempo control,
 //! fades and routing as local files. Metadata comes from librespot's metadata
 //! API; search and "your playlists" use the Web API with a token from the
-//! session's token provider.
+//! browser sign-in.
 
 use crate::audio::source::Source;
+use std::collections::HashMap;
 use anyhow::{anyhow, Context, Result};
 use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, SendTimeoutError, Sender};
 use librespot_core::authentication::Credentials;
@@ -293,7 +294,15 @@ pub struct Spotify {
     pub status: Mutex<SpotifyStatus>,
     http: reqwest::Client,
     web_token: Mutex<Option<WebToken>>,
+    /// Spotify rate-limited us (HTTP 429): no Web API calls until then (epoch ms).
+    web_blocked_until: Mutex<i64>,
+    /// Recent search results (query → time, results), so repeated searches don't hit the API.
+    search_cache: Mutex<HashMap<String, (i64, Vec<SpotifyTrack>)>>,
 }
+
+/// How long search results are reused.
+const SEARCH_CACHE_MS: i64 = 10 * 60_000;
+const SEARCH_CACHE_MAX: usize = 200;
 
 fn cover_url(images: &librespot_metadata::image::Images) -> Option<String> {
     // Prefer a medium-size image.
@@ -312,6 +321,8 @@ impl Spotify {
             status: Mutex::new(SpotifyStatus { has_cached_credentials: has, ..Default::default() }),
             http: reqwest::Client::new(),
             web_token: Mutex::new(None),
+            web_blocked_until: Mutex::new(0),
+            search_cache: Mutex::new(HashMap::new()),
         };
         *s.web_token.lock() = std::fs::read_to_string(s.web_token_path()).ok().and_then(|t| serde_json::from_str(&t).ok());
         s
@@ -547,9 +558,26 @@ impl Spotify {
     }
 
     async fn web_get(&self, url: &str) -> Result<serde_json::Value> {
+        let wait_ms = *self.web_blocked_until.lock() - crate::model::now_ms();
+        if wait_ms > 0 {
+            return Err(rate_limited(wait_ms));
+        }
         let token = self.web_token().await?;
         let resp = self.http.get(url).bearer_auth(token).send().await.context("Spotify Web API")?;
         let status = resp.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            // Back off for as long as Spotify asks (default: 30 s) instead of retrying.
+            let secs = resp
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.trim().parse::<i64>().ok())
+                .unwrap_or(30)
+                .clamp(1, 24 * 3600);
+            *self.web_blocked_until.lock() = crate::model::now_ms() + secs * 1000;
+            log::warn!("Spotify Web API rate limit: waiting {secs} s");
+            return Err(rate_limited(secs * 1000));
+        }
         let body: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
         if !status.is_success() {
             let msg = body["error"]["message"].as_str().unwrap_or("request failed");
@@ -559,12 +587,27 @@ impl Spotify {
     }
 
     pub fn search(&self, query: &str) -> Result<Vec<SpotifyTrack>> {
+        let key = query.trim().to_lowercase();
+        let now = crate::model::now_ms();
+        if let Some((at, hits)) = self.search_cache.lock().get(&key) {
+            if now - at < SEARCH_CACHE_MS {
+                return Ok(hits.clone());
+            }
+        }
         let url = format!(
             "https://api.spotify.com/v1/search?type=track&limit=50&q={}",
-            urlencode(query)
+            urlencode(query.trim())
         );
         let v = self.rt.block_on(self.web_get(&url))?;
-        Ok(v["tracks"]["items"].as_array().map(|a| a.iter().filter_map(web_track).collect()).unwrap_or_default())
+        let hits: Vec<SpotifyTrack> =
+            v["tracks"]["items"].as_array().map(|a| a.iter().filter_map(web_track).collect()).unwrap_or_default();
+        let mut cache = self.search_cache.lock();
+        cache.retain(|_, (at, _)| now - *at < SEARCH_CACHE_MS);
+        if cache.len() >= SEARCH_CACHE_MAX {
+            cache.clear();
+        }
+        cache.insert(key, (now, hits.clone()));
+        Ok(hits)
     }
 
     pub fn my_playlists(&self) -> Result<Vec<SpotifyPlaylist>> {
@@ -687,6 +730,12 @@ fn web_track(t: &serde_json::Value) -> Option<SpotifyTrack> {
             .and_then(|i| i["url"].as_str())
             .map(String::from),
     })
+}
+
+fn rate_limited(wait_ms: i64) -> anyhow::Error {
+    let secs = (wait_ms + 999) / 1000;
+    let wait = if secs >= 120 { format!("{} min", (secs + 59) / 60) } else { format!("{secs} s") };
+    anyhow!("Spotify is limiting requests; try again in {wait}.")
 }
 
 fn urlencode(s: &str) -> String {

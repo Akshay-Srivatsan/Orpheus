@@ -47,6 +47,9 @@ pub struct App {
     pub perform: Mutex<Perform>,
     pub scan_progress: Mutex<crate::library::ScanProgress>,
     analysis_tx: Sender<(Id, bool)>,
+    /// Spotify songs already queued for analysis this session (each is
+    /// streamed once in the background for its waveform and BPM).
+    spotify_analysed: Mutex<std::collections::HashSet<Id>>,
     pub(crate) takeover: Mutex<crate::controls::Takeover>,
     pub(crate) deck_ctl: Mutex<[crate::controls::DeckControlState; 2]>,
     /// Pace decks by the headphone output (set when no master device is open).
@@ -124,6 +127,7 @@ impl App {
             perform: Mutex::new(Perform::default()),
             scan_progress: Mutex::new(Default::default()),
             analysis_tx,
+            spotify_analysed: Mutex::new(Default::default()),
             takeover: Mutex::new(Default::default()),
             deck_ctl: Mutex::new(Default::default()),
             clock_cue,
@@ -385,6 +389,9 @@ impl App {
             }
         }
         let (kind, key) = self.choose_source(track)?;
+        if kind == "spotify" {
+            self.analyse_spotify_once(&track.rec.id);
+        }
         // Stem defaults: version / entry settings, e.g. {"vocals": false}.
         let stems_on: [bool; 4] = std::array::from_fn(|i| {
             r.stems
@@ -486,6 +493,15 @@ impl App {
             }
             Err(e) => log::warn!("pruning set-only tracks: {e:#}"),
         }
+    }
+
+    /// Spotify songs aren't analysed on import (that would stream every
+    /// song); a song without a waveform is analysed when first loaded.
+    fn analyse_spotify_once(&self, id: &Id) {
+        if self.store.waveform(id).is_some() || !self.spotify_analysed.lock().insert(id.clone()) {
+            return;
+        }
+        self.queue_analysis(id.clone(), true);
     }
 
     pub fn queue_analysis(&self, id: Id, priority: bool) {

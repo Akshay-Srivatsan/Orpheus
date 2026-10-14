@@ -16,7 +16,7 @@
 
   $effect(() => {
     const q = query.trim();
-    if (q.length < 2) {
+    if (q.length < 3) {
       results = [];
       return;
     }
@@ -31,12 +31,13 @@
       } finally {
         loading = false;
       }
-    }, 450);
+    // Wait until typing pauses; the backend also caches results and backs off when rate-limited.
+    }, 800);
     return () => clearTimeout(t);
   });
 </script>
 
-{#if query.trim().length >= 2}
+{#if query.trim().length >= 3}
   <section class="sps" class:open>
     <button class="head plain" onclick={() => (open = !open)}>
       <Icon name="spotify" size={14} />
