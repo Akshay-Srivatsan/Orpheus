@@ -350,7 +350,9 @@ where
             let mut cue_peak = 0.0f32;
             for a in &assigns {
                 let level = if a.cue { levels.cue.get() } else { levels.master.get() };
-                let target_gain = a.tap.gain.get();
+                let volume = a.tap.volume.get();
+                let target_gain = a.tap.gain.get() * volume;
+                let mut deck_peak = 0.0f32;
                 let playing = a.tap.playing.load(Ordering::Relaxed);
                 let Some(mut guard) = a.tap.ring.try_lock() else { continue };
                 let Some(ring) = guard.as_mut() else { continue };
@@ -397,6 +399,8 @@ where
                     ring.gain += (target_gain - ring.gain) * gain_step;
                     let g = level * ring.gain * ring.ramp;
                     let (l, r) = (fr[0] * g, fr[1] * g);
+                    // The deck's own level: after its volume, before routing.
+                    deck_peak = deck_peak.max(fr[0].abs().max(fr[1].abs()) * volume * ring.ramp);
                     let base = f * channels;
                     if a.ch[0] == a.ch[1] {
                         mix[base + a.ch[0]] += (l + r) * 0.5;
@@ -413,6 +417,9 @@ where
                 }
                 if starved > 0 {
                     a.tap.underruns.fetch_add(starved, Ordering::Relaxed);
+                }
+                if deck_peak > a.tap.peak.get() {
+                    a.tap.peak.set(deck_peak);
                 }
             }
             for (d, s) in data.iter_mut().zip(mix.iter()) {

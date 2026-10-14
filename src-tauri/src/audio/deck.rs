@@ -284,8 +284,25 @@ impl Deck {
         *self.shared.stretch_engine.lock() = engine.to_string();
     }
 
+    /// Deck volume in dB, applied in the output callback (no buffer delay).
     pub fn set_trim_db(&self, db: f64) {
-        self.shared.trim_db.set(db.clamp(-24.0, 12.0));
+        let db = db.clamp(TRIM_MIN_DB, TRIM_MAX_DB);
+        self.shared.trim_db.set(db);
+        let g = db_to_gain(db) as f32;
+        self.shared.master_tap.volume.set(g);
+        self.shared.cue_tap.volume.set(g);
+    }
+
+    /// The deck's current output peak (0..1+), for its meter.
+    pub fn peak(&self) -> f32 {
+        self.shared.master_tap.peak.get().max(self.shared.cue_tap.peak.get())
+    }
+
+    /// Decays the meter peaks (called by the poller after reading them).
+    pub fn decay_peak(&self, factor: f32) {
+        for t in [&self.shared.master_tap, &self.shared.cue_tap] {
+            t.peak.set(t.peak.get() * factor);
+        }
     }
 
     /// Records the headphone-cue state; the app derives tap gains from it.
@@ -379,6 +396,9 @@ impl Deck {
 }
 
 const BLOCK: usize = 512;
+/// Range of the deck volume (dB).
+pub const TRIM_MIN_DB: f64 = -24.0;
+pub const TRIM_MAX_DB: f64 = 12.0;
 
 /// Transparent below 0.9; smoothly limits peaks (time-stretching and gain can
 /// push samples past full scale) instead of hard clipping.
@@ -734,7 +754,8 @@ impl Worker {
 
     /// Applies gain/fade and writes to the rings.
     fn finish_block(&mut self, out: &mut [f32]) {
-        let g = db_to_gain(self.sh.track_gain_db.get() + self.sh.trim_db.get());
+        // The deck volume (trim) is applied in the output callback.
+        let g = db_to_gain(self.sh.track_gain_db.get());
         let mut fade_done = false;
         for fr in out.chunks_exact_mut(2) {
             if let Some(step) = self.fade_step {

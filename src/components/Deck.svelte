@@ -56,6 +56,17 @@
     if (id) artwork(id).then((a) => { if (track?.id === id) art = a; });
   });
 
+  /** Deck volume range (dB); matches the engine's. */
+  const VOL_MIN = -24;
+  const VOL_MAX = 12;
+  let volDraft = $state<number | null>(null);
+  const volShown = $derived(volDraft ?? d.trimDb);
+  const level = $derived(app.levels.decks?.[deck] ?? 0);
+  function setVolume(db: number) {
+    volDraft = db;
+    api.deckSet(deck, { trimDb: db });
+  }
+
   let tempoDraft = $state<number | null>(null);
   const tempoShown = $derived(tempoDraft ?? d.tempo);
   let altDown = $state(false);
@@ -159,6 +170,13 @@
       {/if}
     </span>
     <span class="spacer"></span>
+    <span class="vol" title="Deck volume (double-click: 0 dB). The meter shows this deck's level, whether or not the room hears it.">
+      <span class="meter"><span style:width="{Math.min(100, Math.sqrt(level) * 100)}%" class:hot={level > 0.985}></span></span>
+      <input type="range" min={VOL_MIN} max={VOL_MAX} step="0.5" value={volShown} aria-label="Deck {name} volume"
+        oninput={(e) => setVolume(+e.currentTarget.value)} onchange={() => (volDraft = null)}
+        ondblclick={() => { setVolume(0); volDraft = null; }} />
+      <span class="db num">{volShown > 0 ? "+" : volShown < 0 ? "−" : ""}{Math.abs(volShown).toFixed(1)} dB</span>
+    </span>
     <button class="plain icon" class:on={d.pfl} title="Hear this deck in headphones (PFL)"
       onclick={() => api.deckSet(deck, { pfl: !d.pfl })}><Icon name="headphones" size={15} /></button>
     <button class="plain icon" title="Deck actions" onclick={openMenu}><Icon name="dots" size={15} /></button>
@@ -302,6 +320,12 @@
   .deck.near { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--orange) 60%, transparent); }
   .deck.dropping { outline: 2px dashed var(--blue); outline-offset: -3px; }
   header { display: flex; align-items: center; gap: 8px; height: 20px; }
+  .vol { display: flex; align-items: center; gap: 6px; }
+  .vol input { width: 90px; }
+  .vol .meter { width: 46px; height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; border: 1px solid var(--border); }
+  .vol .meter span { display: block; height: 100%; background: var(--green); transition: width 60ms linear; }
+  .vol .meter span.hot { background: var(--red); }
+  .db { width: 52px; text-align: right; font-size: var(--fs-xs); color: var(--text-dim); }
   .letter { font: 800 15px var(--font-display); color: var(--deck); width: 14px; }
   .air { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.08em; color: var(--text-dim); }
   .air.live { color: var(--red); }

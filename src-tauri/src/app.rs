@@ -28,6 +28,8 @@ pub struct LevelsSnapshot {
     pub cue: f32,
     pub master_volume: f32,
     pub cue_volume: f32,
+    /// Each deck's level (after its volume, before the crossfader).
+    pub decks: [f32; 2],
 }
 
 pub struct App {
@@ -557,10 +559,15 @@ impl App {
                         cue: app.levels.cue_peak.get(),
                         master_volume: app.levels.master.get(),
                         cue_volume: app.levels.cue.get(),
+                        decks: [app.decks[0].peak(), app.decks[1].peak()],
                     };
                     app.levels.master_peak.set(app.levels.master_peak.get() * 0.6);
                     app.levels.cue_peak.set(app.levels.cue_peak.get() * 0.6);
-                    if last.as_deref() != Some(&key) || lv.master > 0.001 || lv.cue > 0.001 {
+                    for d in &app.decks {
+                        d.decay_peak(0.6);
+                    }
+                    let audible = lv.master > 0.001 || lv.cue > 0.001 || lv.decks.iter().any(|&p| p > 0.001);
+                    if last.as_deref() != Some(&key) || audible {
                         emit(&app.handle, "deck-state", &snaps);
                         emit(&app.handle, "levels", &lv);
                         last = Some(key);

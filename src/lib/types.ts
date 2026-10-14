@@ -356,6 +356,8 @@ export interface Levels {
   cue: number;
   masterVolume: number;
   cueVolume: number;
+  /** Each deck's level (after its volume, before the crossfader). */
+  decks: [number, number];
 }
 
 export interface PerformState {

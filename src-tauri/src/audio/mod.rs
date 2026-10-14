@@ -85,11 +85,16 @@ pub struct Tap {
     pub rate: AtomicU32,
     /// Frames the output had to fill with silence while playing (diagnostics).
     pub underruns: AtomicU64,
+    /// The deck's volume (linear), applied here so changes are immediate.
+    pub volume: AtomicF32,
+    /// Peak of the deck's signal after its volume, before routing (for the
+    /// deck's meter); the poller decays it.
+    pub peak: AtomicF32,
 }
 
 impl Tap {
     pub fn new(playing: Arc<AtomicBool>, gain: f32) -> Arc<Self> {
-        Arc::new(Self { ring: Mutex::new(None), playing, gain: AtomicF32::new(gain), rate: AtomicU32::new(48000), underruns: AtomicU64::new(0) })
+        Arc::new(Self { ring: Mutex::new(None), playing, gain: AtomicF32::new(gain), rate: AtomicU32::new(48000), underruns: AtomicU64::new(0), volume: AtomicF32::new(1.0), peak: AtomicF32::new(0.0) })
     }
 }
 

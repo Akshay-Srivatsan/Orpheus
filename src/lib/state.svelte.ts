@@ -43,7 +43,7 @@ class AppState {
   styleLib = $state<StylesInfo | null>(null);
   settings = $state<Settings | null>(null);
   decks = $state<[DeckState, DeckState]>([emptyDeck(0), emptyDeck(1)]);
-  levels = $state<Levels>({ master: 0, cue: 0, masterVolume: 1, cueVolume: 0.8 });
+  levels = $state<Levels>({ master: 0, cue: 0, masterVolume: 1, cueVolume: 0.8, decks: [0, 0] });
   perform = $state<PerformState | null>(null);
   /** The setlist being performed / edited in the set panel. */
   current = $state<Setlist | null>(null);
