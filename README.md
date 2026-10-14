@@ -28,11 +28,14 @@ Runs on macOS, Linux and Windows (Tauri 2, Rust and Svelte).
 - **A song counts as played only once the room can hear it.** Playing
   something in headphones doesn't add it to the set; making it audible does,
   and songs that weren't planned are inserted into the set at that point.
-- **Dance styles and tempos come first.** The library is organised around the
-  styles a club dances. Each style has a sweet-spot and an acceptable tempo
-  range.
+- **Dance styles and tempos come first.** You tag songs with your own dance
+  styles. Each club names and splits styles its own way, with a sweet-spot
+  and an acceptable tempo range per style. Orpheus maps your styles onto
+  the club's, so the setlist and projector use the club's names.
 - **Projector display for dancers.**
-  - Live sets show the current dance, the song and recent songs.
+  - Live sets show the current dance, the song, its cover art and recent
+    songs. Cover art is the file's embedded picture, an image next to the
+    file (e.g. `cover.jpg`), or Spotify's.
   - Preset sets show the whole setlist with your position in it.
   - During the pause it shows the next dance, so people can find a partner.
   - It can also show announcements, such as "No street shoes on the floor".
@@ -43,12 +46,14 @@ Runs on macOS, Linux and Windows (Tauri 2, Rust and Svelte).
 |---|---|
 | **Track** | A recording: title, artist, BPM, loudness and waveform. |
 | **Source** | Where a track's audio comes from: a local file or a Spotify track. A track can have both. |
-| **Version** | A playable configuration of a track: dance style, tempo, start, end and fade points, gain, stem defaults, comments and tags. One song can be a Rotary Waltz at 150 BPM and a Fast Waltz at 168 BPM. You can also add a slowed "teaching" version. |
-| **Dance style** | A label on a version, not a place in the library. Every view (all songs, a crate, a setlist, history) has a style filter bar: click a style to narrow the view, ⌘/Shift-click to combine styles. With one style chosen, unlabelled songs whose tempo fits it are suggested too, so a mixed "Waltzes" crate can be split into cross-step and rotary by tempo. Drop songs on a style to label them; a song that already has another style gets a new version for this one. |
+| **Version** | A playable configuration of a track: dance styles, tempo, start, end and fade points, gain, stem defaults, comments and tags. One song can be a Rotary Waltz at 150 BPM and a Fast Waltz at 168 BPM. You can also add a slowed "teaching" version. |
+| **Your dance styles** | Labels on versions, not places in the library. You define them in Settings → Dance Styles. A version can have several, e.g. a song that works as both Lindy Hop and East Coast Swing. Every view (all songs, a crate, a setlist, history) has a style filter bar: click a style to narrow the view, ⌘/Shift-click to combine styles. With one style chosen, unlabelled songs whose tempo fits it are suggested too. Drop songs on a style to add it; use the right-click menu to remove one. |
+| **Club styles** | Each club profile has its own styles and tempo ranges. For each club, ordered **mapping rules** say how your styles count there, optionally by planned tempo. For example, your "Waltz" from 105 to 125 BPM is a Cross-Step Waltz, from 135 to 160 BPM a Rotary Waltz, and otherwise not danced. The first matching rule wins. Ranges are matched in their own counting, so half- and double-time BPMs count. Without a rule, a club style with the same key or name is used. The **No club** profile has no styles of its own and shows yours unchanged. |
 | **Crate** | Your own collection of songs: "Waltzes", "Dancebreak classics", "Pre-approved rotary waltzes", "Wedding requests". Crates can mix styles freely. Drag songs onto a crate to add them. |
 | **Smart crate** | A crate defined by rules instead of a hand-picked list, e.g. "in *Waltzes* and tempo fits Rotary Waltz", "Lindy Hop, not played in the last 30 days", "longer than 4:30". It updates as the library changes. |
-| **Setlist** | An ordered list of versions, or of **style slots** ("a West Coast Swing goes here") that you fill live. Each entry can override its version's settings for that set only. |
-| **Club profile** | Dance styles, tempo ranges, pause length, fade length, tags (e.g. "Dance with a Stranger", "Jam"), announcements and **setlist rules**. Rules include song count, song length limits, per-style minimums that depend on the lesson, tempo exceptions, and required closing sequences. The **Checks** tab tests a setlist against them. |
+| **Setlist** | An ordered list of versions, or of **style slots** ("a West Coast Swing goes here") that you fill live. Each setlist uses one club. Each entry can override its version's settings for that set only. It can also show just some of a song's styles, or a custom label such as "Mixer" instead of style names. Songs already played in the open set are marked in the library and the set. |
+| **Club profile** | The club's dance styles and tempo ranges, pause length, fade length, tags (e.g. "Dance with a Stranger", "Jam") and announcements. |
+| **History** | Derived from setlists: every song that was played (audible in the room). Play counts and "last played" come from it. "Remove from History" marks the entry as not played. |
 
 Settings resolve in this order: setlist entry override, then the version,
 then the track's defaults.
@@ -65,10 +70,11 @@ During a set you can skip, reorder or insert songs at any time.
 ## Your library is plain files
 
 The library folder holds tracks, versions, setlists, crates and club
-profiles as pretty-printed JSON, one file per object. Play history is kept
-in append-only `.jsonl` files. Keep the folder in **git** or a synced
-folder to share it between DJs. IDs are random, so concurrent edits don't
-collide, and history logs merge with `merge=union`. After a `git pull`, use
+profiles as pretty-printed JSON, one file per object. Your dance styles and
+their club mappings are in `styles.json`. Play history and play counts are
+derived from the setlists, so there is no separate log to merge. Keep the
+folder in **git** or a synced folder to share it between DJs. IDs are
+random, so concurrent edits don't collide. After a `git pull`, use
 **Settings → Library → Reload**.
 
 Your music files are **never modified**:
@@ -80,7 +86,7 @@ Your music files are **never modified**:
 Machine-specific state stays in the app data folder:
 
 - where files live on this computer;
-- waveforms;
+- waveforms and prepared stems;
 - audio and MIDI settings;
 - the Spotify login.
 
@@ -98,7 +104,9 @@ Machine-specific state stays in the app data folder:
     cue jumps are ignored on the deck the room is hearing.
 - **MIDI:** controllers are detected and connected automatically, with LED
   feedback. A device exposed twice (e.g. through PipeWire's Midi-Bridge)
-  only connects once.
+  only connects once. With the mapping set to **Automatic** (the default),
+  the mapping that matches the connected controller is used. Otherwise the
+  generic one is.
   - Built-in mapping for the **Numark DJ2GO2 / DJ2GO2 Touch** (left = deck A,
     right = deck B):
 
@@ -122,6 +130,12 @@ Machine-specific state stays in the app data folder:
 - **Audio:** choose any output device and channel pair separately for the
   room and for headphones. For example, with a DJ2GO2 use channels 1–2 for
   the room and 3–4 for headphones.
+  - The audio never waits for the interface. The output callbacks and the
+    deck threads that feed them run at real-time priority, while analysis,
+    library scans and stem separation run at the lowest priority. On Linux,
+    real-time priority comes from RealtimeKit (as for PipeWire), or from
+    SCHED_FIFO if your user may use it (e.g. the `audio` group). Without
+    either, Orpheus logs a warning and runs at normal priority.
 - **Tempo:** pitch is preserved while changing tempo (Signalsmith Stretch).
   BPM is detected automatically. The Info tab adds tap tempo and ½ / ⅔ /
   1½ / 2× fixes for octave and triple-meter mistakes. After editing a BPM,
@@ -177,7 +191,7 @@ You also need **libclang**, which `signalsmith-stretch` uses for bindgen:
 npm install
 npm run tauri dev        # run the app
 npm run tauri build      # build an installer / .app
-npm test                 # frontend tests (setlist rules)
+npm test                 # frontend tests (style mapping, smart crates)
 cd src-tauri && cargo test --release   # backend tests
 ```
 
@@ -201,19 +215,20 @@ src-tauri/src/
   app.rs        app state, settings, audio routing, loading, background jobs
   perform.rs    two-deck model: crossfader, Play Next / Go Live, auto-load, pauses, set history, projector state
   controls.rs   deck controls (CUE, hot cues, scrubbing, edit points) and controller actions
-  store.rs      file-based library (tracks, setlists, crates, profiles, history)
+  store.rs      file-based library (tracks, setlists, crates, profiles, styles; history derived from setlists)
   library.rs    folder scanning, content-addressed import, analysis jobs
   decode.rs     symphonia decoding + audio-content hashing
   analysis.rs   BPM, 3-band waveform, loudness, silence detection
-  audio/        engine: decks (stretch + SRC + fades) → lock-free rings → device mixer (cpal)
+  audio/        engine: decks (stretch + SRC + fades) → lock-free rings → device mixer (cpal); thread priorities
   spotify.rs    librespot session, per-deck players, metadata, Web API search
   stems.rs      background stem separation and cache
   midi.rs       midir hot-plug, mappings (DJ2GO2 built in), learn, LEDs
   commands.rs   Tauri commands
-  profiles/     built-in club profiles (Dancebreak, Powers' DJ tips)
+  profiles/     built-in club profiles (No club, Dancebreak, Powers' DJ tips)
 src/
   components/   main window (decks, transport, library, set panel, inspector, settings)
   components/projector/  public display
-  lib/rules.ts  setlist rule checks
+  lib/styles.ts your styles → club styles (the only implementation; used by both windows)
+  lib/smart.ts  smart crate rules
   lib/tempo.ts  tempo/duration helpers shared with the backend's logic
 ```

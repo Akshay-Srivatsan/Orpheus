@@ -23,13 +23,7 @@
   let rules = $state<SmartRules>(init.rules);
 
   const preview = $derived(
-    evaluate($state.snapshot(rules) as SmartRules, app.rows, {
-      profile: app.profile,
-      crates: app.crates.filter((c) => c.id !== editing?.id),
-      library: app.rows,
-      fadeSeconds: app.fadeSeconds,
-      trimSilence: app.settings?.trimSilence ?? true,
-    }),
+    evaluate($state.snapshot(rules) as SmartRules, app.rows, { ...app.smartCtx, crates: app.crates.filter((c) => c.id !== editing?.id) }),
   );
   const tags = $derived(app.profile?.tags ?? []);
   const otherCrates = $derived(app.crates.filter((c) => c.id !== editing?.id));
@@ -38,7 +32,7 @@
     Object.assign(c, defaultCondition(f));
     if (f === "crate") c.value = otherCrates[0]?.id ?? null;
     if (f === "tag") c.value = tags[0]?.id ?? null;
-    if (f === "bpm" || f === "style") c.value = app.filterStyle ?? app.profile?.styles[0]?.key ?? null;
+    if (f === "bpm" || f === "style") c.value = app.filterStyle ?? app.myStyles[0]?.key ?? null;
   }
 
   function setOp(c: SmartCondition, op: string) {
@@ -46,7 +40,7 @@
     c.op = op;
     if (input === "range" && !Array.isArray(c.value)) c.value = [100, 120];
     if ((input === "number" || input === "days") && typeof c.value !== "number") c.value = c.field === "duration" ? 210 : 30;
-    if (input === "style" && typeof c.value !== "string") c.value = app.profile?.styles[0]?.key ?? null;
+    if (input === "style" && typeof c.value !== "string") c.value = app.myStyles[0]?.key ?? null;
     if (input === "source" && c.value !== "file" && c.value !== "spotify") c.value = "file";
   }
 
@@ -92,7 +86,7 @@
           </select>
           {#if op?.input === "style"}
             <select bind:value={c.value}>
-              {#each app.profile?.styles ?? [] as s}<option value={s.key}>{s.name}</option>{/each}
+              {#each app.myStyles as s}<option value={s.key}>{s.name}</option>{/each}
             </select>
           {:else if op?.input === "number" || op?.input === "days"}
             <input type="number" min="0" value={c.value as number} oninput={(e) => (c.value = +e.currentTarget.value)} />

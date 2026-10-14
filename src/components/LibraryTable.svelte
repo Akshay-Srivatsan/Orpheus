@@ -2,7 +2,8 @@
   import { api, on } from "../lib/api";
   import { evaluate } from "../lib/smart";
   import { NO_STYLE, addToSet, app, audition, confirmAction, loadDeck } from "../lib/state.svelte";
-  import { bpmForStyle, fmtBpm, fmtPct, fmtTime, playback, playedDurationMs, tempoFit } from "../lib/tempo";
+  import type { SetlistEntry } from "../lib/types";
+  import { fmtBpm, fmtPct, fmtTime, playback, playedDurationMs, tempoFit } from "../lib/tempo";
   import type { HistoryItem, Id, Row } from "../lib/types";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
   import Icon from "./Icon.svelte";
@@ -15,8 +16,9 @@
   let history = $state<HistoryItem[]>([]);
   let historyRev = $state(0);
   $effect(() => {
-    const un = on("history-changed", () => historyRev++);
-    return () => { un.then((f) => f()); };
+    // History is derived from setlists: refresh when one changes.
+    const un = [on("history-changed", () => historyRev++), on("setlist-changed", () => historyRev++), on("setlists-changed", () => historyRev++)];
+    return () => un.forEach((u) => u.then((f) => f()));
   });
   let scroller: HTMLDivElement | undefined = $state();
   let scrollTop = $state(0);
@@ -34,8 +36,8 @@
     key: string;
     position?: number;
     playedAt?: number;
-    /** Track id as recorded in the history (for removing the entry). */
-    historyTrackId?: Id;
+    /** The setlist entry this history row comes from (for "Remove from History"). */
+    historyEntryId?: Id;
     /** Not labelled with the filtered style, but its tempo fits. */
     suggested?: boolean;
   }
@@ -50,7 +52,7 @@
         return app.rows.filter((r) => r.track.missing).map((r) => mk(r));
       case "crate": {
         const c = app.crates.find((c) => c.id === v.id);
-        if (c?.smart) return evaluate(c.smart, app.rows, smartCtx).map((r) => mk(r));
+        if (c?.smart) return evaluate(c.smart, app.rows, app.smartCtx).map((r) => mk(r));
         return (c?.versionIds ?? []).flatMap((id, i) => {
           const r = app.versionMap.get(id);
           return r ? [mk(r, { position: i + 1 })] : [];
@@ -66,35 +68,27 @@
           const r = h.versionId ? app.versionMap.get(h.versionId) : undefined;
           const t = app.trackMap.get(h.trackId);
           const row = r ?? (t ? { track: t, version: t.versions[0] } : undefined);
-          return row ? [mk(row, { key: `${h.playedAt}-${i}`, playedAt: h.playedAt, historyTrackId: h.trackId })] : [];
+          return row ? [mk(row, { key: `${h.entryId}-${i}`, playedAt: h.playedAt, historyEntryId: h.entryId })] : [];
         });
       default:
         return [];
     }
   });
 
-  const smartCtx = $derived({
-    profile: app.profile,
-    crates: app.crates,
-    library: app.rows,
-    fadeSeconds: app.fadeSeconds,
-    trimSilence: app.settings?.trimSilence ?? true,
-  });
 
   /** The current view's rows narrowed by the dance-style filter. */
   const styled = $derived.by((): ViewRow[] => {
-    const f = app.styleFilter;
-    if (!f.length) return baseRows;
-    const keys = new Set(f);
-    const labelled = baseRows.filter((r) => (r.version.style ? keys.has(r.version.style) : keys.has(NO_STYLE)));
+    if (!app.styleFilter.length) return baseRows;
+    const keys = new Set(app.styleFilter);
+    const labelled = baseRows.filter((r) => (r.version.styles?.length ? r.version.styles.some((k) => keys.has(k)) : keys.has(NO_STYLE)));
     // With one style chosen, also suggest unlabelled songs from this view whose tempo fits it.
-    const st = app.style(app.filterStyle);
-    if (!st || !app.suggestByTempo || !(st.sweet || st.extended)) return labelled;
+    const f = app.filterStyle;
+    if (!f || !app.suggestByTempo || !app.clubTargets(f).some((t) => t.sweet || t.extended)) return labelled;
     const have = new Set(labelled.map((r) => r.track.id));
     const suggested = baseRows
-      .filter((r) => !r.version.style && !have.has(r.track.id) && r.track.bpm)
-      .filter((r) => tempoFit(bpmForStyle(r.track.bpm, st), st) !== "outside")
-      .map((r) => ({ ...r, key: "s-" + r.key, suggested: true }));
+      .filter((r) => !r.version.styles?.length && !have.has(r.track.id) && r.track.bpm)
+      .map((r) => ({ ...r, key: "s-" + r.key, suggested: true }))
+      .filter((r) => { const i = info(r); return !!i.st && i.fit !== "outside"; });
     return [...labelled, ...suggested];
   });
 
@@ -103,15 +97,20 @@
     if (!q) return styled;
     const words = q.split(/\s+/);
     return styled.filter((r) => {
-      const hay = `${r.track.title} ${r.track.artist} ${r.track.album} ${r.version.name} ${r.version.comment ?? ""} ${app.styleName(r.version.style)} ${r.track.notes ?? ""}`.toLowerCase();
+      const hay = `${r.track.title} ${r.track.artist} ${r.track.album} ${r.version.name} ${r.version.comment ?? ""} ${(r.version.styles ?? []).map((k) => app.styleName(k)).join(" ")} ${r.track.notes ?? ""}`.toLowerCase();
       return words.every((w) => hay.includes(w));
     });
   });
 
-  const info = (r: ViewRow) => {
-    const pb = playback(r.track, r.version, null, app.profile);
-    return { pb, dur: playedDurationMs(r.track, r.version, null, pb.rate, { fadeSeconds: app.fadeSeconds, trimSilence: app.settings?.trimSilence }) };
-  };
+  /** How a row plays: tempo in the counting of its club style (the filtered one, if it has it), fit and length. */
+  function info(r: ViewRow) {
+    const f = app.filterStyle;
+    const entry: Partial<SetlistEntry> | null = f && (r.suggested || r.version.styles?.includes(f)) ? { styles: [f] } : null;
+    const pb = playback(r.track, r.version, entry, app.clubStyleOf);
+    const st = app.clubStyleOf(r.version, entry, pb.target ?? r.track.bpm) ?? undefined;
+    const dur = playedDurationMs(r.track, r.version, null, pb.rate, { fadeSeconds: app.fadeSeconds, trimSilence: app.settings?.trimSilence });
+    return { pb, st, fit: tempoFit(pb.target, st), dur };
+  }
 
   const sorted = $derived.by(() => {
     const rows = filtered.map((r) => ({ r, i: info(r) }));
@@ -124,7 +123,7 @@
         case "title": return x.r.track.title.toLowerCase();
         case "artist": return `${x.r.track.artist.toLowerCase()}\u0000${x.r.track.title.toLowerCase()}`;
         case "version": return x.r.version.name.toLowerCase();
-        case "style": return app.styleName(x.r.version.style);
+        case "style": return (x.r.version.styles ?? []).map((k) => app.styleName(k)).join(" ");
         case "bpm": return x.i.pb.target ?? x.r.track.bpm ?? 0;
         case "time": return x.i.dur;
         case "energy": return x.r.track.energy ?? -1;
@@ -151,7 +150,6 @@
   const end = $derived(Math.min(sorted.length, Math.ceil((scrollTop + viewH) / ROW_H) + 10));
   const visible = $derived(sorted.slice(start, end));
   const selSet = $derived(new Set(app.selected));
-  const styleView = $derived(app.style(app.filterStyle));
   const viewCrate = $derived(app.view.kind === "crate" ? app.crates.find((c) => c.id === (app.view as { id: Id }).id) : undefined);
   const plainCrate = $derived(viewCrate && !viewCrate.smart ? viewCrate : undefined);
 
@@ -233,14 +231,16 @@
     e.preventDefault();
     if (!selSet.has(r.version.id)) select(e, idx);
     const ids = app.selected.slice();
-    const historyItems: MenuItem[] =
-      r.playedAt != null && r.historyTrackId
-        ? [
-            { label: "Remove from History", action: () => app.run(api.removeHistory([[r.playedAt!, r.historyTrackId!]])) },
-            { label: "Clear History…", danger: true, action: clearHistory },
-            { separator: true },
-          ]
-        : [];
+    const historyIds = sorted.filter((x) => selSet.has(x.r.version.id) && x.r.historyEntryId).map((x) => x.r.historyEntryId!);
+    const historyItems: MenuItem[] = r.historyEntryId
+      ? [
+          {
+            label: "Remove from History",
+            action: () => app.run(api.removeHistory(historyIds.length ? historyIds : [r.historyEntryId!])),
+          },
+          { separator: true },
+        ]
+      : [];
     const items: MenuItem[] = [
       ...historyItems,
       { label: "Preview in Headphones (free deck)", action: () => preview(r) },
@@ -252,13 +252,7 @@
       ...app.crates.filter((c) => !c.smart).map((c) => ({ label: `Add to Crate “${c.name}”`, action: () => api.addToCrate(c.id, ids) })),
       ...(plainCrate ? [{ label: "Remove from Crate", action: () => api.removeFromCrate(plainCrate.id, ids) }] : []),
       { separator: true },
-      ...(app.filterStyle && ids.some((id) => app.versionMap.get(id)?.version.style !== app.filterStyle)
-        ? [{ label: `Label as ${app.styleName(app.filterStyle)}`, action: () => app.run(api.styleAdd(app.filterStyle!, ids)) }]
-        : []),
-      ...(ids.some((id) => app.versionMap.get(id)?.version.style)
-        ? [{ label: "Remove Dance Style", action: () => app.run(api.styleRemove(ids)) }]
-        : []),
-      { label: "Set Dance Style…", action: () => { app.inspectTrack = r.track.id; app.rightTab = "info"; } },
+      ...styleMenu(ids, r),
       { separator: true },
       { label: "New Version of This Song…", action: () => { app.inspectTrack = r.track.id; app.rightTab = "info"; } },
       { label: "Re-analyze", action: () => api.analyze([...new Set(ids.map((id) => app.versionMap.get(id)?.track.id).filter(Boolean) as Id[])]) },
@@ -271,10 +265,22 @@
     menu = { x: e.clientX, y: e.clientY, items };
   }
 
-  async function clearHistory() {
-    if (await confirmAction("Clear the whole play history? Play counts reset; setlists keep their played marks.", "Clear")) {
-      await app.run(api.removeHistory());
-    }
+  /** Add / remove your dance styles on the selected songs. */
+  function styleMenu(ids: Id[], r: ViewRow): MenuItem[] {
+    const versions = ids.map((id) => app.versionMap.get(id)?.version).filter(Boolean) as { styles?: string[] }[];
+    const has = (k: string) => versions.filter((v) => v.styles?.includes(k)).length;
+    const items: MenuItem[] = app.myStyles.map((s) => {
+      const all = has(s.key) === versions.length;
+      return {
+        label: s.name,
+        checked: all,
+        action: () => app.run(all ? api.styleRemove(ids, s.key) : api.styleAdd(s.key, ids)),
+      };
+    });
+    if (versions.some((v) => v.styles?.length)) items.push({ label: "Remove All Dance Styles", action: () => app.run(api.styleRemove(ids, null)) });
+    if (!items.length) items.push({ label: "Add Dance Styles…", action: () => (app.settingsOpen = "styles") });
+    else items.push({ label: "More in Info…", action: () => { app.inspectTrack = r.track.id; app.rightTab = "info"; } });
+    return items;
   }
 
   async function mergeSelected(ids: Id[]) {
@@ -310,12 +316,13 @@
     <div style:height="{sorted.length * ROW_H}px" style:position="relative">
       {#each visible as { r, i: inf }, k (r.key)}
         {@const idx = start + k}
-        {@const fit = styleView ? tempoFit(inf.pb.target, styleView) : tempoFit(inf.pb.target, app.style(r.version.style))}
+        {@const fit = inf.fit}
         <div
           class="tr"
           class:sel={selSet.has(r.version.id)}
           class:missing={r.track.missing}
           class:suggested={r.suggested}
+          class:inset={app.view.kind !== "history" && app.playedInSet.has(r.track.id)}
           title={r.suggested ? `Not labelled ${app.styleName(app.filterStyle)} yet — its tempo fits` : undefined}
           class:playing={app.decks.some((d) => d.versionId === r.version.id && d.onAir && d.status === "playing")}
           class:previewing={app.decks.some((d) => d.versionId === r.version.id && !(d.onAir && d.status === "playing"))}
@@ -334,12 +341,13 @@
             {#if r.track.missing}<span title="File missing on this computer"><Icon name="warning" size={12} /></span>{/if}
             {#if r.track.sources.some((s) => s.kind === "spotify") && !r.track.files.length}<span class="sp" title="Spotify">●</span>{/if}
             {r.track.title}
+            {#if app.view.kind !== "history" && app.playedInSet.has(r.track.id)}<span class="played" title="Already played in this set">played</span>{/if}
           </span>
           <span class="c artist" title={r.track.artist}>{r.track.artist}</span>
           <span class="c version faint" title={r.version.comment ?? ""}>{app.versionLabel(r.version, r.track)}</span>
-          <span class="c style">{#if r.suggested}<span class="sugg">tempo fits</span>{:else}<StyleBadge style={r.version.style} short />{/if}</span>
+          <span class="c style">{#if r.suggested}<span class="sugg">tempo fits</span>{:else}<StyleBadge styles={(r.version.styles ?? []).map((k) => app.mine(k))} short />{/if}</span>
           <span class="c bpm num" class:fit-sweet={fit === "sweet"} class:fit-out={fit === "outside"}>
-            {fmtBpm(styleView ? bpmForStyle(inf.pb.target ?? r.track.bpm, styleView) : (inf.pb.target ?? r.track.bpm))}
+            {fmtBpm(inf.pb.target ?? r.track.bpm)}
             {#if Math.abs(inf.pb.rate - 1) > 0.001}<span class="rate">{fmtPct(inf.pb.rate)}</span>{/if}
             {#if !r.track.bpm && !r.track.analyzed && r.track.files.length}<span class="faint">…</span>{/if}
           </span>
@@ -397,6 +405,8 @@
   .tr.suggested { color: var(--text-dim); font-style: italic; }
   .tr.suggested:first-of-type, .tr:not(.suggested) + .tr.suggested { border-top: 1px dashed var(--border-strong); }
   .sugg { font-size: var(--fs-xs); color: var(--text-faint); font-style: normal; }
+  .tr.inset { color: var(--text-dim); }
+  .played { flex: none; font-size: var(--fs-xs); color: var(--yellow); border: 1px solid currentColor; border-radius: 3px; padding: 0 3px; line-height: 13px; }
   .tr.playing .title { color: var(--main); }
   .tr.previewing .title { color: var(--preview); }
   .c { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

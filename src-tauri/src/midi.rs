@@ -231,6 +231,8 @@ struct State {
     /// Recently sent LED messages: if one comes back in (a MIDI loopback),
     /// it must not be treated as a button press.
     sent: std::collections::VecDeque<([u8; 3], std::time::Instant)>,
+    /// Automatic mode: mappings to choose from by the connected port's name.
+    auto: Option<Vec<Mapping>>,
 }
 
 pub struct Midi {
@@ -292,8 +294,18 @@ fn base_name(name: &str) -> String {
     n
 }
 
+impl State {
+    fn auto_pick(&self) -> Option<Mapping> {
+        let candidates = self.auto.as_ref()?;
+        self.inputs.keys().find_map(|port| {
+            let p = port.to_lowercase();
+            candidates.iter().find(|m| m.device_match.iter().any(|d| !d.is_empty() && p.contains(&d.to_lowercase()))).cloned()
+        })
+    }
+}
+
 impl Midi {
-    pub fn new(mapping: Mapping, enabled: bool, handler: Handler) -> Arc<Self> {
+    pub fn new(mapping: Mapping, enabled: bool, auto: Option<Vec<Mapping>>, handler: Handler) -> Arc<Self> {
         let midi = Arc::new(Self {
             state: Arc::new(Mutex::new(State {
                 mapping,
@@ -304,6 +316,7 @@ impl Midi {
                 enabled,
                 last: None,
                 sent: Default::default(),
+                auto,
             })),
             handler,
         });
@@ -319,8 +332,12 @@ impl Midi {
         midi
     }
 
-    pub fn set_mapping(&self, mapping: Mapping, enabled: bool) {
+    /// Sets the active mapping. With `auto`, the mapping whose `device_match`
+    /// fits a connected controller is picked from those candidates instead.
+    pub fn set_mapping(&self, mapping: Mapping, enabled: bool, auto: Option<Vec<Mapping>>) {
         let mut st = self.state.lock();
+        st.auto = auto;
+        let mapping = st.auto_pick().unwrap_or(mapping);
         let reinit = st.mapping.id != mapping.id;
         st.mapping = mapping;
         st.enabled = enabled;
@@ -336,6 +353,11 @@ impl Midi {
                 }
             }
         }
+    }
+
+    /// Id of the mapping in use (resolved, also in automatic mode).
+    pub fn active_mapping(&self) -> String {
+        self.state.lock().mapping.id.clone()
     }
 
     pub fn ports(&self) -> Vec<PortInfo> {
@@ -400,7 +422,15 @@ impl Midi {
             match input.connect(&port, "orpheus-in", move |_ts, msg, _| on_message(&state, &handler, msg, &port_name), ()) {
                 Ok(conn) => {
                     log::info!("MIDI input connected: {name}");
-                    self.state.lock().inputs.insert(name.clone(), conn);
+                    {
+                        let mut st = self.state.lock();
+                        st.inputs.insert(name.clone(), conn);
+                        if let Some(m) = st.auto_pick().filter(|m| m.id != st.mapping.id) {
+                            log::info!("using MIDI mapping \"{}\" for {name}", m.name);
+                            st.mapping = m;
+                            st.led_state.clear();
+                        }
+                    }
                     self.connect_output(name);
                 }
                 Err(e) => log::warn!("MIDI connect {name}: {e}"),
@@ -592,6 +622,7 @@ mod tests {
             enabled: true,
             last: None,
             sent: Default::default(),
+            auto: None,
         }));
         // The PLAY LED was just lit; the same bytes arriving must not press PLAY.
         state.lock().sent.push_back(([0x90, 0x00, 0x7f], std::time::Instant::now()));
@@ -637,6 +668,7 @@ mod tests {
             enabled: true,
             last: None,
             sent: Default::default(),
+            auto: None,
         }));
         on_message(&state, &handler, &[0x90, 0x00, 0x7f], "a"); // deck A play press
         on_message(&state, &handler, &[0x90, 0x00, 0x7f], "bridge"); // same event via a 2nd port: dropped

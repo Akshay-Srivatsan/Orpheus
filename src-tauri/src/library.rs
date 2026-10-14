@@ -72,6 +72,44 @@ pub fn read_tags(path: &Path) -> NewTrack {
     t
 }
 
+/// Cover art for a local file: the embedded front cover (or any embedded
+/// picture), else an image file next to it. Returns (MIME type, bytes).
+pub fn artwork(path: &Path) -> Option<(String, Vec<u8>)> {
+    if let Ok(tagged) = lofty::read_from_path(path) {
+        let pics: Vec<&lofty::picture::Picture> = tagged.tags().iter().flat_map(|t| t.pictures()).collect();
+        let pic = pics
+            .iter()
+            .find(|p| p.pic_type() == lofty::picture::PictureType::CoverFront)
+            .or_else(|| pics.first());
+        if let Some(p) = pic {
+            let mime = p.mime_type().map(|m| m.as_str().to_string()).unwrap_or_else(|| "image/jpeg".into());
+            return Some((mime, p.data().to_vec()));
+        }
+    }
+    // An image next to the file: one with a conventional name, or the only image there.
+    let images: Vec<PathBuf> = std::fs::read_dir(path.parent()?)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| image_mime(p).is_some())
+        .collect();
+    let conventional = |p: &&PathBuf| {
+        let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
+        ["cover", "folder", "front", "album"].iter().any(|n| stem.contains(n))
+    };
+    let p = images.iter().find(conventional).or(if images.len() == 1 { images.first() } else { None })?;
+    Some((image_mime(p)?.to_string(), std::fs::read(p).ok()?))
+}
+
+fn image_mime(p: &Path) -> Option<&'static str> {
+    match p.extension()?.to_str()?.to_ascii_lowercase().as_str() {
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "png" => Some("image/png"),
+        "webp" => Some("image/webp"),
+        _ => None,
+    }
+}
+
 /// Imports (or re-links) one file. Returns the track id and whether it is new.
 fn import_candidate(store: &Store, c: &Candidate, hash: &str, tags: Option<NewTrack>) -> Result<(Id, bool)> {
     let path_s = c.path.to_string_lossy().to_string();
@@ -84,6 +122,18 @@ fn import_candidate(store: &Store, c: &Candidate, hash: &str, tags: Option<NewTr
     Ok((store.insert_track(&nt, src)?, true))
 }
 
+/// Low-priority threads for scanning, so a big import never disturbs playback.
+fn background_pool() -> &'static rayon::ThreadPool {
+    static POOL: std::sync::OnceLock<rayon::ThreadPool> = std::sync::OnceLock::new();
+    POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .thread_name(|i| format!("scan-{i}"))
+            .start_handler(|_| crate::audio::priority::lower_current_thread())
+            .build()
+            .expect("scan thread pool")
+    })
+}
+
 fn process_candidates(db: &Store, cands: Vec<Candidate>, progress: &dyn Fn(&ScanProgress), p: &mut ScanProgress) -> Vec<Id> {
     p.phase = "Reading files".into();
     p.total = cands.len();
@@ -92,14 +142,16 @@ fn process_candidates(db: &Store, cands: Vec<Candidate>, progress: &dyn Fn(&Scan
     let mut touched = vec![];
     // Hash + read tags in parallel, write to the database serially.
     for chunk in cands.chunks(64) {
-        let results: Vec<_> = chunk
-            .par_iter()
-            .map(|c| {
-                let hash = decode::content_hash(&c.path);
-                let tags = hash.as_ref().ok().map(|_| read_tags(&c.path));
-                (hash, tags)
-            })
-            .collect();
+        let results: Vec<_> = background_pool().install(|| {
+            chunk
+                .par_iter()
+                .map(|c| {
+                    let hash = decode::content_hash(&c.path);
+                    let tags = hash.as_ref().ok().map(|_| read_tags(&c.path));
+                    (hash, tags)
+                })
+                .collect()
+        });
         for (c, (hash, tags)) in chunk.iter().zip(results) {
             match hash {
                 Ok(h) => {

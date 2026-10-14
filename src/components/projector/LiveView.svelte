@@ -2,6 +2,7 @@
   // Live mode: the current dance dominates; recent songs alongside.
   import { flip } from "svelte/animate";
   import { fade } from "svelte/transition";
+  import { projStyle } from "../../lib/styles";
   import type { ProjectorPayload } from "../../lib/types";
   import NowCard from "./NowCard.svelte";
 
@@ -24,9 +25,10 @@
   {#if upNext || history.length}
     <aside>
       {#if upNext}
-        <section class="next" style:--c={upNext.color} transition:fade={{ duration: 250 }}>
+        {@const st = projStyle(payload, upNext)}
+        <section class="next" style:--c={st.color} transition:fade={{ duration: 250 }}>
           <div class="h">Up next</div>
-          <div class="next-style">{upNext.styleName}</div>
+          <div class="next-style">{st.name}</div>
           {#if upNext.tags.length}
             <div class="next-tags">{upNext.tags.map((t) => t.name).join(" · ")}</div>
           {/if}
@@ -37,10 +39,11 @@
           <div class="h">Recently played</div>
           <ol>
             {#each history as e (e.id)}
-              <li style:--c={e.color} animate:flip={{ duration: 350 }} in:fade={{ duration: 300 }}>
+              {@const st = projStyle(payload, e)}
+              <li style:--c={st.color} animate:flip={{ duration: 350 }} in:fade={{ duration: 300 }}>
                 <span class="stripe"></span>
                 <span class="txt">
-                  <span class="r-style">{e.styleName}</span>
+                  <span class="r-style">{st.name}</span>
                   <span class="r-title">{e.title}</span>
                 </span>
               </li>

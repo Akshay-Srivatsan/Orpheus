@@ -6,14 +6,13 @@
   const today = new Date().toISOString().slice(0, 10);
   let name = $state("");
   let mode = $state<SetlistMode>("preset");
-  let profileId = $state(app.settings?.activeProfileId ?? "dancebreak");
+  let profileId = $state(app.settings?.activeProfileId ?? app.profiles[0]?.id ?? "");
   let date = $state(today);
-  let lesson = $state("");
   const profile = $derived(app.profiles.find((p) => p.id === profileId));
 
   async function create() {
     const set = await app.run(api.createSetlist({
-      name: name.trim() || `${profile?.name ?? "Social"} — ${date}`, mode, profileId, lessonStyle: lesson || null, eventDate: date || null,
+      name: name.trim() || `${profile?.name ?? "Social"} — ${date}`, mode, profileId, eventDate: date || null,
     }));
     if (!set) return;
     await app.run(api.performOpen(set.id));
@@ -33,11 +32,6 @@
       <input type="date" bind:value={date} />
       <span class="l">Club</span>
       <select bind:value={profileId}>{#each app.profiles as p}<option value={p.id}>{p.name}</option>{/each}</select>
-      <span class="l">Lesson</span>
-      <select bind:value={lesson}>
-        <option value="">No lesson</option>
-        {#each profile?.styles ?? [] as s}<option value={s.key}>{s.name}</option>{/each}
-      </select>
       <span class="l">Style</span>
       <div class="col">
         <label><input type="radio" bind:group={mode} value="preset" /> <b>Preset</b> — plan the songs ahead; the projector shows the whole setlist</label>

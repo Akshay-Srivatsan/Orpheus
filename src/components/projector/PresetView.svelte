@@ -1,6 +1,7 @@
 <script lang="ts">
   // Preset mode: the whole setlist, with the current position highlighted
   // and kept in view.
+  import { projStyle } from "../../lib/styles";
   import type { ProjectorPayload } from "../../lib/types";
   import NowCard from "./NowCard.svelte";
 
@@ -45,9 +46,10 @@
   <div class="setlist">
     <ol bind:this={list}>
       {#each payload.entries as e, i (e.id)}
+        {@const st = projStyle(payload, e)}
         <li
           data-id={e.id}
-          style:--c={e.color}
+          style:--c={st.color}
           class:played={e.status === "played"}
           class:skipped={e.status === "skipped"}
           class:current={e.id === currentId}
@@ -55,7 +57,7 @@
         >
           <span class="n">{numbers[i] ?? ""}</span>
           <span class="stripe"></span>
-          <span class="style">{e.styleName || "—"}</span>
+          <span class="style">{st.name || "—"}</span>
           <span class="song">
             <span class="song-text">
               {#if e.title}<span class="title">{e.title}</span>{/if}

@@ -15,7 +15,7 @@ function row(style: string | null, bpm: number | null, extra: Partial<Track> = {
     sources: [{ kind: "file", key: id }], versions: [], files: ["/x"], missing: false, playCount: 0, lastPlayedAt: null,
     ...extra,
   };
-  const version: Version = { id: `v${seq}`, name: "Original", style, ...vextra };
+  const version: Version = { id: `v${seq}`, name: "Original", styles: style ? [style] : [], ...vextra };
   track.versions = [version];
   return { track, version };
 }
@@ -32,7 +32,7 @@ describe("smart crates", () => {
   const spotify = row(null, 96, { sources: [{ kind: "spotify", key: "spotify:track:x" }], durationMs: 300_000 });
   const rows = [rotary, csw, unlabelledRotaryTempo, unlabelledSlow, spotify];
   const waltzes: Crate = { id: "w", name: "Waltzes", position: 1, versionIds: [rotary.version.id, csw.version.id, unlabelledRotaryTempo.version.id, unlabelledSlow.version.id] };
-  const ctx: SmartContext = { profile, crates: [waltzes], library: rows, now: 10 * 86_400_000, trimSilence: false };
+  const ctx: SmartContext = { profile, styles: null, crates: [waltzes], library: rows, now: 10 * 86_400_000, trimSilence: false };
   const run = (rules: SmartRules) => ids(evaluate(rules, rows, ctx));
 
   it("filters by style label", () => {

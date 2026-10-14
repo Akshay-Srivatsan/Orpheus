@@ -1,6 +1,9 @@
-// Tempo and duration helpers shared by the UI and the setlist rules.
+// Tempo and duration helpers.
 
-import type { Overrides, Profile, SetlistEntry, StyleDef, Track, Version } from "./types";
+import type { Overrides, SetlistEntry, StyleDef, Track, Version } from "./types";
+
+/** The club style (with its tempo ranges) a version is danced as at a given tempo; see `styles.ts`. */
+export type ClubStyleOf = (version: Version | undefined, entry: Partial<SetlistEntry> | null | undefined, bpm: number | null) => StyleDef | null;
 
 /** Folds `bpm` by octaves so it is as close as possible to `target`. */
 export function foldBpm(bpm: number, target: number): number {
@@ -38,11 +41,6 @@ export function resolveSettings(version: Version | undefined, entry: Partial<Set
   };
 }
 
-/** Style of an entry (slot style or override) or version. */
-export function styleOf(version: Version | undefined, entry?: Partial<SetlistEntry> | null): string | null {
-  return entry?.style ?? version?.style ?? null;
-}
-
 export interface Playback {
   /** Original tempo in the style's counting. */
   base: number | null;
@@ -53,15 +51,14 @@ export interface Playback {
 }
 
 /** How a version will be played (optionally within a setlist entry). Mirrors the backend's load_request. */
-export function playback(track: Track | undefined, version: Version | undefined, entry: Partial<SetlistEntry> | null, profile: Profile | null): Playback {
-  const style = profile?.styles.find((s) => s.key === styleOf(version, entry));
+export function playback(track: Track | undefined, version: Version | undefined, entry: Partial<SetlistEntry> | null, clubStyleOf: ClubStyleOf): Playback {
   const target = resolveSettings(version, entry).targetBpm ?? null;
   if (!track?.bpm) return { base: null, target, rate: 1 };
   if (target) {
     const base = foldBpm(track.bpm, target);
     return { base, target, rate: Math.min(2, Math.max(0.5, target / base)) };
   }
-  const base = bpmForStyle(track.bpm, style);
+  const base = bpmForStyle(track.bpm, clubStyleOf(version, entry, track.bpm) ?? undefined);
   return { base, target: base, rate: 1 };
 }
 

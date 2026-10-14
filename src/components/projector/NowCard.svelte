@@ -2,6 +2,8 @@
   // The dominant "what are we dancing" card: the current song, or the next
   // dance during the pause between songs.
   import { fade, fly } from "svelte/transition";
+  import { artwork } from "../../lib/artwork";
+  import { projStyle } from "../../lib/styles";
   import type { ProjEntry, ProjectorPayload } from "../../lib/types";
 
   let { payload, progress, compact = false }: { payload: ProjectorPayload; progress: number | null; compact?: boolean } =
@@ -12,6 +14,14 @@
   const revealNext = $derived(gap && s.revealNextInGap && !!payload.next);
   const entry = $derived<ProjEntry | null>(revealNext ? payload.next : payload.current);
   const label = $derived(revealNext ? "Next dance" : gap ? "Just played" : "Now dancing");
+  const st = $derived(entry ? projStyle(payload, entry) : null);
+  const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  let art = $state<string | null>(null);
+  $effect(() => {
+    const id = !revealNext && s.showArtwork && inTauri ? entry?.trackId : null;
+    art = null;
+    if (id) artwork(id).then((a) => { if (entry?.trackId === id) art = a; });
+  });
   const key = $derived(`${revealNext ? "next" : gap ? "past" : "now"}:${entry?.id ?? ""}`);
 
   function fmtBpm(b: number | null) {
@@ -21,13 +31,14 @@
 
 <div class="card" class:compact>
   {#key key}
-    <div class="inner" class:dim={gap && !revealNext} in:fly={{ y: 24, duration: 420, delay: 120 }} out:fade={{ duration: 180 }}>
-      {#if entry}
-        <div class="label" style:--c={entry.color}>
+    <div class="inner" class:dim={gap && !revealNext} class:with-art={!!art} in:fly={{ y: 24, duration: 420, delay: 120 }} out:fade={{ duration: 180 }}>
+      {#if art}<img class="art" src={art} alt="" in:fade={{ duration: 300 }} />{/if}
+      {#if entry}<div class="text">
+        <div class="label" style:--c={st?.color}>
           {#if !gap}<span class="live-dot"></span>{/if}
           {label}
         </div>
-        {#if entry.styleName}<div class="style" style:--c={entry.color}>{entry.styleName}</div>{/if}
+        {#if st?.name}<div class="style" style:--c={st.color}>{st.name}</div>{/if}
         {#if entry.tags.length}
           <div class="tags">
             {#each entry.tags as t (t.id)}
@@ -42,11 +53,11 @@
           {#if s.showArtist && entry.artist}<div class="artist">{entry.artist}</div>{/if}
           {#if s.showBpm && entry.bpm}<div class="bpm">{fmtBpm(entry.bpm)}</div>{/if}
         {/if}
-      {/if}
+      </div>{/if}
     </div>
   {/key}
   {#if !gap && progress != null && entry}
-    <div class="progress" style:--c={entry.color}><div class="bar" style:width="{progress * 100}%"></div></div>
+    <div class="progress" style:--c={st?.color}><div class="bar" style:width="{progress * 100}%"></div></div>
   {/if}
 </div>
 
@@ -64,6 +75,28 @@
   }
   .inner {
     grid-area: 1 / 1;
+  }
+  .inner.with-art {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: calc(3 * var(--u));
+  }
+  .inner .text {
+    min-width: 0;
+  }
+  .art {
+    grid-column: 2;
+    grid-row: 1;
+    width: calc(22 * var(--u));
+    height: calc(22 * var(--u));
+    object-fit: cover;
+    border-radius: calc(1 * var(--u));
+    box-shadow: 0 calc(0.6 * var(--u)) calc(3 * var(--u)) rgba(0, 0, 0, 0.45);
+  }
+  .compact .art {
+    width: calc(12 * var(--u));
+    height: calc(12 * var(--u));
   }
   .inner.dim {
     opacity: 0.55;

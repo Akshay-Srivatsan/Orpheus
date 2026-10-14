@@ -1,13 +1,15 @@
 <script lang="ts">
+  import { NEUTRAL } from "../lib/styles";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api";
   import { app, confirmAction } from "../lib/state.svelte";
   import type { AudioDevice, MidiControl, MidiInfo, MidiMapping, Profile, Settings, StyleDef } from "../lib/types";
   import Icon from "./Icon.svelte";
+  import StylesSettings from "./StylesSettings.svelte";
 
   const tabs = [
     ["general", "General"], ["library", "Library"], ["audio", "Audio"], ["midi", "Controllers"],
-    ["stems", "Stems"], ["spotify", "Spotify"], ["projector", "Projector"], ["profiles", "Club Profiles"],
+    ["stems", "Stems"], ["spotify", "Spotify"], ["projector", "Projector"], ["styles", "Dance Styles"], ["profiles", "Club Profiles"],
   ] as const;
   let tab = $state<string>(typeof app.settingsOpen === "string" ? app.settingsOpen : "general");
   const s = $derived(app.settings!);
@@ -58,7 +60,8 @@
 
   // ---------------------------------------------------------------- MIDI mapping editor
   const mappings = $derived(midi?.mappings ?? []);
-  const mapping = $derived(mappings.find((m) => m.id === s.midi.mappingId) ?? mappings[0]);
+  /** The mapping in use; with automatic selection, the one chosen for the connected controller. */
+  const mapping = $derived(mappings.find((m) => m.id === (s.midi.mappingId || midi?.activeMapping)) ?? mappings[0]);
   const hex = (n: number) => "0x" + n.toString(16).toUpperCase().padStart(2, "0");
 
   function saveMapping(m: MidiMapping) {
@@ -94,29 +97,16 @@
   }
 
   // ---------------------------------------------------------------- profiles
-  let profileId = $state(app.profile?.id ?? "dancebreak");
+  let profileId = $state(app.profile?.id ?? app.profiles[0]?.id ?? "");
   const profile = $derived(app.profiles.find((p) => p.id === profileId));
   let draft = $state<Profile | null>(null);
-  let rulesText = $state("");
-  let rulesError = $state<string | null>(null);
   $effect(() => {
-    if (profile) {
-      draft = structuredClone($state.snapshot(profile)) as Profile;
-      rulesText = JSON.stringify(profile.rules, null, 2);
-      rulesError = null;
-    }
+    if (profile) draft = structuredClone($state.snapshot(profile)) as Profile;
   });
-  const dirty = $derived(!!draft && !!profile && (JSON.stringify(draft) !== JSON.stringify($state.snapshot(profile)) || rulesText !== JSON.stringify(profile.rules, null, 2)));
+  const dirty = $derived(!!draft && !!profile && JSON.stringify(draft) !== JSON.stringify($state.snapshot(profile)));
 
   async function saveProfile() {
     if (!draft) return;
-    try {
-      draft.rules = JSON.parse(rulesText);
-      rulesError = null;
-    } catch (e) {
-      rulesError = String(e);
-      return;
-    }
     await app.run(api.saveProfile($state.snapshot(draft) as Profile));
   }
   async function duplicateProfile() {
@@ -130,7 +120,16 @@
   }
   function addStyle() {
     if (!draft) return;
-    draft.styles.push({ key: `style-${draft.styles.length + 1}`, name: "New style", short: "NEW", color: "#8e8e93", group: null, sweet: null, extended: null, beatsPerBar: 4, lessonCategory: "other", energy: "medium" });
+    draft.styles.push({ key: uniqueId(draft.styles.map((x) => x.key), "style"), name: "New style", short: "NEW", color: NEUTRAL, sweet: null, extended: null });
+  }
+  function addTag() {
+    if (!draft) return;
+    draft.tags.push({ id: uniqueId(draft.tags.map((x) => x.id), "tag"), name: "New tag", color: NEUTRAL, announce: false });
+  }
+  function uniqueId(taken: string[], base: string): string {
+    let i = taken.length + 1;
+    while (taken.includes(`${base}-${i}`)) i++;
+    return `${base}-${i}`;
   }
   function rangeVal(r: [number, number] | null, i: 0 | 1) {
     return r ? r[i] : "";
@@ -156,7 +155,7 @@
       {#if tab === "general"}
         <h2>General</h2>
         <div class="form">
-          <span class="l">Club profile</span>
+          <span class="l" title="Club for new setlists (each setlist can choose its own)">Default club</span>
           <select value={s.activeProfileId} onchange={(e) => set("activeProfileId", e.currentTarget.value)}>
             {#each app.profiles as p}<option value={p.id}>{p.name}</option>{/each}
           </select>
@@ -285,14 +284,15 @@
           </span>
           <span class="l">Mapping</span>
           <span class="row">
-            <select value={mapping?.id} onchange={(e) => set("midi", { ...$state.snapshot(s.midi), mappingId: e.currentTarget.value })}>
+            <select value={s.midi.mappingId} onchange={(e) => set("midi", { ...$state.snapshot(s.midi), mappingId: e.currentTarget.value })}>
+              <option value="">Automatic{s.midi.mappingId === "" && mapping ? ` (${mapping.name})` : ""}</option>
               {#each mappings as m}<option value={m.id}>{m.name}</option>{/each}
             </select>
-            {#if mapping && !mapping.builtin}
+            {#if mapping && !mapping.builtin && s.midi.mappingId === mapping.id}
               <button class="danger" onclick={async () => {
                 if (!(await confirmAction(`Delete the mapping “${mapping.name}”?`))) return;
                 const custom = s.midi.customMappings.filter((x) => x.id !== mapping.id);
-                set("midi", { ...$state.snapshot(s.midi), customMappings: custom, mappingId: "numark-dj2go2" });
+                set("midi", { ...$state.snapshot(s.midi), customMappings: custom, mappingId: "" });
                 if (midi) midi = { ...midi, mappings: midi.mappings.filter((x) => x.id !== mapping.id) };
               }}>Delete Mapping</button>
             {/if}
@@ -440,6 +440,7 @@
             <label><input type="checkbox" checked={s.projector.showArtist} onchange={(e) => setProj({ showArtist: e.currentTarget.checked })} /> Artist</label>
             <label><input type="checkbox" checked={s.projector.showBpm} onchange={(e) => setProj({ showBpm: e.currentTarget.checked })} /> Tempo (BPM)</label>
             <label><input type="checkbox" checked={s.projector.showClock} onchange={(e) => setProj({ showClock: e.currentTarget.checked })} /> Clock</label>
+            <label><input type="checkbox" checked={s.projector.showArtwork} onchange={(e) => setProj({ showArtwork: e.currentTarget.checked })} /> Cover art</label>
           </span>
           <span class="l">Recently played</span>
           <span><input type="number" min="0" max="12" value={s.projector.historyCount} onchange={(e) => setProj({ historyCount: +e.currentTarget.value })} /> songs</span>
@@ -454,7 +455,7 @@
 
       {:else if tab === "profiles" && draft}
         <h2>Club Profiles</h2>
-        <p class="dim">A profile holds a club's dance styles, tempo ranges, setlist rules and announcements. Built-in: Dancebreak and Richard Powers' general DJ tips.</p>
+        <p class="dim">A club profile holds the club's own dance styles and tempo ranges, tags and announcements. How your styles map onto a club's is set in <button class="plain link" onclick={() => (tab = "styles")}>Dance Styles</button>. Built in: {app.profiles.filter((p) => p.builtin).map((p) => p.name).join(", ")}.</p>
         <div class="row">
           <select bind:value={profileId}>{#each app.profiles as p}<option value={p.id}>{p.name}{p.modified ? " (modified)" : ""}</option>{/each}</select>
           <button onclick={duplicateProfile}><Icon name="copy" size={13} /> Duplicate…</button>
@@ -472,7 +473,7 @@
         </div>
         <h3>Dance styles</h3>
         <table class="stable">
-          <thead><tr><th></th><th>Name</th><th>Short</th><th>Key</th><th>Group</th><th>Sweet BPM</th><th>Acceptable BPM</th><th>Beats</th><th>Energy</th><th>Lesson</th><th></th></tr></thead>
+          <thead><tr><th></th><th>Name</th><th>Short</th><th>Key</th><th>Sweet BPM</th><th>Acceptable BPM</th><th></th></tr></thead>
           <tbody>
             {#each draft.styles as st, i (i)}
               <tr>
@@ -480,23 +481,34 @@
                 <td><input type="text" bind:value={st.name} /></td>
                 <td><input type="text" class="w5" bind:value={st.short} /></td>
                 <td><input type="text" class="w9" bind:value={st.key} title="Stable id stored on songs; change with care" /></td>
-                <td><input type="text" class="w6" value={st.group ?? ""} onchange={(e) => (st.group = e.currentTarget.value || null)} /></td>
                 <td class="nowrap"><input type="number" class="w4" value={rangeVal(st.sweet, 0)} onchange={(e) => setRange(st, "sweet", 0, e.currentTarget.value)} />–<input type="number" class="w4" value={rangeVal(st.sweet, 1)} onchange={(e) => setRange(st, "sweet", 1, e.currentTarget.value)} /></td>
                 <td class="nowrap"><input type="number" class="w4" value={rangeVal(st.extended, 0)} onchange={(e) => setRange(st, "extended", 0, e.currentTarget.value)} />–<input type="number" class="w4" value={rangeVal(st.extended, 1)} onchange={(e) => setRange(st, "extended", 1, e.currentTarget.value)} /></td>
-                <td><input type="number" class="w3" bind:value={st.beatsPerBar} /></td>
-                <td><select bind:value={st.energy}><option value="slow">Slow</option><option value="medium">Medium</option><option value="fast">Fast</option></select></td>
-                <td><select bind:value={st.lessonCategory}>{#each draft.lessonCategories as c}<option value={c.id}>{c.name}</option>{/each}</select></td>
                 <td><button class="plain icon" onclick={() => draft!.styles.splice(i, 1)} title="Remove"><Icon name="x" size={12} /></button></td>
               </tr>
             {/each}
           </tbody>
         </table>
         <button class="small" onclick={addStyle}><Icon name="plus" size={12} /> Add Style</button>
+        {#if !draft.styles.length}<p class="faint small">No styles: your own dance styles are shown as they are.</p>{/if}
+        <h3>Tags <span class="faint small">(marks on setlist entries, e.g. “Last dance”)</span></h3>
+        <table class="stable">
+          <thead><tr><th></th><th>Name</th><th>Show on projector</th><th></th></tr></thead>
+          <tbody>
+            {#each draft.tags as t, i (i)}
+              <tr>
+                <td><input type="color" bind:value={t.color} /></td>
+                <td><input type="text" bind:value={t.name} title="Id: {t.id}" /></td>
+                <td><input type="checkbox" bind:checked={t.announce} /></td>
+                <td><button class="plain icon" onclick={() => draft!.tags.splice(i, 1)} title="Remove"><Icon name="x" size={12} /></button></td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+        <button class="small" onclick={addTag}><Icon name="plus" size={12} /> Add Tag</button>
         <h3>Announcements</h3>
         <textarea rows="4" value={draft.announcements.join("\n")} onchange={(e) => (draft!.announcements = e.currentTarget.value.split("\n").filter((x) => x.trim()))}></textarea>
-        <h3>Setlist rules <span class="faint small">(JSON — see the built-in profiles for every rule type)</span></h3>
-        <textarea class="code" rows="14" bind:value={rulesText}></textarea>
-        {#if rulesError}<div class="err small">{rulesError}</div>{/if}
+      {:else if tab === "styles"}
+        <StylesSettings />
       {/if}
     </div>
   </div>
@@ -530,10 +542,10 @@
   th { text-align: left; color: var(--text-faint); font-weight: 600; padding: 4px; border-bottom: 1px solid var(--border); }
   td { padding: 3px 4px; border-bottom: 1px solid rgba(255,255,255,0.04); }
   .stable input[type="text"] { width: 130px; }
-  .w3 { width: 44px !important; } .w4 { width: 54px !important; } .w5 { width: 60px !important; } .w6 { width: 80px !important; } .w9 { width: 130px !important; }
+  .w4 { width: 54px !important; } .w5 { width: 60px !important; } .w9 { width: 130px !important; }
   input[type="color"] { width: 26px; height: 22px; padding: 0; border: none; background: none; }
   .nowrap { white-space: nowrap; }
   textarea { width: 100%; }
-  .code { font: var(--fs-sm) var(--font-mono); }
+  .link { padding: 0; height: auto; color: var(--blue); display: inline; }
   .danger { color: var(--red); }
 </style>

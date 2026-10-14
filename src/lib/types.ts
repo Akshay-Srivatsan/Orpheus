@@ -19,11 +19,12 @@ export interface Overrides {
   stems?: Record<string, boolean> | null;
 }
 
-/** A playable configuration of a track: style, tempo, cue points, comments. */
+/** A playable configuration of a track: styles, tempo, cue points, comments. */
 export interface Version extends Overrides {
   id: Id;
   name: string;
-  style?: string | null;
+  /** Your dance styles (keys into styles.json) this version can be danced as. */
+  styles?: string[];
   comment?: string;
   tags?: string[];
 }
@@ -104,7 +105,6 @@ export interface SetlistSummary {
   name: string;
   eventDate: string | null;
   profileId: string;
-  lessonStyle: string | null;
   notes: string;
   mode: SetlistMode;
   createdAt: number;
@@ -122,8 +122,10 @@ export interface SetlistEntry {
   id: Id;
   /** Absent = a style slot; the DJ picks the song live. */
   versionId?: Id | null;
-  /** Slot style, or an override of the version's style. */
-  style?: string | null;
+  /** Your styles to show, in order: a subset of the version's, or a slot's styles. Absent = all of the version's. */
+  styles?: string[] | null;
+  /** Custom text shown instead of style names. */
+  label?: string | null;
   overrides?: Overrides;
   note?: string;
   tags?: string[];
@@ -131,16 +133,50 @@ export interface SetlistEntry {
   playedAt?: number | null;
 }
 
-export type NewEntry = Partial<Pick<SetlistEntry, "versionId" | "style" | "overrides" | "note" | "tags">>;
-export type EntryPatch = Partial<Pick<SetlistEntry, "versionId" | "style" | "overrides" | "note" | "tags" | "status">>;
+export type NewEntry = Partial<Pick<SetlistEntry, "versionId" | "styles" | "label" | "overrides" | "note" | "tags">>;
+export type EntryPatch = Partial<Pick<SetlistEntry, "versionId" | "styles" | "label" | "overrides" | "note" | "tags" | "status">>;
 
+/** A song played in a setlist (history is derived from setlists). */
 export interface HistoryItem {
   playedAt: number;
   trackId: Id;
-  versionId?: Id;
-  style?: string;
-  bpm?: number;
-  setlistId?: Id;
+  versionId: Id | null;
+  styles: string[];
+  setlistId: Id;
+  entryId: Id;
+}
+
+// ---------------------------------------------------------------- your styles
+
+/** One of your dance styles (what songs are tagged with). */
+export interface LibraryStyle {
+  key: string;
+  name: string;
+  short: string;
+  color: string;
+  note?: string;
+}
+
+/**
+ * At a club, songs tagged `style` with a planned tempo in [minBpm, maxBpm]
+ * count as club style `to` ("" = not danced there). First match wins.
+ */
+export interface StyleMappingRule {
+  style: string;
+  minBpm?: number | null;
+  maxBpm?: number | null;
+  to: string;
+}
+
+/** styles.json: your styles and, per club profile id, the mapping rules. */
+export interface StyleLibrary {
+  styles: LibraryStyle[];
+  mappings: Record<string, StyleMappingRule[]>;
+}
+
+export interface StylesInfo extends StyleLibrary {
+  /** Number of versions tagged with each style key. */
+  usage: Record<string, number>;
 }
 
 export interface LibraryInfo {
@@ -156,14 +192,10 @@ export interface StyleDef {
   name: string;
   short: string;
   color: string;
-  group: string | null;
   /** Preferred tempo range [min, max] in BPM. */
   sweet: [number, number] | null;
   /** Acceptable tempo range. */
   extended: [number, number] | null;
-  beatsPerBar: number;
-  lessonCategory: string;
-  energy: "slow" | "medium" | "fast";
   note?: string;
 }
 
@@ -174,39 +206,6 @@ export interface TagDef {
   /** Show on the projector. */
   announce: boolean;
 }
-
-export type CountSpec = number | Record<string, number>;
-export type Severity = "error" | "warning" | "info";
-
-/** Rule targets: a style key, `group:<id>`, or `@lesson`. */
-export type Rule =
-  | { type: "songCount"; min?: number; max?: number; severity?: Severity; label?: string }
-  | { type: "maxDuration"; seconds: number; from?: number; to?: number; severity?: Severity; label?: string }
-  | { type: "styleCount"; target: string; min?: CountSpec; max?: CountSpec; severity?: Severity; label?: string }
-  | { type: "styleInFirst"; target: string; n: number; min: number; severity?: Severity; label?: string }
-  | { type: "tagCount"; tag: string; target?: string; half?: "first" | "second"; min?: number; max?: number; severity?: Severity; label?: string }
-  | {
-      type: "tempoRange";
-      range: "sweet" | "extended";
-      maxExceptions?: number;
-      notInFirst?: number;
-      noConsecutive?: boolean;
-      severity?: Severity;
-      label?: string;
-    }
-  | {
-      type: "endingSequence";
-      sequence: string[];
-      /** The first N of the sequence may appear in any order. */
-      flexibleCount?: number;
-      /** Targets allowed after the sequence (e.g. an optional closing routine). */
-      allowAfter?: string[];
-      severity?: Severity;
-      label?: string;
-    }
-  | { type: "noRepeat"; severity?: Severity; label?: string }
-  | { type: "noConsecutiveSame"; tempoPct?: number; severity?: Severity; label?: string }
-  | { type: "maxConsecutive"; energy: "slow" | "medium" | "fast"; count: number; severity?: Severity; label?: string };
 
 export interface Profile {
   id: string;
@@ -219,12 +218,9 @@ export interface Profile {
   autoAdvance: boolean;
   fadeOutSeconds: number;
   tempo: { maxSpeedupPct: number; maxSlowdownPct: number };
-  lessonCategories: { id: string; name: string }[];
-  groups: { id: string; name: string }[];
   styles: StyleDef[];
   tags: TagDef[];
   announcements: string[];
-  rules: Rule[];
 }
 
 // ---------------------------------------------------------------- settings
@@ -246,6 +242,7 @@ export interface ProjectorSettings {
   showArtist: boolean;
   showBpm: boolean;
   showClock: boolean;
+  showArtwork: boolean;
   fontScale: number;
   theme: "dark" | "light";
 }
@@ -299,6 +296,7 @@ export interface Settings {
   /** Switch headphones to the free deck when a deck goes on air. */
   headphonesFollowFreeDeck: boolean;
   projector: ProjectorSettings;
+  /** mappingId "" = pick automatically from the connected controller. */
   midi: { enabled: boolean; mappingId: string; customMappings: MidiMapping[] };
   spotify: { clientId: string; autoConnect: boolean };
 }
@@ -371,12 +369,12 @@ export interface ProjTag {
 
 export interface ProjEntry {
   id: Id;
+  trackId: Id | null;
   title: string;
   artist: string;
-  style: string | null;
-  styleName: string;
-  styleShort: string;
-  color: string;
+  /** Your style keys; the page resolves club names via `profile` and `styleLibrary`. */
+  styles: string[];
+  label: string | null;
   tags: ProjTag[];
   status: EntryStatus;
   bpm: number | null;
@@ -396,6 +394,9 @@ export interface ProjectorPayload {
   message: string | null;
   /** Deck whose position drives the progress bar. */
   liveDeck: 0 | 1;
+  /** The setlist's club profile (null if unknown). */
+  profile: Profile | null;
+  styleLibrary: StyleLibrary;
 }
 
 export interface ScanProgress {
@@ -452,6 +453,8 @@ export interface SpotifyPlaylist {
 export interface MidiInfo {
   ports: { name: string; connected: boolean }[];
   mappings: MidiMapping[];
+  /** Mapping in use (with automatic selection: the one matching the controller). */
+  activeMapping: string;
   actions: [string, string, string][];
   ledStates: string[];
 }

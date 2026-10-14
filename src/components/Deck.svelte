@@ -1,9 +1,11 @@
 <script lang="ts">
   // One of two identical decks. The crossfader decides which deck the room
   // hears ("on air"); the other is the free deck, cued in headphones.
+  import { NEUTRAL } from "../lib/styles";
   import { api } from "../lib/api";
+  import { artwork } from "../lib/artwork";
   import { addToSet, app, loadDeck } from "../lib/state.svelte";
-  import { fmtBpm, fmtPct, fmtTime, foldBpm, playback, styleOf, tempoFit } from "../lib/tempo";
+  import { fmtBpm, fmtPct, fmtTime, foldBpm, playback, tempoFit } from "../lib/tempo";
   import type { Id } from "../lib/types";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
   import Icon from "./Icon.svelte";
@@ -19,9 +21,9 @@
   const row = $derived(d.versionId ? app.versionMap.get(d.versionId) : undefined);
   const track = $derived(row?.track ?? (d.trackId ? app.trackMap.get(d.trackId) : undefined));
   const entry = $derived(d.entryId ? app.current?.entries.find((e) => e.id === d.entryId) : undefined);
-  const styleKey = $derived(styleOf(row?.version, entry));
-  const style = $derived(app.style(styleKey));
-  const pb = $derived(playback(track, row?.version, entry ?? null, app.profile));
+  const pb = $derived(playback(track, row?.version, entry ?? null, app.clubStyleOf));
+  const shown = $derived(row ? app.shownFor(row.version, entry, pb.target) : []);
+  const style = $derived(row ? (app.clubStyleOf(row.version, entry, pb.target) ?? undefined) : undefined);
   const baseBpm = $derived(track?.bpm ? (pb.target ? foldBpm(track.bpm, pb.target) : (pb.base ?? track.bpm)) : null);
   const liveBpm = $derived(baseBpm ? baseBpm * d.tempo : null);
   const fit = $derived(tempoFit(liveBpm, style));
@@ -46,6 +48,13 @@
   const STEM_LABELS = [["Vox", "Vocals", "#ff6482"], ["Drm", "Drums", "#ffd60a"], ["Bas", "Bass", "#30d158"], ["Oth", "Other (melody, instruments)", "#64d2ff"]] as const;
   const stemJob = $derived(track ? app.stems?.jobs[track.id] : undefined);
   const canStem = $derived(!!track && track.files.length > 0);
+
+  let art = $state<string | null>(null);
+  $effect(() => {
+    const id = track?.id;
+    art = null;
+    if (id) artwork(id).then((a) => { if (track?.id === id) art = a; });
+  });
 
   let tempoDraft = $state<number | null>(null);
   const tempoShown = $derived(tempoDraft ?? d.tempo);
@@ -156,11 +165,11 @@
   </header>
 
   <div class="meta">
-    <div class="art" style:--c={app.styleColor(styleKey)}>
-      {#if track?.artworkUrl}
-        <img src={track.artworkUrl} alt="" />
+    <div class="art" style:--c={shown[0]?.color ?? NEUTRAL}>
+      {#if art}
+        <img src={art} alt="" />
       {:else}
-        <span>{style?.short ?? (loaded ? "♪" : "")}</span>
+        <span>{entry?.label || shown[0]?.short || (loaded ? "♪" : "")}</span>
       {/if}
     </div>
     <div class="titles">
@@ -171,7 +180,7 @@
           {#if row && app.versionLabel(row.version, track)}<span class="ver">· {row.version.name}</span>{/if}
         </div>
         <div class="chips">
-          <StyleBadge style={styleKey} />
+          <StyleBadge styles={shown} label={entry?.label} />
           {#each entry?.tags ?? [] as tag}
             {@const t = app.profile?.tags.find((x) => x.id === tag)}
             <span class="badge" style:--c={t?.color ?? "#999"}>{t?.name ?? tag}</span>

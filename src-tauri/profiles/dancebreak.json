@@ -2,7 +2,7 @@
  "id": "dancebreak",
  "name": "Dancebreak",
  "builtin": true,
- "description": "Stanford Dancebreak socials (dancebreak.stanford.edu/info/djing). 2-hour socials, 30\u201335 songs, 5\u201310 s pauses, ends with Last WCS / Lindy / Cross-Step and a final Rotary Waltz.",
+ "description": "Stanford Dancebreak socials (dancebreak.stanford.edu/info/djing): Dancebreak's dance styles and tempo ranges, 5\u201310 s pauses.",
  "setMinutes": 120,
  "gap": {
   "targetSeconds": 8,
@@ -15,65 +15,12 @@
   "maxSpeedupPct": 10,
   "maxSlowdownPct": 8
  },
- "lessonCategories": [
-  {
-   "id": "waltz",
-   "name": "Waltz lesson"
-  },
-  {
-   "id": "swing",
-   "name": "Swing lesson"
-  },
-  {
-   "id": "other",
-   "name": "Other lesson"
-  }
- ],
- "groups": [
-  {
-   "id": "waltz",
-   "name": "Cross-step"
-  },
-  {
-   "id": "rotary",
-   "name": "Rotary waltzes"
-  },
-  {
-   "id": "swing",
-   "name": "Swing"
-  },
-  {
-   "id": "latin",
-   "name": "Latin"
-  },
-  {
-   "id": "fusion",
-   "name": "Fusion"
-  },
-  {
-   "id": "line",
-   "name": "Line dances"
-  },
-  {
-   "id": "mixer",
-   "name": "Mixers"
-  },
-  {
-   "id": "choreo",
-   "name": "Choreography"
-  },
-  {
-   "id": "extra",
-   "name": "Additional styles"
-  }
- ],
  "styles": [
   {
    "key": "cross-step-waltz",
    "name": "Cross-Step Waltz",
    "short": "CSW",
    "color": "#a78bfa",
-   "group": "waltz",
    "sweet": [
     110,
     120
@@ -81,17 +28,13 @@
    "extended": [
     105,
     125
-   ],
-   "beatsPerBar": 3,
-   "lessonCategory": "waltz",
-   "energy": "medium"
+   ]
   },
   {
    "key": "rotary-waltz",
    "name": "Rotary Waltz",
    "short": "RW",
    "color": "#f472b6",
-   "group": "rotary",
    "sweet": [
     140,
     155
@@ -99,25 +42,18 @@
    "extended": [
     135,
     160
-   ],
-   "beatsPerBar": 3,
-   "lessonCategory": "waltz",
-   "energy": "medium"
+   ]
   },
   {
    "key": "fast-waltz",
    "name": "Fast Waltz",
    "short": "FW",
    "color": "#fb7185",
-   "group": "rotary",
    "sweet": [
     170,
     200
    ],
    "extended": null,
-   "beatsPerBar": 3,
-   "lessonCategory": "waltz",
-   "energy": "fast",
    "note": "Fast or accelerating rotary waltz; max 3 per set."
   },
   {
@@ -125,7 +61,6 @@
    "name": "Lindy Hop",
    "short": "LH",
    "color": "#fbbf24",
-   "group": "swing",
    "sweet": [
     130,
     150
@@ -133,17 +68,13 @@
    "extended": [
     125,
     160
-   ],
-   "beatsPerBar": 4,
-   "lessonCategory": "swing",
-   "energy": "fast"
+   ]
   },
   {
    "key": "west-coast-swing",
    "name": "West Coast Swing",
    "short": "WCS",
    "color": "#34d399",
-   "group": "swing",
    "sweet": [
     95,
     105
@@ -151,17 +82,13 @@
    "extended": [
     90,
     110
-   ],
-   "beatsPerBar": 4,
-   "lessonCategory": "swing",
-   "energy": "medium"
+   ]
   },
   {
    "key": "polka",
    "name": "Polka",
    "short": "PK",
    "color": "#facc15",
-   "group": null,
    "sweet": [
     110,
     125
@@ -169,29 +96,21 @@
    "extended": [
     105,
     130
-   ],
-   "beatsPerBar": 4,
-   "lessonCategory": "other",
-   "energy": "fast"
+   ]
   },
   {
    "key": "fusion",
    "name": "Fusion",
    "short": "FUS",
    "color": "#818cf8",
-   "group": "fusion",
    "sweet": null,
-   "extended": null,
-   "beatsPerBar": 4,
-   "lessonCategory": "other",
-   "energy": "slow"
+   "extended": null
   },
   {
    "key": "salsa",
    "name": "Salsa",
    "short": "SAL",
    "color": "#f97316",
-   "group": "latin",
    "sweet": [
     90,
     98
@@ -200,9 +119,6 @@
     86,
     100
    ],
-   "beatsPerBar": 4,
-   "lessonCategory": "other",
-   "energy": "fast",
    "note": "Counted in half-time (Powers' convention)."
   },
   {
@@ -210,7 +126,6 @@
    "name": "Bachata",
    "short": "BCH",
    "color": "#fb923c",
-   "group": "latin",
    "sweet": [
     120,
     130
@@ -218,17 +133,13 @@
    "extended": [
     110,
     140
-   ],
-   "beatsPerBar": 4,
-   "lessonCategory": "other",
-   "energy": "medium"
+   ]
   },
   {
    "key": "cha-cha",
    "name": "Cha Cha",
    "short": "CHA",
    "color": "#fdba74",
-   "group": "latin",
    "sweet": [
     114,
     122
@@ -236,17 +147,13 @@
    "extended": [
     112,
     126
-   ],
-   "beatsPerBar": 4,
-   "lessonCategory": "other",
-   "energy": "medium"
+   ]
   },
   {
    "key": "merengue",
    "name": "Merengue",
    "short": "MER",
    "color": "#ea580c",
-   "group": "latin",
    "sweet": [
     116,
     124
@@ -254,58 +161,39 @@
    "extended": [
     112,
     138
-   ],
-   "beatsPerBar": 4,
-   "lessonCategory": "other",
-   "energy": "fast"
+   ]
   },
   {
    "key": "line-dance",
    "name": "Line Dance",
    "short": "LINE",
    "color": "#2dd4bf",
-   "group": "line",
    "sweet": null,
-   "extended": null,
-   "beatsPerBar": 4,
-   "lessonCategory": "other",
-   "energy": "medium"
+   "extended": null
   },
   {
    "key": "mixer",
    "name": "Mixer",
    "short": "MIX",
    "color": "#4ade80",
-   "group": "mixer",
    "sweet": null,
-   "extended": null,
-   "beatsPerBar": 4,
-   "lessonCategory": "other",
-   "energy": "medium"
+   "extended": null
   },
   {
    "key": "choreography",
    "name": "Choreography (BNP etc.)",
    "short": "CHOR",
    "color": "#38bdf8",
-   "group": "choreo",
    "sweet": null,
-   "extended": null,
-   "beatsPerBar": 4,
-   "lessonCategory": "other",
-   "energy": "medium"
+   "extended": null
   },
   {
    "key": "solo-jazz",
    "name": "Solo Jazz Routine",
    "short": "JAZZ",
    "color": "#60a5fa",
-   "group": "choreo",
    "sweet": null,
    "extended": null,
-   "beatsPerBar": 4,
-   "lessonCategory": "other",
-   "energy": "fast",
    "note": "e.g. Mama's Stew, Big Apple \u2014 optional closer after the last rotary."
   },
   {
@@ -313,7 +201,6 @@
    "name": "Night Club Two-Step",
    "short": "NC2S",
    "color": "#c084fc",
-   "group": "extra",
    "sweet": [
     78,
     86
@@ -321,17 +208,13 @@
    "extended": [
     76,
     88
-   ],
-   "beatsPerBar": 4,
-   "lessonCategory": "other",
-   "energy": "slow"
+   ]
   },
   {
    "key": "tango",
    "name": "Tango",
    "short": "TAN",
    "color": "#ef4444",
-   "group": "extra",
    "sweet": [
     62,
     70
@@ -339,17 +222,13 @@
    "extended": [
     60,
     74
-   ],
-   "beatsPerBar": 4,
-   "lessonCategory": "other",
-   "energy": "slow"
+   ]
   },
   {
    "key": "hustle",
    "name": "Hustle",
    "short": "HUS",
    "color": "#e879f9",
-   "group": "extra",
    "sweet": [
     115,
     121
@@ -357,17 +236,13 @@
    "extended": [
     110,
     125
-   ],
-   "beatsPerBar": 4,
-   "lessonCategory": "other",
-   "energy": "medium"
+   ]
   },
   {
    "key": "east-coast-swing",
    "name": "East Coast Swing",
    "short": "ECS",
    "color": "#fcd34d",
-   "group": "extra",
    "sweet": [
     176,
     192
@@ -375,17 +250,13 @@
    "extended": [
     160,
     200
-   ],
-   "beatsPerBar": 4,
-   "lessonCategory": "swing",
-   "energy": "fast"
+   ]
   },
   {
    "key": "foxtrot",
    "name": "Foxtrot",
    "short": "FOX",
    "color": "#94a3b8",
-   "group": "extra",
    "sweet": [
     124,
     132
@@ -393,22 +264,15 @@
    "extended": [
     120,
     152
-   ],
-   "beatsPerBar": 4,
-   "lessonCategory": "other",
-   "energy": "slow"
+   ]
   },
   {
    "key": "blues",
    "name": "Blues",
    "short": "BLU",
    "color": "#6366f1",
-   "group": "fusion",
    "sweet": null,
-   "extended": null,
-   "beatsPerBar": 4,
-   "lessonCategory": "other",
-   "energy": "slow"
+   "extended": null
   }
  ],
  "tags": [
@@ -460,181 +324,5 @@
   "Remember to sign in on the piano!",
   "Pizza is in the lobby.",
   "Jam! Come to the middle if you have something to celebrate."
- ],
- "rules": [
-  {
-   "type": "songCount",
-   "min": 30,
-   "max": 35,
-   "severity": "warning",
-   "label": "30\u201335 songs in a 2-hour social"
-  },
-  {
-   "type": "styleInFirst",
-   "target": "@lesson",
-   "n": 5,
-   "min": 2,
-   "label": "At least 2 of the first 5 songs are the lesson style"
-  },
-  {
-   "type": "maxDuration",
-   "seconds": 210,
-   "from": 1,
-   "to": 10,
-   "label": "First 10 songs under 3:30"
-  },
-  {
-   "type": "maxDuration",
-   "seconds": 270,
-   "from": 11,
-   "label": "Remaining songs under 4:30"
-  },
-  {
-   "type": "styleCount",
-   "target": "@lesson",
-   "min": {
-    "waltz": 7,
-    "swing": 7,
-    "other": 5
-   },
-   "label": "Lesson style"
-  },
-  {
-   "type": "tagCount",
-   "tag": "dance-with-stranger",
-   "target": "@lesson",
-   "half": "first",
-   "min": 1,
-   "label": "1 Dance with a Stranger (lesson style) in the first half"
-  },
-  {
-   "type": "styleCount",
-   "target": "cross-step-waltz",
-   "min": {
-    "waltz": 9,
-    "swing": 8,
-    "other": 8
-   },
-   "label": "Cross-step waltzes"
-  },
-  {
-   "type": "tagCount",
-   "tag": "jam",
-   "target": "cross-step-waltz",
-   "half": "second",
-   "min": 1,
-   "label": "1 Jam (cross-step) in the second half"
-  },
-  {
-   "type": "styleCount",
-   "target": "group:rotary",
-   "min": {
-    "waltz": 7,
-    "swing": 6,
-    "other": 6
-   },
-   "label": "Rotary waltzes"
-  },
-  {
-   "type": "styleCount",
-   "target": "fast-waltz",
-   "max": 3,
-   "label": "No more than 3 fast/accelerating waltzes"
-  },
-  {
-   "type": "styleCount",
-   "target": "lindy-hop",
-   "min": {
-    "waltz": 4,
-    "swing": 4,
-    "other": 3
-   },
-   "label": "Lindy Hop"
-  },
-  {
-   "type": "styleCount",
-   "target": "west-coast-swing",
-   "min": {
-    "waltz": 4,
-    "swing": 4,
-    "other": 3
-   },
-   "label": "West Coast Swing"
-  },
-  {
-   "type": "styleCount",
-   "target": "polka",
-   "min": 1,
-   "label": "Polka"
-  },
-  {
-   "type": "styleCount",
-   "target": "group:fusion",
-   "min": 1,
-   "label": "Fusion"
-  },
-  {
-   "type": "styleCount",
-   "target": "group:latin",
-   "min": 1,
-   "label": "Latin"
-  },
-  {
-   "type": "styleCount",
-   "target": "group:line",
-   "min": 1,
-   "label": "Line dance"
-  },
-  {
-   "type": "styleCount",
-   "target": "group:mixer",
-   "min": 1,
-   "label": "Mixer"
-  },
-  {
-   "type": "styleCount",
-   "target": "group:choreo",
-   "min": 1,
-   "label": "Choreography (BNP etc.)"
-  },
-  {
-   "type": "styleCount",
-   "target": "group:extra",
-   "max": 4,
-   "label": "Additional non-core styles (max 4)"
-  },
-  {
-   "type": "tempoRange",
-   "range": "extended",
-   "maxExceptions": 6,
-   "notInFirst": 10,
-   "noConsecutive": true,
-   "label": "Tempo within range (0\u20136 exceptions, not consecutive, not in first 10)"
-  },
-  {
-   "type": "endingSequence",
-   "sequence": [
-    "west-coast-swing",
-    "lindy-hop",
-    "cross-step-waltz",
-    "rotary-waltz"
-   ],
-   "flexibleCount": 3,
-   "allowAfter": [
-    "solo-jazz"
-   ],
-   "label": "Ends with Last WCS, Lindy, Cross-Step (any order), then Last Rotary Waltz"
-  },
-  {
-   "type": "noRepeat",
-   "severity": "warning",
-   "label": "No song played twice"
-  },
-  {
-   "type": "noConsecutiveSame",
-   "tempoPct": 5,
-   "severity": "warning",
-   "label": "No two consecutive songs of the same style at the same tempo"
-  }
  ]
 }

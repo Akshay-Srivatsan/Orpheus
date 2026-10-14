@@ -78,12 +78,14 @@ pub struct ProjTag {
 #[serde(rename_all = "camelCase")]
 pub struct ProjEntry {
     pub id: Id,
+    /// For cover art (`track_artwork`).
+    pub track_id: Option<Id>,
     pub title: String,
     pub artist: String,
-    pub style: Option<String>,
-    pub style_name: String,
-    pub style_short: String,
-    pub color: String,
+    /// Your style keys to show (club styles are resolved by the page).
+    pub styles: Vec<String>,
+    /// Custom text replacing the style names.
+    pub label: Option<String>,
     pub tags: Vec<ProjTag>,
     pub status: String,
     pub bpm: Option<f64>,
@@ -105,6 +107,9 @@ pub struct ProjectorPayload {
     pub message: Option<String>,
     /// Deck whose position drives the projector's progress bar.
     pub live_deck: usize,
+    /// The club profile (for its style names), and your styles and mappings.
+    pub profile: serde_json::Value,
+    pub style_library: StyleLibrary,
 }
 
 /// Room gain of `deck` for crossfader position `x` (0 = A, 1 = B). Both decks
@@ -229,7 +234,7 @@ impl App {
         }
         let s = self.settings.read().clone();
         let date = chrono_like_date();
-        let id = self.store.setlist_create(&format!("Live set — {date}"), "live", &s.active_profile_id, None, None)?;
+        let id = self.store.setlist_create(&format!("Live set — {date}"), "live", &s.active_profile_id, None)?;
         emit(&self.handle, "setlists-changed", ());
         self.open_setlist(Some(id.clone()))?;
         Ok(id)
@@ -325,11 +330,11 @@ impl App {
     /// (so cue points / tempo set while cueing are kept).
     fn start_entry(&self, entry: &SetlistEntry, deck: usize) -> Result<()> {
         let version_id = entry.version_id.clone().ok_or_else(|| {
-            let style = entry
-                .style
-                .as_deref()
-                .map(|s| self.active_profile().style_name(s))
-                .unwrap_or_else(|| "this".into());
+            let style = match (&entry.label, entry.styles.as_deref()) {
+                (Some(l), _) => l.clone(),
+                (None, Some(st)) if !st.is_empty() => st.iter().map(|s| self.style_name(s)).collect::<Vec<_>>().join(" / "),
+                _ => "this".into(),
+            };
             anyhow!("Choose a song for the {style} slot first")
         })?;
         // Already loaded on the other deck (e.g. the DJ loaded it by hand)? Use that deck.
@@ -426,29 +431,14 @@ impl App {
             }
         };
         self.store.entry_set_playing(&entry_id)?;
-        let (entry, _) = self.store.entry(&entry_id)?;
-        let (version, track_id) = self.store.version(version_id)?;
-        let track = self.store.track(&track_id)?;
-        let bpm = track.rec.bpm.map(|b| {
-            let target = Self::resolve_settings(&version, Some(&entry)).target_bpm;
-            let base = target.map(|t| crate::app::fold_bpm(b, t)).unwrap_or(b);
-            (base * d.tempo() * 10.0).round() / 10.0
-        });
-        self.store.mark_played(HistoryItem {
-            played_at: now_ms(),
-            track_id: track.rec.id.clone(),
-            version_id: Some(version.id.clone()),
-            style: entry.style.clone().or(version.style.clone()),
-            bpm,
-            setlist_id: Some(setlist_id.clone()),
-        })?;
+        let (_, track_id) = self.store.version(version_id)?;
         {
             let mut p = self.perform.lock();
             p.live_deck = deck;
             p.gap_started = None;
         }
         self.emit_setlist(&setlist_id);
-        emit(&self.handle, "library-changed", vec![track.rec.id.clone()]);
+        emit(&self.handle, "library-changed", vec![track_id]);
         self.emit_perform();
         Ok(())
     }
@@ -576,19 +566,19 @@ impl App {
         }
     }
 
+    /// Club style names / colours are filled in by the projector page from
+    /// `ProjectorPayload::{profile, style_library}` (see `src/lib/styles.ts`).
     fn proj_entry(&self, e: &SetlistEntry, profile: &ProfileCore, lookup: &HashMap<Id, (Version, Track)>) -> ProjEntry {
         let vt = e.version_id.as_ref().and_then(|id| lookup.get(id));
-        let style_key = e.style.clone().or_else(|| vt.and_then(|(v, _)| v.style.clone()));
-        let st = style_key.as_deref().and_then(|s| profile.style(s));
+        let styles = e.styles.clone().or_else(|| vt.map(|(v, _)| v.styles.clone())).unwrap_or_default();
         let target = vt.and_then(|(v, _)| Self::resolve_settings(v, Some(e)).target_bpm);
         ProjEntry {
             id: e.id.clone(),
+            track_id: vt.map(|(_, t)| t.rec.id.clone()),
             title: vt.map(|(_, t)| t.rec.title.clone()).unwrap_or_default(),
             artist: vt.map(|(_, t)| t.rec.artist.clone()).unwrap_or_default(),
-            style_name: style_key.as_deref().map(|s| profile.style_name(s)).unwrap_or_default(),
-            style: style_key,
-            style_short: st.map(|s| s.short.clone()).unwrap_or_default(),
-            color: st.map(|s| s.color.clone()).unwrap_or_else(|| "#9ca3af".into()),
+            styles,
+            label: e.label.clone(),
             tags: e
                 .tags
                 .iter()
@@ -637,7 +627,7 @@ impl App {
             .take(settings.history_count as usize)
             .map(|(_, p)| p.clone())
             .collect();
-        history.retain(|h| !h.title.is_empty() || !h.style_name.is_empty());
+        history.retain(|h| !h.title.is_empty() || !h.styles.is_empty() || h.label.is_some());
         let mode = match settings.display_mode.as_str() {
             "live" | "preset" => settings.display_mode.clone(),
             _ => setlist.as_ref().map(|s| s.mode.clone()).unwrap_or_else(|| "live".into()),
@@ -660,6 +650,8 @@ impl App {
             playing,
             message,
             live_deck,
+            profile: self.active_profile_json(),
+            style_library: self.style_library(),
         }
     }
 }

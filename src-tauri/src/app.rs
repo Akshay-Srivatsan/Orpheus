@@ -146,8 +146,8 @@ impl App {
                 app.on_stems_changed(track);
             }
         });
-        let (mapping, enabled) = app.current_mapping();
-        let _ = app.midi.set(Midi::new(mapping, enabled, handler));
+        let (mapping, enabled, auto) = app.current_mapping();
+        let _ = app.midi.set(Midi::new(mapping, enabled, auto, handler));
         // Restore the last active setlist.
         if let Ok(id) = std::fs::read_to_string(app.local_dir.join("active-setlist")) {
             let id = id.trim().to_string();
@@ -158,15 +158,17 @@ impl App {
         Ok(app)
     }
 
-    pub fn current_mapping(&self) -> (midi::Mapping, bool) {
+    /// The configured mapping, or (when the setting is empty = automatic) a
+    /// generic fallback plus the candidates to pick from by controller name.
+    pub fn current_mapping(&self) -> (midi::Mapping, bool, Option<Vec<midi::Mapping>>) {
         let s = self.settings.read();
         let all = self.all_mappings_with(&s);
-        let m = all
-            .iter()
-            .find(|m| m.id == s.midi.mapping_id)
-            .cloned()
-            .unwrap_or_else(|| all[0].clone());
-        (m, s.midi.enabled)
+        let fallback = || all.iter().find(|m| m.device_match.is_empty()).cloned().unwrap_or_else(|| all[0].clone());
+        if s.midi.mapping_id.is_empty() {
+            return (fallback(), s.midi.enabled, Some(all.clone()));
+        }
+        let m = all.iter().find(|m| m.id == s.midi.mapping_id).cloned().unwrap_or_else(fallback);
+        (m, s.midi.enabled, None)
     }
 
     pub fn all_mappings_with(&self, s: &Settings) -> Vec<midi::Mapping> {
@@ -201,9 +203,9 @@ impl App {
             }
         }
         if serde_json::to_string(&old.midi)? != serde_json::to_string(&new.midi)? {
-            let (m, enabled) = self.current_mapping();
+            let (m, enabled, auto) = self.current_mapping();
             if let Some(midi) = self.midi.get() {
-                midi.set_mapping(m, enabled);
+                midi.set_mapping(m, enabled, auto);
             }
         }
         emit(&self.handle, "settings-changed", &new);
@@ -239,6 +241,55 @@ impl App {
             .or_else(|| serde_json::from_str(BUILTIN_PROFILES[0]).ok())
             .and_then(|v| serde_json::from_value(v).ok())
             .unwrap_or_default()
+    }
+
+    /// Your styles and club mappings; seeded (and saved) on first use from the
+    /// styles your library already uses, named after the active club profile.
+    pub fn style_library(&self) -> StyleLibrary {
+        if let Some(lib) = self.store.style_library() {
+            return lib;
+        }
+        let profile = self.profile(&self.settings.read().active_profile_id);
+        let used = self.store.style_usage();
+        let mut styles: Vec<LibraryStyle> = profile
+            .styles
+            .iter()
+            .map(|s| LibraryStyle { key: s.key.clone(), name: s.name.clone(), short: s.short.clone(), color: s.color.clone(), note: String::new() })
+            .collect();
+        for key in used.keys() {
+            if !styles.iter().any(|s| &s.key == key) {
+                styles.push(LibraryStyle {
+                    key: key.clone(),
+                    name: crate::settings::prettify_key(key),
+                    short: key.chars().take(3).collect::<String>().to_uppercase(),
+                    color: "#8e8e93".into(),
+                    note: String::new(),
+                });
+            }
+        }
+        let lib = StyleLibrary { styles, mappings: Default::default() };
+        if let Err(e) = self.store.save_style_library(lib.clone()) {
+            log::warn!("saving styles.json: {e:#}");
+        }
+        lib
+    }
+
+    /// Your own name for a style key (used in messages; the UI resolves club names).
+    pub fn style_name(&self, key: &str) -> String {
+        self.style_library()
+            .styles
+            .iter()
+            .find(|s| s.key == key)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| crate::settings::prettify_key(key))
+    }
+
+    pub(crate) fn active_profile_json(&self) -> serde_json::Value {
+        let id = self.active_profile().id;
+        self.profiles_json()
+            .ok()
+            .and_then(|ps| ps.into_iter().find(|p| p["id"].as_str() == Some(id.as_str())))
+            .unwrap_or(serde_json::Value::Null)
     }
 
     pub(crate) fn active_profile(&self) -> ProfileCore {
@@ -530,20 +581,24 @@ impl App {
             let (hi, lo) = (hi_rx.clone(), lo_rx.clone());
             std::thread::Builder::new()
                 .name(format!("analysis-{i}"))
-                .spawn(move || loop {
-                    let id = match hi.try_recv() {
-                        Ok(id) => id,
-                        Err(_) => crossbeam_channel::select! {
-                            recv(hi) -> m => match m { Ok(id) => id, Err(_) => return },
-                            recv(lo) -> m => match m { Ok(id) => id, Err(_) => return },
-                        },
-                    };
-                    let Some(app) = weak.upgrade() else { return };
-                    let r = app.analyze(&id);
-                    if let Err(e) = r {
-                        log::warn!("analysis of track {id} failed: {e:#}");
+                .spawn(move || {
+                    // Background work: never compete with the audio threads.
+                    crate::audio::priority::lower_current_thread();
+                    loop {
+                        let id = match hi.try_recv() {
+                            Ok(id) => id,
+                            Err(_) => crossbeam_channel::select! {
+                                recv(hi) -> m => match m { Ok(id) => id, Err(_) => return },
+                                recv(lo) -> m => match m { Ok(id) => id, Err(_) => return },
+                            },
+                        };
+                        let Some(app) = weak.upgrade() else { return };
+                        let r = app.analyze(&id);
+                        if let Err(e) = r {
+                            log::warn!("analysis of track {id} failed: {e:#}");
+                        }
+                        emit(&app.handle, "library-changed", vec![id]);
                     }
-                    emit(&app.handle, "library-changed", vec![id]);
                 })
                 .unwrap();
         }

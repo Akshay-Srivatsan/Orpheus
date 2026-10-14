@@ -2,13 +2,11 @@
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { onMount } from "svelte";
   import { api } from "../lib/api";
-  import { checkSetlist } from "../lib/rules";
-  import { app, confirmAction } from "../lib/state.svelte";
+  import { app } from "../lib/state.svelte";
   import Deck from "./Deck.svelte";
   import Inspector from "./Inspector.svelte";
   import LibraryTable from "./LibraryTable.svelte";
   import NewSetlistDialog from "./NewSetlistDialog.svelte";
-  import SetlistChecks from "./SetlistChecks.svelte";
   import SetPanel from "./SetPanel.svelte";
   import SettingsDialog from "./SettingsDialog.svelte";
   import Sidebar from "./Sidebar.svelte";
@@ -42,19 +40,6 @@
     return () => { un.then((f) => f()); };
   });
 
-  const checks = $derived.by(() => {
-    if (!app.current || !app.profile) return null;
-    const tracks = app.trackMap;
-    return checkSetlist({
-      profile: app.profile,
-      setlist: app.current,
-      tracks,
-      versions: app.versionMap,
-      fadeSeconds: app.fadeSeconds,
-      trimSilence: app.settings?.trimSilence ?? true,
-    });
-  });
-  const problems = $derived(checks?.results.filter((r) => !r.ok && r.severity !== "info").length ?? 0);
   const spotifyView = $derived(app.view.kind === "spotify-search" || app.view.kind === "spotify-playlist");
 
   const viewTitle = $derived.by(() => {
@@ -114,13 +99,8 @@
               {#if viewCrate?.smart}<Icon name="auto" size={15} />{/if}
               {viewTitle}
               {#if viewCrate?.smart}
-                <span class="faint small" title={viewCrate.smart.conditions.map((c) => describe(c, app)).join(viewCrate.smart.match === "any" ? "\nor " : "\nand ")}>smart crate</span>
+                <span class="faint small" title={viewCrate.smart.conditions.map((c) => describe(c, app.smartCtx)).join(viewCrate.smart.match === "any" ? "\nor " : "\nand ")}>smart crate</span>
                 <button class="plain small" onclick={() => (app.smartEditor = viewCrate!.id)}>Edit Rules…</button>
-              {/if}
-              {#if app.view.kind === "history"}
-                <button class="plain small" onclick={async () => {
-                  if (await confirmAction("Clear the whole play history? Play counts reset; setlists keep their played marks.", "Clear")) app.run(api.removeHistory());
-                }}>Clear History…</button>
               {/if}
             </div>
             <div class="search">
@@ -135,20 +115,11 @@
       <aside class="right">
         <div class="tabs segmented">
           <button class:on={app.rightTab === "set"} onclick={() => (app.rightTab = "set")}>Set</button>
-          <button class:on={app.rightTab === "checks"} onclick={() => (app.rightTab = "checks")}>
-            Checks {#if problems}<span class="pill">{problems}</span>{/if}
-          </button>
           <button class:on={app.rightTab === "info"} onclick={() => (app.rightTab = "info")}>Info</button>
         </div>
         <div class="rbody">
           {#if app.rightTab === "set"}
-            <SetPanel {checks} />
-          {:else if app.rightTab === "checks"}
-            {#if checks}
-              <div class="checks"><SetlistChecks result={checks} onSelectEntries={(ids) => { app.selectedEntries = ids; app.rightTab = "set"; }} /></div>
-            {:else}
-              <div class="empty">Open a setlist to check it against {app.profile?.name ?? "the club"}'s guidelines.</div>
-            {/if}
+            <SetPanel />
           {:else}
             <Inspector />
           {/if}
@@ -180,9 +151,7 @@
   .right { display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--border); background: var(--bg-elev); }
   .tabs { margin: 8px; display: flex; }
   .tabs button { flex: 1; }
-  .pill { background: var(--red); color: white; border-radius: 8px; padding: 0 5px; font-size: 10px; margin-left: 4px; }
   .rbody { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-  .checks { overflow-y: auto; padding: 0 8px 8px; }
   .loading { display: grid; place-items: center; height: 100vh; color: var(--text-dim); }
   .dropzone { position: fixed; inset: 12px; z-index: 90; border: 3px dashed var(--blue); border-radius: 16px; background: rgba(10,132,255,0.08);
     display: grid; place-items: center; font: 600 var(--fs-lg) var(--font-display); pointer-events: none; }

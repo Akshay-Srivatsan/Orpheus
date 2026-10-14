@@ -78,8 +78,12 @@ pub struct Overrides {
 pub struct Version {
     pub id: Id,
     pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub style: Option<String>,
+    /// Your dance styles this version can be danced as (in order).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub styles: Vec<String>,
+    /// Older libraries stored a single style; read and folded into `styles`.
+    #[serde(default, rename = "style", skip_serializing)]
+    pub legacy_style: Option<String>,
     #[serde(flatten)]
     pub settings: Overrides,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -92,8 +96,8 @@ pub struct Version {
 #[serde(rename_all = "camelCase")]
 pub struct VersionPatch {
     pub name: Option<String>,
-    #[serde(default, with = "double_option")]
-    pub style: Option<Option<String>>,
+    /// Replaces the version's styles.
+    pub styles: Option<Vec<String>>,
     #[serde(default, with = "double_option")]
     pub target_bpm: Option<Option<f64>>,
     #[serde(default, with = "double_option")]
@@ -108,6 +112,45 @@ pub struct VersionPatch {
     pub stems: Option<Option<serde_json::Map<String, serde_json::Value>>>,
     pub comment: Option<String>,
     pub tags: Option<Vec<String>>,
+}
+
+/// One of *your* dance styles: what versions in your library are tagged with.
+/// Club profiles have their own styles; `StyleLibrary::mappings` connects them.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct LibraryStyle {
+    /// Stable id stored on versions.
+    pub key: String,
+    pub name: String,
+    pub short: String,
+    pub color: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub note: String,
+}
+
+/// One rule of how your styles show up at a club: songs tagged `style` whose
+/// planned tempo is within [`min_bpm`, `max_bpm`] count as club style `to`
+/// (empty = not danced at this club). Rules are tried in order; the first match
+/// wins. Resolution happens in the UI (`src/lib/styles.ts`).
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct StyleMappingRule {
+    pub style: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_bpm: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_bpm: Option<f64>,
+    pub to: String,
+}
+
+/// `styles.json` in the library folder: your styles, and for each club
+/// profile id the rules mapping them onto the club's styles. Without a
+/// matching rule, a club style with the same key or name is used.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct StyleLibrary {
+    pub styles: Vec<LibraryStyle>,
+    pub mappings: std::collections::BTreeMap<String, Vec<StyleMappingRule>>,
 }
 
 /// A saved cue point (hot cue) on a track; shared by all its versions.
@@ -253,9 +296,16 @@ pub struct SetlistEntry {
     /// `None` = a style slot: the DJ picks a song live.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version_id: Option<Id>,
-    /// Slot style, or an override of the version's style.
+    /// Styles to show for this entry, in order: a subset of the version's
+    /// styles, or the slot's style(s). `None` = all of the version's styles.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub style: Option<String>,
+    pub styles: Option<Vec<String>>,
+    /// Custom text shown instead of style names (setlist, projector).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Older libraries: single slot / override style; folded into `styles`.
+    #[serde(rename = "style", skip_serializing)]
+    pub legacy_style: Option<String>,
     /// Per-setlist overrides of the version's settings.
     #[serde(skip_serializing_if = "is_default_overrides")]
     pub overrides: Overrides,
@@ -274,7 +324,9 @@ impl Default for SetlistEntry {
         Self {
             id: String::new(),
             version_id: None,
-            style: None,
+            styles: None,
+            label: None,
+            legacy_style: None,
             overrides: Overrides::default(),
             note: String::new(),
             tags: vec![],
@@ -296,7 +348,6 @@ pub struct Setlist {
     pub name: String,
     pub event_date: Option<String>,
     pub profile_id: String,
-    pub lesson_style: Option<String>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub notes: String,
     /// `live` or `preset`; affects defaults and what the projector shows.
@@ -314,7 +365,6 @@ pub struct SetlistSummary {
     pub name: String,
     pub event_date: Option<String>,
     pub profile_id: String,
-    pub lesson_style: Option<String>,
     pub notes: String,
     pub mode: String,
     pub created_at: i64,
@@ -329,7 +379,6 @@ impl From<&Setlist> for SetlistSummary {
             name: s.name.clone(),
             event_date: s.event_date.clone(),
             profile_id: s.profile_id.clone(),
-            lesson_style: s.lesson_style.clone(),
             notes: s.notes.clone(),
             mode: s.mode.clone(),
             created_at: s.created_at,
@@ -346,8 +395,6 @@ pub struct SetlistPatch {
     #[serde(default, with = "double_option")]
     pub event_date: Option<Option<String>>,
     pub profile_id: Option<String>,
-    #[serde(default, with = "double_option")]
-    pub lesson_style: Option<Option<String>>,
     pub notes: Option<String>,
     pub mode: Option<String>,
 }
@@ -356,7 +403,8 @@ pub struct SetlistPatch {
 #[serde(rename_all = "camelCase")]
 pub struct NewEntry {
     pub version_id: Option<Id>,
-    pub style: Option<String>,
+    pub styles: Option<Vec<String>>,
+    pub label: Option<String>,
     #[serde(default)]
     pub overrides: Overrides,
     #[serde(default)]
@@ -371,7 +419,9 @@ pub struct EntryPatch {
     #[serde(default, with = "double_option")]
     pub version_id: Option<Option<Id>>,
     #[serde(default, with = "double_option")]
-    pub style: Option<Option<String>>,
+    pub styles: Option<Option<Vec<String>>>,
+    #[serde(default, with = "double_option")]
+    pub label: Option<Option<String>>,
     /// Replaces all overrides.
     pub overrides: Option<Overrides>,
     pub note: Option<String>,
@@ -379,20 +429,16 @@ pub struct EntryPatch {
     pub status: Option<String>,
 }
 
-/// One line of `history/<yyyy-mm>.jsonl`.
+/// A song played in a setlist (history is derived from setlists).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryItem {
     pub played_at: i64,
     pub track_id: Id,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version_id: Option<Id>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub style: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bpm: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub setlist_id: Option<Id>,
+    pub styles: Vec<String>,
+    pub setlist_id: Id,
+    pub entry_id: Id,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -403,3 +449,25 @@ pub struct AudioDevice {
     pub channels: u16,
     pub is_default: bool,
 }
+
+impl Version {
+    /// Folds the legacy single `style` field into `styles`.
+    pub fn normalize(&mut self) {
+        if let Some(s) = self.legacy_style.take() {
+            if !self.styles.contains(&s) {
+                self.styles.insert(0, s);
+            }
+        }
+    }
+}
+
+impl SetlistEntry {
+    pub fn normalize(&mut self) {
+        if let Some(s) = self.legacy_style.take() {
+            if self.styles.is_none() {
+                self.styles = Some(vec![s]);
+            }
+        }
+    }
+}
+

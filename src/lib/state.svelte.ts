@@ -4,8 +4,11 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { api, on, type Events } from "./api";
 import type {
   Crate, DeckState, Id, Levels, LibraryInfo, StemsStatus, OutputStatus, PerformState, Profile, Row, ScanProgress, Setlist,
-  SetlistSummary, Settings, SpotifyStatus, StyleDef, Track, Version,
+  SetlistEntry, SetlistSummary, Settings, SpotifyStatus, StyleDef, StylesInfo, Track, Version,
 } from "./types";
+import { NEUTRAL, clubStyle, clubStyleOfEntry, clubTargets, entryStyleKeys, myStyle, prettify, showStyle, showStyles, type Shown } from "./styles";
+import type { ClubStyleOf } from "./tempo";
+import type { SmartContext } from "./smart";
 
 export type SourceView =
   | { kind: "all" }
@@ -36,6 +39,8 @@ class AppState {
   crates = $state<Crate[]>([]);
   setlists = $state<SetlistSummary[]>([]);
   profiles = $state<Profile[]>([]);
+  /** Your dance styles and their mappings onto club styles (styles.json). */
+  styleLib = $state<StylesInfo | null>(null);
   settings = $state<Settings | null>(null);
   decks = $state<[DeckState, DeckState]>([emptyDeck(0), emptyDeck(1)]);
   levels = $state<Levels>({ master: 0, cue: 0, masterVolume: 1, cueVolume: 0.8 });
@@ -71,7 +76,7 @@ class AppState {
   inspectTrack = $state<Id | null>(null);
   /** Entry shown in the inspector (its per-setlist overrides). */
   inspectEntry = $state<Id | null>(null);
-  rightTab = $state<"set" | "checks" | "info">("set");
+  rightTab = $state<"set" | "info">("set");
   settingsOpen = $state<false | string>(false);
   newSetlistOpen = $state(false);
   /** Smart crate being edited: its id, or "new". */
@@ -96,20 +101,59 @@ class AppState {
     const id = this.current?.profileId ?? this.settings?.activeProfileId;
     return this.profiles.find((p) => p.id === id) ?? this.profiles[0] ?? null;
   });
-  styleMap = $derived(new Map((this.profile?.styles ?? []).map((s) => [s.key, s])));
+  /** Your dance styles (what songs are tagged with). */
+  myStyles = $derived(this.styleLib?.styles ?? []);
+  /** The current club has its own styles (otherwise yours are shown as they are). */
+  hasClub = $derived((this.profile?.styles.length ?? 0) > 0);
 
-  style(key: string | null | undefined): StyleDef | undefined {
-    return key ? this.styleMap.get(key) : undefined;
+  /** The club style (with tempo ranges) one of your styles counts as at `bpm`, at the current club. */
+  style(key: string | null | undefined, bpm: number | null = null): StyleDef | undefined {
+    return key ? (clubStyle(this.styleLib, this.profile, key, bpm) ?? undefined) : undefined;
   }
 
+  /** How one of your styles is shown at the current club (its naming when it maps, else yours). */
+  show(key: string, bpm: number | null = null): Shown {
+    return showStyle(this.styleLib, this.profile, key, bpm);
+  }
+
+  /** Club styles one of your styles can count as at the current club. */
+  clubTargets(key: string): StyleDef[] {
+    return clubTargets(this.styleLib, this.profile, key);
+  }
+
+  /** One of your styles as you name it (ignoring the club). */
+  mine(key: string): Shown {
+    return showStyle(this.styleLib, null, key, null);
+  }
+
+  /** Your name for one of your styles. */
   styleName(key: string | null | undefined): string {
     if (!key) return "";
-    return this.styleMap.get(key)?.name ?? key.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    return myStyle(this.styleLib, key)?.name ?? prettify(key);
   }
 
   styleColor(key: string | null | undefined): string {
-    return (key && this.styleMap.get(key)?.color) || "#8e8e93";
+    return (key && myStyle(this.styleLib, key)?.color) || NEUTRAL;
   }
+
+  /** The styles an entry (or a version) shows at the current club, deduplicated. */
+  shownFor(version: Version | undefined, entry: Partial<SetlistEntry> | null | undefined, bpm: number | null): Shown[] {
+    return showStyles(this.styleLib, this.profile, entryStyleKeys(version, entry), bpm);
+  }
+
+  clubStyleOf: ClubStyleOf = (version, entry, bpm) => clubStyleOfEntry(this.styleLib, this.profile, version, entry, bpm);
+
+  /** Tracks already played (or playing) in the open setlist. */
+  playedInSet = $derived.by(() => {
+    const out = new Set<Id>();
+    for (const e of this.current?.entries ?? []) {
+      if ((e.status === "played" || e.status === "playing") && e.versionId) {
+        const t = this.versionMap.get(e.versionId)?.track.id;
+        if (t) out.add(t);
+      }
+    }
+    return out;
+  });
 
   /** The single style being filtered on, if exactly one is. */
   filterStyle = $derived(this.styleFilter.length === 1 && this.styleFilter[0] !== NO_STYLE ? this.styleFilter[0] : null);
@@ -119,6 +163,16 @@ class AppState {
   freeDeck = $derived<0 | 1>(this.liveDeck === 0 ? 1 : 0);
 
   fadeSeconds = $derived(this.settings?.fadeOutMs != null ? this.settings.fadeOutMs / 1000 : this.profile?.fadeOutSeconds ?? 5);
+
+  /** Context for evaluating smart crates. */
+  smartCtx = $derived<SmartContext>({
+    profile: this.profile,
+    styles: this.styleLib,
+    crates: this.crates,
+    library: this.rows,
+    fadeSeconds: this.fadeSeconds,
+    trimSilence: this.settings?.trimSilence ?? true,
+  });
 
   toast(text: string, kind: Toast["kind"] = "error") {
     const id = Date.now() + Math.random();
@@ -181,6 +235,7 @@ class AppState {
       api.deckStates(), api.scanProgress(), api.spotifyStatus(), api.audioStatus(), api.libraryInfo(),
     ]);
     Object.assign(this, { tracks, crates, setlists, profiles, settings, perform, decks, scan, spotify, outputs, library });
+    this.styleLib = await api.styles();
     await this.reloadCurrent();
     if (library.loadErrors.length) this.toast(`${library.loadErrors.length} library file(s) could not be read — see Settings → Library`);
 
@@ -191,7 +246,12 @@ class AppState {
       this.perform = p;
       if (changed) await this.reloadCurrent();
     });
-    this.listen("library-changed", (ids) => this.reloadTracks(ids));
+    this.listen("library-changed", async (ids) => {
+      await this.reloadTracks(ids);
+      // Style usage counts may have changed.
+      this.styleLib = await api.styles();
+    });
+    this.listen("styles-changed", async () => (this.styleLib = await api.styles()));
     this.listen("setlist-changed", async (id) => {
       if (id === this.current?.id) await this.reloadCurrent();
       if (this.view.kind === "setlist" && this.view.id === id) await this.reloadBrowsed();
@@ -249,7 +309,7 @@ export async function addToSet(versionIds: Id[], where: "next" | "end" | number)
   if (!set) {
     const name = `Live set — ${new Date().toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
     const created = await app.run(
-      api.createSetlist({ name, mode: "live", profileId: app.settings?.activeProfileId ?? "dancebreak" }),
+      api.createSetlist({ name, mode: "live", profileId: app.settings?.activeProfileId ?? app.profile?.id ?? "" }),
     );
     if (!created) return;
     await app.run(api.performOpen(created.id));
@@ -271,10 +331,13 @@ export async function addToSet(versionIds: Id[], where: "next" | "end" | number)
     await app.run(api.updateEntry(slot.id, { versionId: versionIds[0] }));
     return;
   }
+  const f = app.filterStyle;
   const entries = versionIds.map((id) => {
-    const v = app.versionMap.get(id)?.version;
-    // An unlabelled song added while filtering on a style is danced as that style.
-    return { versionId: id, style: v?.style ? undefined : (app.filterStyle ?? undefined) };
+    const styles = app.versionMap.get(id)?.version.styles ?? [];
+    // While filtering on a style, a song added is danced as that style
+    // (an unlabelled one, or one that can be danced as several).
+    const pick = f && (styles.length === 0 || (styles.length > 1 && styles.includes(f)));
+    return { versionId: id, styles: pick ? [f] : undefined };
   });
   await app.run(api.insertEntries(set.id, entries, position));
 }

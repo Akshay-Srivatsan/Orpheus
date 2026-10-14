@@ -1,8 +1,9 @@
 // Smart crates: rule-based collections evaluated against the library.
 // Pure functions (no Tauri imports) so they're unit-testable.
 
+import { clubStyle, clubStyleOfEntry, myStyle, prettify } from "./styles";
 import { playback, playedDurationMs, tempoFit, bpmForStyle } from "./tempo";
-import type { Crate, Id, Profile, Row } from "./types";
+import type { Crate, Id, Profile, Row, StyleLibrary } from "./types";
 
 export type SmartField =
   | "style" | "bpm" | "tempoFit" | "duration" | "energy" | "rhythm" | "rating" | "text" | "source"
@@ -115,7 +116,10 @@ export function defaultCondition(field: SmartField = "style"): SmartCondition {
 }
 
 export interface SmartContext {
+  /** The club whose tempo ranges "fits the range of" uses. */
   profile: Profile | null;
+  /** Your styles and their club mappings. */
+  styles: StyleLibrary | null;
   crates: Crate[];
   /** Rows of the whole library (needed when a rule refers to another smart crate). */
   library?: Row[];
@@ -142,16 +146,16 @@ export function crateMembers(c: Crate, ctx: SmartContext, depth = 0): Set<Id> {
 
 function test(cond: SmartCondition, row: Row, ctx: SmartContext, depth: number): boolean {
   const { track: t, version: v } = row;
-  const profile = ctx.profile;
-  const style = (k: string | null | undefined) => profile?.styles.find((s) => s.key === k);
-  const pb = playback(t, v, null, profile);
+  const own = v.styles ?? [];
+  const clubOf = (k: string, bpm: number | null) => clubStyle(ctx.styles, ctx.profile, k, bpm) ?? undefined;
+  const pb = playback(t, v, null, (ver, e, bpm) => clubStyleOfEntry(ctx.styles, ctx.profile, ver, e, bpm));
   switch (cond.field) {
     case "style":
       switch (cond.op) {
-        case "is": return v.style === cond.value;
-        case "isNot": return v.style !== cond.value;
-        case "isSet": return !!v.style;
-        case "isEmpty": return !v.style;
+        case "is": return own.includes(String(cond.value));
+        case "isNot": return !own.includes(String(cond.value));
+        case "isSet": return own.length > 0;
+        case "isEmpty": return own.length === 0;
       }
       return false;
     case "bpm": {
@@ -159,14 +163,15 @@ function test(cond: SmartCondition, row: Row, ctx: SmartContext, depth: number):
       if (cond.op === "isEmpty") return bpm == null;
       if (bpm == null) return false;
       if (cond.op === "fitsStyle") {
-        const st = style(String(cond.value ?? ""));
+        const st = clubOf(String(cond.value ?? ""), bpm);
         return !!st && ["sweet", "extended"].includes(tempoFit(bpmForStyle(bpm, st), st));
       }
       if (cond.op === "between" && Array.isArray(cond.value)) return bpm >= cond.value[0] && bpm <= cond.value[1];
       return cmp(bpm, cond.op, cond.value);
     }
     case "tempoFit": {
-      const fit = tempoFit(pb.target ?? (t.bpm ? bpmForStyle(t.bpm, style(v.style)) : null), style(v.style));
+      const st = clubStyleOfEntry(ctx.styles, ctx.profile, v, null, pb.target ?? t.bpm) ?? undefined;
+      const fit = tempoFit(pb.target ?? (t.bpm ? bpmForStyle(t.bpm, st) : null), st);
       if (cond.op === "sweet") return fit === "sweet";
       if (cond.op === "ok") return fit === "sweet" || fit === "extended";
       if (cond.op === "outside") return fit === "outside";
@@ -225,12 +230,12 @@ export function evaluate(rules: SmartRules, rows: Row[], ctx: SmartContext, dept
 }
 
 /** Short human description of a condition, for tooltips. */
-export function describe(c: SmartCondition, ctx: Pick<SmartContext, "profile" | "crates">): string {
+export function describe(c: SmartCondition, ctx: Pick<SmartContext, "styles" | "crates">): string {
   const f = fieldDef(c.field);
   const op = f.ops.find((o) => o.op === c.op);
   let val = "";
   switch (op?.input) {
-    case "style": val = ctx.profile?.styles.find((s) => s.key === c.value)?.name ?? String(c.value ?? ""); break;
+    case "style": val = myStyle(ctx.styles, String(c.value ?? ""))?.name ?? prettify(String(c.value ?? "")); break;
     case "crate": val = ctx.crates.find((x) => x.id === c.value)?.name ?? "?"; break;
     case "range": val = Array.isArray(c.value) ? `${c.value[0]}–${c.value[1]}` : ""; break;
     case "none": break;

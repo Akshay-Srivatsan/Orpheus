@@ -10,7 +10,7 @@
 //!   setlists/<id>.json    a setlist and its entries
 //!   crates/<id>.json      a hand-picked collection of versions
 //!   profiles/<id>.json    custom / modified club profiles
-//!   history/<yyyy-mm>.jsonl  append-only play log
+//!   styles.json           your dance styles and how they map onto clubs' styles
 //! ```
 //!
 //! Machine-specific state lives in the app data directory instead: the file
@@ -79,17 +79,33 @@ struct Inner {
     entry_owner: HashMap<Id, Id>,
     crates: HashMap<Id, Crate>,
     profiles: BTreeMap<String, serde_json::Value>,
-    history: Vec<HistoryItem>,
-    play_stats: HashMap<Id, (i64, i64)>,
     index: FileIndex,
     by_hash: HashMap<String, Vec<String>>,
     load_errors: Vec<String>,
+    styles: Option<StyleLibrary>,
 }
 
 pub struct Store {
     lib: RwLock<PathBuf>,
     local: PathBuf,
     inner: RwLock<Inner>,
+}
+
+/// Removes duplicates, keeping the first occurrence of each.
+fn dedup(v: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    for s in v {
+        if !s.is_empty() && !out.contains(s) {
+            out.push(s.clone());
+        }
+    }
+    out
+}
+
+/// Replaces (or with `None` removes) one style key in a list.
+fn rekey(v: &[String], from: &str, to: Option<&str>) -> Vec<String> {
+    let mapped: Vec<String> = v.iter().filter_map(|s| if s == from { to.map(String::from) } else { Some(s.clone()) }).collect();
+    dedup(&mapped)
 }
 
 /// Writes `bytes` to `path` atomically (temp file + rename).
@@ -165,14 +181,30 @@ impl Inner {
         self.alias.get(track_id).cloned().unwrap_or_else(|| track_id.to_string())
     }
 
-    fn add_play(&mut self, h: &HistoryItem) {
-        let id = self.canonical(&h.track_id);
-        let e = self.play_stats.entry(id).or_insert((0, 0));
-        e.0 += 1;
-        e.1 = e.1.max(h.played_at);
+    /// Track id → (number of setlists it was played in, last played), derived
+    /// from the setlists so deleting a setlist erases its plays.
+    fn play_stats(&self) -> HashMap<Id, (i64, i64)> {
+        let mut stats: HashMap<Id, (i64, i64)> = HashMap::new();
+        for s in self.setlists.values() {
+            let mut seen: HashMap<&Id, i64> = HashMap::new();
+            for e in &s.entries {
+                if !(e.status == "played" || e.status == "playing") {
+                    continue;
+                }
+                let Some(tid) = e.version_id.as_ref().and_then(|v| self.version_owner.get(v)) else { continue };
+                let at = seen.entry(tid).or_insert(0);
+                *at = (*at).max(e.played_at.unwrap_or(0));
+            }
+            for (tid, last) in seen {
+                let st = stats.entry(tid.clone()).or_insert((0, 0));
+                st.0 += 1;
+                st.1 = st.1.max(last);
+            }
+        }
+        stats
     }
 
-    fn to_track(&self, rec: &TrackRecord) -> Track {
+    fn to_track(&self, rec: &TrackRecord, stats: &HashMap<Id, (i64, i64)>) -> Track {
         let mut files = vec![];
         for s in rec.sources.iter().filter(|s| s.kind == "file") {
             if let Some(paths) = self.by_hash.get(&s.key) {
@@ -181,7 +213,7 @@ impl Inner {
         }
         files.sort();
         let has_spotify = rec.sources.iter().any(|s| s.kind == "spotify");
-        let (count, last) = self.play_stats.get(&rec.id).copied().unwrap_or((0, 0));
+        let (count, last) = stats.get(&rec.id).copied().unwrap_or((0, 0));
         Track {
             missing: files.is_empty() && !has_spotify,
             files,
@@ -213,7 +245,7 @@ impl Store {
 
     /// (Re)loads everything from disk, e.g. after `git pull` or switching libraries.
     pub fn reload(&self, library_dir: &Path) -> Result<()> {
-        for d in ["tracks", "setlists", "crates", "profiles", "history"] {
+        for d in ["tracks", "setlists", "crates", "profiles"] {
             fs::create_dir_all(library_dir.join(d))
                 .with_context(|| format!("creating {}", library_dir.join(d).display()))?;
         }
@@ -223,16 +255,12 @@ impl Store {
         if !gi.exists() {
             let _ = fs::write(&gi, ".*.tmp-*\n");
         }
-        let ga = library_dir.join(".gitattributes");
-        if !ga.exists() {
-            // History logs are append-only: concurrent additions merge by union.
-            let _ = fs::write(&ga, "history/*.jsonl merge=union\n");
-        }
         let mut inner = Inner::default();
         let mut errors = vec![];
         for p in json_files(&library_dir.join("tracks")) {
             match read_json::<TrackRecord>(&p) {
-                Ok(t) if !t.id.is_empty() => {
+                Ok(mut t) if !t.id.is_empty() => {
+                    t.versions.iter_mut().for_each(Version::normalize);
                     inner.reindex_track(&t);
                     inner.tracks.insert(t.id.clone(), t);
                 }
@@ -242,7 +270,8 @@ impl Store {
         }
         for p in json_files(&library_dir.join("setlists")) {
             match read_json::<Setlist>(&p) {
-                Ok(s) if !s.id.is_empty() => {
+                Ok(mut s) if !s.id.is_empty() => {
+                    s.entries.iter_mut().for_each(SetlistEntry::normalize);
                     inner.reindex_setlist(&s);
                     inner.setlists.insert(s.id.clone(), s);
                 }
@@ -270,22 +299,12 @@ impl Store {
                 Err(e) => errors.push(format!("{e:#}")),
             }
         }
-        if let Ok(rd) = fs::read_dir(library_dir.join("history")) {
-            let mut paths: Vec<PathBuf> = rd.filter_map(|e| e.ok()).map(|e| e.path()).collect();
-            paths.sort();
-            for p in paths.into_iter().filter(|p| p.extension().and_then(|e| e.to_str()) == Some("jsonl")) {
-                let text = fs::read_to_string(&p).unwrap_or_default();
-                for (n, line) in text.lines().enumerate().filter(|(_, l)| !l.trim().is_empty()) {
-                    match serde_json::from_str::<HistoryItem>(line) {
-                        Ok(h) => inner.history.push(h),
-                        Err(e) => errors.push(format!("{}:{}: {e}", p.display(), n + 1)),
-                    }
-                }
+        let styles_path = library_dir.join("styles.json");
+        if styles_path.exists() {
+            match read_json::<StyleLibrary>(&styles_path) {
+                Ok(s) => inner.styles = Some(s),
+                Err(e) => errors.push(format!("{e:#}")),
             }
-        }
-        inner.history.sort_by_key(|h| h.played_at);
-        for h in inner.history.clone() {
-            inner.add_play(&h);
         }
         let index_path = self.local.join("file-index.json");
         if index_path.exists() {
@@ -364,7 +383,8 @@ impl Store {
 
     pub fn all_tracks(&self) -> Vec<Track> {
         let inner = self.inner.read();
-        let mut v: Vec<Track> = inner.tracks.values().map(|t| inner.to_track(t)).collect();
+        let stats = inner.play_stats();
+        let mut v: Vec<Track> = inner.tracks.values().map(|t| inner.to_track(t, &stats)).collect();
         v.sort_by(|a, b| (&a.rec.artist, &a.rec.title).cmp(&(&b.rec.artist, &b.rec.title)));
         v
     }
@@ -372,7 +392,8 @@ impl Store {
     pub fn track(&self, id: &str) -> Result<Track> {
         let inner = self.inner.read();
         let id = inner.canonical(id);
-        inner.tracks.get(&id).map(|t| inner.to_track(t)).ok_or_else(|| anyhow!("track {id} not found"))
+        let stats = inner.play_stats();
+        inner.tracks.get(&id).map(|t| inner.to_track(t, &stats)).ok_or_else(|| anyhow!("track {id} not found"))
     }
 
     /// Creates a track with one source and a default version.
@@ -397,7 +418,8 @@ impl Store {
             versions: vec![Version {
                 id: new_id(),
                 name: "Original".into(),
-                style: None,
+                styles: vec![],
+                legacy_style: None,
                 settings: Overrides::default(),
                 comment: String::new(),
                 tags: vec![],
@@ -475,11 +497,6 @@ impl Store {
             inner.tracks.remove(&o.id);
             let _ = fs::remove_file(lib.join("tracks").join(format!("{}.json", o.id)));
             let _ = fs::remove_file(self.local.join("waveforms").join(format!("{}.bin", o.id)));
-        }
-        // Recompute play counts with the new aliases.
-        inner.play_stats.clear();
-        for h in inner.history.clone() {
-            inner.add_play(&h);
         }
         Ok(())
     }
@@ -672,60 +689,33 @@ impl Store {
         Ok(())
     }
 
-    fn history_file(&self, played_at: i64) -> PathBuf {
-        let (y, m, _) = civil_from_days((played_at / 1000).div_euclid(86400));
-        self.library_dir().join("history").join(format!("{y:04}-{m:02}.jsonl"))
-    }
-
-    pub fn mark_played(&self, h: HistoryItem) -> Result<()> {
-        let path = self.history_file(h.played_at);
-        let mut f = fs::OpenOptions::new().create(true).append(true).open(&path)?;
-        writeln!(f, "{}", serde_json::to_string(&h)?)?;
-        let mut inner = self.inner.write();
-        inner.add_play(&h);
-        inner.history.push(h);
-        Ok(())
-    }
-
+    /// Songs played in setlists (newest first). Deleting a setlist removes its plays.
     pub fn history(&self, limit: usize) -> Vec<HistoryItem> {
-        self.inner.read().history.iter().rev().take(limit).cloned().collect()
-    }
-
-    /// Removes play-history items (matched by time and track); `None` clears all.
-    pub fn history_remove(&self, items: Option<&[(i64, Id)]>) -> Result<usize> {
-        let mut inner = self.inner.write();
-        let before = inner.history.len();
-        match items {
-            Some(items) => inner.history.retain(|h| !items.iter().any(|(t, id)| *t == h.played_at && *id == h.track_id)),
-            None => inner.history.clear(),
-        }
-        let removed = before - inner.history.len();
-        // Rewrite the monthly logs from what's left.
-        let dir = self.library_dir().join("history");
-        let mut by_file: BTreeMap<PathBuf, String> = BTreeMap::new();
-        if let Ok(rd) = fs::read_dir(&dir) {
-            for e in rd.filter_map(|e| e.ok()) {
-                if e.path().extension().and_then(|x| x.to_str()) == Some("jsonl") {
-                    by_file.insert(e.path(), String::new());
+        let inner = self.inner.read();
+        let mut out: Vec<HistoryItem> = vec![];
+        for s in inner.setlists.values() {
+            for e in &s.entries {
+                let (Some(at), Some(vid)) = (e.played_at, e.version_id.as_ref()) else { continue };
+                if !(e.status == "played" || e.status == "playing") {
+                    continue;
                 }
+                let Some(tid) = inner.version_owner.get(vid) else { continue };
+                let styles = e.styles.clone().unwrap_or_else(|| {
+                    inner.tracks.get(tid).and_then(|t| t.versions.iter().find(|v| &v.id == vid)).map(|v| v.styles.clone()).unwrap_or_default()
+                });
+                out.push(HistoryItem {
+                    played_at: at,
+                    track_id: tid.clone(),
+                    version_id: Some(vid.clone()),
+                    styles,
+                    setlist_id: s.id.clone(),
+                    entry_id: e.id.clone(),
+                });
             }
         }
-        for h in &inner.history {
-            let line = serde_json::to_string(h)? + "\n";
-            by_file.entry(self.history_file(h.played_at)).or_default().push_str(&line);
-        }
-        for (path, text) in by_file {
-            if text.is_empty() {
-                let _ = fs::remove_file(&path);
-            } else {
-                write_atomic(&path, text.as_bytes())?;
-            }
-        }
-        inner.play_stats.clear();
-        for h in inner.history.clone() {
-            inner.add_play(&h);
-        }
-        Ok(removed)
+        out.sort_by(|a, b| b.played_at.cmp(&a.played_at));
+        out.truncate(limit);
+        out
     }
 
     // ---------------------------------------------------------------- versions
@@ -754,7 +744,7 @@ impl Store {
         self.with_track(&tid, |t| {
             let v = t.versions.iter_mut().find(|v| v.id == id).ok_or_else(|| anyhow!("version not found"))?;
             if let Some(x) = &p.name { v.name = x.clone(); }
-            if let Some(x) = &p.style { v.style = x.clone(); }
+            if let Some(x) = &p.styles { v.styles = dedup(x); }
             if let Some(x) = &p.target_bpm { v.settings.target_bpm = *x; }
             if let Some(x) = &p.cue_in_ms { v.settings.cue_in_ms = *x; }
             if let Some(x) = &p.cue_out_ms { v.settings.cue_out_ms = *x; }
@@ -875,41 +865,26 @@ impl Store {
         })
     }
 
-    /// Labels a song with a dance style and returns the version that carries
-    /// it: the given version if it has no style (or already this one), else an
-    /// existing version of the same track with that style, else a new version
-    /// (copying the original's cue points and settings) named `version_name`.
-    pub fn assign_style(&self, version_id: &str, style: &str, version_name: &str) -> Result<Id> {
-        let (v, tid) = self.version(version_id)?;
-        if v.style.as_deref() == Some(style) {
-            return Ok(v.id);
+    /// Adds a dance style to a version (a version can have several).
+    pub fn assign_style(&self, version_id: &str, style: &str) -> Result<()> {
+        let (v, _) = self.version(version_id)?;
+        if !v.styles.iter().any(|s| s == style) {
+            let mut styles = v.styles.clone();
+            styles.push(style.to_string());
+            self.version_update(version_id, &VersionPatch { styles: Some(styles), ..Default::default() })?;
         }
-        if v.style.is_none() {
-            self.version_update(&v.id, &VersionPatch { style: Some(Some(style.to_string())), ..Default::default() })?;
-            return Ok(v.id);
-        }
-        let track = self.track(&tid)?;
-        if let Some(existing) = track.rec.versions.iter().find(|x| x.style.as_deref() == Some(style)) {
-            return Ok(existing.id.clone());
-        }
-        let nv = self.version_create(
-            &tid,
-            Version {
-                id: String::new(),
-                name: version_name.to_string(),
-                style: Some(style.to_string()),
-                settings: v.settings.clone(),
-                comment: String::new(),
-                tags: vec![],
-            },
-        )?;
-        Ok(nv.id)
+        Ok(())
     }
 
-    /// Removes a song from a dance style (clears that version's style). The
-    /// version is kept, so setlists that use it keep working.
-    pub fn unassign_style(&self, version_id: &str) -> Result<()> {
-        self.version_update(version_id, &VersionPatch { style: Some(None), ..Default::default() })?;
+    /// Removes one style (or all with `None`) from a version. The version is
+    /// kept, so setlists that use it keep working.
+    pub fn unassign_style(&self, version_id: &str, style: Option<&str>) -> Result<()> {
+        let (v, _) = self.version(version_id)?;
+        let styles = match style {
+            Some(st) => v.styles.iter().filter(|s| *s != st).cloned().collect(),
+            None => vec![],
+        };
+        self.version_update(version_id, &VersionPatch { styles: Some(styles), ..Default::default() })?;
         Ok(())
     }
 
@@ -929,14 +904,13 @@ impl Store {
         self.inner.read().setlists.get(id).cloned().ok_or_else(|| anyhow!("setlist {id} not found"))
     }
 
-    pub fn setlist_create(&self, name: &str, mode: &str, profile_id: &str, lesson: Option<String>, date: Option<String>) -> Result<Id> {
+    pub fn setlist_create(&self, name: &str, mode: &str, profile_id: &str, date: Option<String>) -> Result<Id> {
         let now = now_ms();
         let s = Setlist {
             id: new_id(),
             name: name.into(),
             event_date: date,
             profile_id: profile_id.into(),
-            lesson_style: lesson,
             mode: mode.into(),
             created_at: now,
             updated_at: now,
@@ -953,7 +927,6 @@ impl Store {
             if let Some(v) = &p.name { s.name = v.clone(); }
             if let Some(v) = &p.event_date { s.event_date = v.clone(); }
             if let Some(v) = &p.profile_id { s.profile_id = v.clone(); }
-            if let Some(v) = &p.lesson_style { s.lesson_style = v.clone(); }
             if let Some(v) = &p.notes { s.notes = v.clone(); }
             if let Some(v) = &p.mode { s.mode = v.clone(); }
             Ok(())
@@ -1011,7 +984,8 @@ impl Store {
                 .map(|n| SetlistEntry {
                     id: new_id(),
                     version_id: n.version_id.clone(),
-                    style: n.style.clone(),
+                    styles: n.styles.as_ref().map(|s| dedup(s)),
+                    label: n.label.clone().filter(|l| !l.trim().is_empty()),
                     overrides: n.overrides.clone(),
                     note: n.note.clone(),
                     tags: n.tags.clone(),
@@ -1029,7 +1003,8 @@ impl Store {
         self.with_setlist(&sid, |s| {
             let e = s.entries.iter_mut().find(|e| e.id == id).ok_or_else(|| anyhow!("entry not found"))?;
             if let Some(v) = &p.version_id { e.version_id = v.clone(); }
-            if let Some(v) = &p.style { e.style = v.clone(); }
+            if let Some(v) = &p.styles { e.styles = v.as_ref().map(|s| dedup(s)); }
+            if let Some(v) = &p.label { e.label = v.clone().filter(|l| !l.trim().is_empty()); }
             if let Some(v) = &p.overrides { e.overrides = v.clone(); }
             if let Some(v) = &p.note { e.note = v.clone(); }
             if let Some(v) = &p.tags { e.tags = v.clone(); }
@@ -1089,6 +1064,107 @@ impl Store {
             }
             Ok(())
         })
+    }
+
+    // ---------------------------------------------------------------- your styles
+
+    /// Your styles and club mappings (`None` until first saved / seeded).
+    pub fn style_library(&self) -> Option<StyleLibrary> {
+        self.inner.read().styles.clone()
+    }
+
+    pub fn save_style_library(&self, lib: StyleLibrary) -> Result<()> {
+        let mut seen = std::collections::HashSet::new();
+        for s in &lib.styles {
+            if s.key.trim().is_empty() || !seen.insert(s.key.clone()) {
+                return Err(anyhow!("every style needs a unique, non-empty key (\"{}\")", s.key));
+            }
+        }
+        write_json(&self.library_dir().join("styles.json"), &lib)?;
+        self.inner.write().styles = Some(lib);
+        Ok(())
+    }
+
+    /// Style keys used by versions, with how many versions use each.
+    pub fn style_usage(&self) -> BTreeMap<String, usize> {
+        let mut m = BTreeMap::new();
+        for t in self.inner.read().tracks.values() {
+            for v in &t.versions {
+                for s in &v.styles {
+                    *m.entry(s.clone()).or_insert(0) += 1;
+                }
+            }
+        }
+        m
+    }
+
+    /// Replaces a style key on every version, setlist entry and smart-crate
+    /// condition (`None` removes it).
+    pub fn rekey_style(&self, from: &str, to: Option<&str>) -> Result<()> {
+        let (tracks, setlists, crates): (Vec<TrackRecord>, Vec<Setlist>, Vec<Crate>) = {
+            let mut inner = self.inner.write();
+            let mut ts = vec![];
+            for t in inner.tracks.values_mut() {
+                let mut hit = false;
+                for v in t.versions.iter_mut().filter(|v| v.styles.iter().any(|s| s == from)) {
+                    v.styles = rekey(&v.styles, from, to);
+                    hit = true;
+                }
+                if hit {
+                    ts.push(t.clone());
+                }
+            }
+            let mut ss = vec![];
+            for s in inner.setlists.values_mut() {
+                let mut hit = false;
+                for e in s.entries.iter_mut() {
+                    if let Some(st) = e.styles.as_mut().filter(|st| st.iter().any(|s| s == from)) {
+                        *st = rekey(st, from, to);
+                        hit = true;
+                    }
+                }
+                if hit {
+                    ss.push(s.clone());
+                }
+            }
+            // Smart crates that test for the style.
+            let mut cs = vec![];
+            for c in inner.crates.values_mut() {
+                let Some(conds) = c.smart.as_mut().and_then(|v| v.get_mut("conditions")).and_then(|v| v.as_array_mut()) else {
+                    continue;
+                };
+                let before = conds.len();
+                let mut hit = false;
+                conds.retain_mut(|cond| {
+                    let refers = matches!(cond["field"].as_str(), Some("style" | "bpm")) && cond["value"].as_str() == Some(from);
+                    if !refers {
+                        return true;
+                    }
+                    hit = true;
+                    match to {
+                        Some(t) => {
+                            cond["value"] = serde_json::Value::String(t.to_string());
+                            true
+                        }
+                        None => false,
+                    }
+                });
+                if hit || conds.len() != before {
+                    cs.push(c.clone());
+                }
+            }
+            (ts, ss, cs)
+        };
+        for t in &tracks {
+            self.save_track(t)?;
+        }
+        for s in &setlists {
+            self.save_setlist(s)?;
+        }
+        for c in &crates {
+            self.save_crate(c)?;
+        }
+        Ok(())
     }
 
     // ---------------------------------------------------------------- profiles
@@ -1169,7 +1245,7 @@ mod tests {
         let id = store.insert_track(&NewTrack { title: "S".into(), ..Default::default() }, src).unwrap();
         store.set_in_library(&id, false).unwrap();
         let vid = store.track(&id).unwrap().rec.versions[0].id.clone();
-        let sid = store.setlist_create("Set", "live", "dancebreak", None, None).unwrap();
+        let sid = store.setlist_create("Set", "live", "dancebreak", None).unwrap();
         let eids = store.entries_insert(&sid, None, &[NewEntry { version_id: Some(vid), ..Default::default() }]).unwrap();
         assert_eq!(store.prune_unused(&[]).unwrap(), 0, "still used by the set");
         // Reloading keeps the flag (it's only written when false).
@@ -1192,22 +1268,28 @@ mod tests {
         let va = store.track(&a).unwrap().rec.versions[0].id.clone();
         let vb = store.track(&b).unwrap().rec.versions[0].id.clone();
 
-        // Labelling an unstyled version sets its style in place...
-        assert_eq!(store.assign_style(&va, "cross-step-waltz", "Cross-Step Waltz").unwrap(), va);
-        assert_eq!(store.version(&va).unwrap().0.style.as_deref(), Some("cross-step-waltz"));
-        // ...a version that already has another style gets a new version...
-        let va2 = store.assign_style(&va, "rotary-waltz", "Rotary Waltz").unwrap();
-        assert_ne!(va2, va);
-        let (v2, tid) = store.version(&va2).unwrap();
-        assert_eq!((v2.style.as_deref(), v2.name.as_str(), tid.as_str()), (Some("rotary-waltz"), "Rotary Waltz", a.as_str()));
-        // ...and labelling again reuses it.
-        assert_eq!(store.assign_style(&va, "rotary-waltz", "Rotary Waltz").unwrap(), va2);
-        assert_eq!(store.track(&a).unwrap().rec.versions.len(), 2);
+        // A version can carry several styles; adding is idempotent.
+        store.assign_style(&va, "waltz").unwrap();
+        store.assign_style(&va, "rotary-waltz").unwrap();
+        store.assign_style(&va, "waltz").unwrap();
+        assert_eq!(store.version(&va).unwrap().0.styles, vec!["waltz".to_string(), "rotary-waltz".to_string()]);
+        let va2 = va.clone();
+
+        // Older files with a single "style" are read into "styles".
+        let path = lib.join("tracks").join(format!("{b}.json"));
+        let text = fs::read_to_string(&path).unwrap().replace("\"name\": \"Original\"", "\"name\": \"Original\", \"style\": \"polka\"");
+        fs::write(&path, text).unwrap();
+        let reloaded = Store::open(&lib, &local).unwrap();
+        assert_eq!(reloaded.version(&vb).unwrap().0.styles, vec!["polka".to_string()]);
+
+        // Renaming a style key updates every version.
+        store.rekey_style("waltz", Some("rotary-waltz")).unwrap();
+        assert_eq!(store.version(&va).unwrap().0.styles, vec!["rotary-waltz".to_string()]);
 
         // One "Waltzes" crate can hold both styles.
         let waltzes = store.crate_create("Waltzes", None).unwrap();
         store.crate_add(&waltzes, &[va.clone(), va2.clone(), vb.clone()]).unwrap();
-        assert_eq!(store.crates()[0].version_ids.len(), 3);
+        assert_eq!(store.crates()[0].version_ids.len(), 2);
 
         // Smart crates keep their rules (opaque to the backend) on disk.
         let rules = serde_json::json!({ "match": "all", "conditions": [{ "field": "style", "op": "is", "value": "rotary-waltz" }] });
@@ -1221,28 +1303,34 @@ mod tests {
         store2.crate_set_smart(&smart, None).unwrap();
         assert!(store2.crates().iter().find(|c| c.id == smart).unwrap().smart.is_none());
 
-        store2.unassign_style(&va).unwrap();
-        assert_eq!(store2.version(&va).unwrap().0.style, None);
+        store2.unassign_style(&va, Some("rotary-waltz")).unwrap();
+        assert!(store2.version(&va).unwrap().0.styles.is_empty());
         let _ = fs::remove_dir_all(lib.parent().unwrap());
     }
 
     #[test]
-    fn history_items_can_be_removed() {
+    fn plays_and_history_come_from_setlists() {
         let (lib, local) = temp_dirs();
         let store = Store::open(&lib, &local).unwrap();
         let tid = store.insert_track(&NewTrack { title: "S".into(), ..Default::default() }, SourceRef { kind: "file".into(), key: "h".into() }).unwrap();
-        for t in [1_000, 2_000, 40 * 86_400_000] {
-            store.mark_played(HistoryItem { played_at: t, track_id: tid.clone(), version_id: None, style: None, bpm: None, setlist_id: None }).unwrap();
+        let vid = store.track(&tid).unwrap().rec.versions[0].id.clone();
+        let mut sets = vec![];
+        for _ in 0..2 {
+            let sid = store.setlist_create("Set", "live", "none", None).unwrap();
+            // Played twice in the same set counts once for that set.
+            let ids = store.entries_insert(&sid, None, &[NewEntry { version_id: Some(vid.clone()), ..Default::default() }, NewEntry { version_id: Some(vid.clone()), ..Default::default() }]).unwrap();
+            for id in &ids {
+                store.entry_set_playing(id).unwrap();
+            }
+            sets.push(sid);
         }
-        assert_eq!(store.track(&tid).unwrap().play_count, 3);
-        assert_eq!(store.history_remove(Some(&[(2_000, tid.clone())])).unwrap(), 1);
-        let store = Store::open(&lib, &local).unwrap();
-        assert_eq!(store.history(10).len(), 2);
         assert_eq!(store.track(&tid).unwrap().play_count, 2);
-        store.history_remove(None).unwrap();
-        let store = Store::open(&lib, &local).unwrap();
-        assert!(store.history(10).is_empty());
-        assert_eq!(fs::read_dir(lib.join("history")).unwrap().count(), 0);
+        assert_eq!(store.history(10).len(), 4);
+        store.setlist_delete(&sets[0]).unwrap();
+        let reloaded = Store::open(&lib, &local).unwrap();
+        assert_eq!(reloaded.track(&tid).unwrap().play_count, 1);
+        assert_eq!(reloaded.history(10).len(), 2);
+        assert!(reloaded.track(&tid).unwrap().last_played_at.is_some());
         let _ = fs::remove_dir_all(lib.parent().unwrap());
     }
 
@@ -1270,23 +1358,23 @@ mod tests {
                 Version {
                     id: String::new(),
                     name: "Rotary @150".into(),
-                    style: Some("rotary-waltz".into()),
+                    styles: vec!["rotary-waltz".into()],
+                    legacy_style: None,
                     settings: Overrides { target_bpm: Some(150.0), ..Default::default() },
                     comment: String::new(),
                     tags: vec![],
                 },
             )
             .unwrap();
-        let sid = store.setlist_create("Social", "preset", "dancebreak", None, None).unwrap();
+        let sid = store.setlist_create("Social", "preset", "dancebreak", None).unwrap();
         let mk = |n: &str| NewEntry { note: n.into(), ..Default::default() };
         store.entries_insert(&sid, None, &[mk("a"), mk("b"), mk("c")]).unwrap();
         let ids = store.entries_insert(&sid, Some(1), &[NewEntry { version_id: Some(v.id.clone()), ..Default::default() }]).unwrap();
         let notes: Vec<_> = store.entries(&sid).into_iter().map(|e| e.note).collect();
         assert_eq!(notes, ["a", "", "b", "c"]);
         store.entry_update(&ids[0], &EntryPatch { overrides: Some(Overrides { target_bpm: Some(148.0), ..Default::default() }), ..Default::default() }).unwrap();
-        store
-            .mark_played(HistoryItem { played_at: now_ms(), track_id: tid.clone(), version_id: Some(v.id.clone()), style: None, bpm: None, setlist_id: None })
-            .unwrap();
+        let played = store.entries_insert(&sid, None, &[NewEntry { version_id: Some(v.id.clone()), ..Default::default() }]).unwrap();
+        store.entry_set_playing(&played[0]).unwrap();
 
         // Everything survives a reload from disk.
         let store2 = Store::open(&lib, &local).unwrap();

@@ -91,6 +91,23 @@ pub async fn track_waveform(app: S<'_>, id: Id) -> Res<Vec<u8>> {
     Ok(app.store.waveform(&id).unwrap_or_default())
 }
 
+/// Cover art: a data URL of the local file's art, else the Spotify artwork URL.
+#[tauri::command]
+pub async fn track_artwork(app: S<'_>, id: Id) -> Res<Option<String>> {
+    use base64::Engine;
+    let local = tauri::async_runtime::spawn_blocking({
+        let store = app.store.clone();
+        let id = id.clone();
+        move || crate::library::resolve_path(&store, &id).and_then(|p| crate::library::artwork(&p))
+    })
+    .await
+    .map_err(err)?;
+    if let Some((mime, bytes)) = local {
+        return Ok(Some(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))));
+    }
+    Ok(app.store.track(&id).ok().and_then(|t| t.rec.artwork_url.clone()))
+}
+
 #[tauri::command]
 pub async fn track_analyze(app: S<'_>, ids: Vec<Id>) -> Res<()> {
     for id in ids {
@@ -293,11 +310,6 @@ pub async fn crate_delete(app: S<'_>, id: Id) -> Res<()> {
     Ok(())
 }
 
-/// Name for a version created when a styled song joins another style.
-fn style_version_name(app: &App, style: Option<&str>) -> String {
-    style.map(|s| app.active_profile().style_name(s)).unwrap_or_else(|| "New version".into())
-}
-
 #[tauri::command]
 pub async fn crate_add(app: S<'_>, id: Id, version_ids: Vec<Id>) -> Res<()> {
     app.store.crate_add(&id, &version_ids).map_err(ae)?;
@@ -313,27 +325,22 @@ pub async fn crate_set_smart(app: S<'_>, id: Id, smart: Option<serde_json::Value
     Ok(())
 }
 
-/// Labels songs with a dance style. Songs that already have another style get
-/// a version for this one (a song can be danced as several styles). Returns
-/// the version ids that carry the style.
+/// Adds a dance style to versions (a version can have several).
 #[tauri::command]
-pub async fn style_add(app: S<'_>, style: String, version_ids: Vec<Id>) -> Res<Vec<Id>> {
-    let name = style_version_name(&app, Some(&style));
-    let ids = version_ids
-        .iter()
-        .map(|v| app.store.assign_style(v, &style, &name))
-        .collect::<anyhow::Result<Vec<_>>>()
-        .map_err(ae)?;
+pub async fn style_add(app: S<'_>, style: String, version_ids: Vec<Id>) -> Res<()> {
+    for v in &version_ids {
+        app.store.assign_style(v, &style).map_err(ae)?;
+    }
     crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
     app.emit_perform();
-    Ok(ids)
+    Ok(())
 }
 
-/// Removes the dance-style label from versions (the versions are kept).
+/// Removes a dance style (or, with `style = null`, all styles) from versions.
 #[tauri::command]
-pub async fn style_remove(app: S<'_>, version_ids: Vec<Id>) -> Res<()> {
+pub async fn style_remove(app: S<'_>, version_ids: Vec<Id>, style: Option<String>) -> Res<()> {
     for v in &version_ids {
-        app.store.unassign_style(v).map_err(ae)?;
+        app.store.unassign_style(v, style.as_deref()).map_err(ae)?;
     }
     crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
     app.emit_perform();
@@ -366,10 +373,9 @@ pub async fn setlist_create(
     name: String,
     mode: String,
     profile_id: String,
-    lesson_style: Option<String>,
     event_date: Option<String>,
 ) -> Res<Setlist> {
-    let id = app.store.setlist_create(&name, &mode, &profile_id, lesson_style, event_date).map_err(ae)?;
+    let id = app.store.setlist_create(&name, &mode, &profile_id, event_date).map_err(ae)?;
     crate::app::emit(&app.handle, "setlists-changed", ());
     app.store.setlist(&id).map_err(ae)
 }
@@ -392,6 +398,8 @@ pub async fn setlist_delete(app: S<'_>, id: Id) -> Res<()> {
     app.store.setlist_delete(&id).map_err(ae)?;
     app.prune();
     crate::app::emit(&app.handle, "setlists-changed", ());
+    // Play counts are derived from setlists.
+    crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
     Ok(())
 }
 
@@ -407,6 +415,8 @@ pub async fn setlist_reset(app: S<'_>, id: Id) -> Res<()> {
     app.store.reset_setlist_status(&id).map_err(ae)?;
     app.emit_setlist(&id);
     app.emit_perform();
+    // Play counts are derived from setlists.
+    crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
     Ok(())
 }
 
@@ -438,6 +448,8 @@ pub async fn entries_delete(app: S<'_>, setlist_id: Id, ids: Vec<Id>) -> Res<()>
     app.prune();
     app.emit_setlist(&setlist_id);
     app.emit_perform();
+    // Play counts are derived from setlists.
+    crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
     Ok(())
 }
 
@@ -457,6 +469,57 @@ pub async fn write_text_file(path: String, contents: String) -> Res<()> {
 #[tauri::command]
 pub async fn read_text_file(path: String) -> Res<String> {
     std::fs::read_to_string(&path).map_err(err)
+}
+
+// ---------------------------------------------------------------- your styles
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StylesInfo {
+    #[serde(flatten)]
+    pub library: StyleLibrary,
+    /// How many versions are tagged with each style key.
+    pub usage: std::collections::BTreeMap<String, usize>,
+}
+
+#[tauri::command]
+pub async fn styles_get(app: S<'_>) -> Res<StylesInfo> {
+    Ok(StylesInfo { library: app.style_library(), usage: app.store.style_usage() })
+}
+
+#[tauri::command]
+pub async fn styles_save(app: S<'_>, library: StyleLibrary) -> Res<()> {
+    app.store.save_style_library(library).map_err(ae)?;
+    crate::app::emit(&app.handle, "styles-changed", ());
+    app.emit_perform();
+    Ok(())
+}
+
+/// Renames one of your styles everywhere: songs, setlists, smart crates and
+/// club mappings. Renaming onto an existing style merges the two; `to = null`
+/// deletes the style (and removes it from every song).
+#[tauri::command]
+pub async fn styles_rekey(app: S<'_>, from: String, to: Option<String>) -> Res<()> {
+    let to = to.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    let mut lib = app.style_library();
+    match to.as_deref() {
+        Some(t) if lib.styles.iter().any(|s| s.key == t) => lib.styles.retain(|s| s.key != from),
+        Some(t) => lib.styles.iter_mut().filter(|s| s.key == from).for_each(|s| s.key = t.to_string()),
+        None => lib.styles.retain(|s| s.key != from),
+    }
+    for rules in lib.mappings.values_mut() {
+        match to.as_deref() {
+            Some(t) => rules.iter_mut().filter(|r| r.style == from).for_each(|r| r.style = t.to_string()),
+            None => rules.retain(|r| r.style != from),
+        }
+    }
+    app.store.save_style_library(lib).map_err(ae)?;
+    app.store.rekey_style(&from, to.as_deref()).map_err(ae)?;
+    crate::app::emit(&app.handle, "crates-changed", ());
+    crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
+    crate::app::emit(&app.handle, "styles-changed", ());
+    app.emit_perform();
+    Ok(())
 }
 
 // ---------------------------------------------------------------- profiles & settings
@@ -714,13 +777,17 @@ pub async fn stems_remove_model(app: S<'_>) -> Res<()> {
     app.stems.remove_model().map_err(ae)
 }
 
-/// Removes play-history items, given as `[playedAt, trackId]` pairs; `None` clears all.
+/// "Remove from History": marks those setlist entries as not played.
 #[tauri::command]
-pub async fn history_remove(app: S<'_>, items: Option<Vec<(i64, Id)>>) -> Res<usize> {
-    let n = app.store.history_remove(items.as_deref()).map_err(ae)?;
+pub async fn history_remove(app: S<'_>, entry_ids: Vec<Id>) -> Res<()> {
+    for id in &entry_ids {
+        let (_, sid) = app.store.entry(id).map_err(ae)?;
+        app.store.entry_update(id, &EntryPatch { status: Some("pending".into()), ..Default::default() }).map_err(ae)?;
+        app.emit_setlist(&sid);
+    }
     crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
     crate::app::emit(&app.handle, "history-changed", ());
-    Ok(n)
+    Ok(())
 }
 
 #[tauri::command]
@@ -969,6 +1036,8 @@ pub async fn spotify_resolve(app: S<'_>, input: String) -> Res<Vec<SpotifyTrack>
 pub struct MidiInfo {
     pub ports: Vec<PortInfo>,
     pub mappings: Vec<Mapping>,
+    /// The mapping in use (in automatic mode: the one matching the controller).
+    pub active_mapping: String,
     pub actions: Vec<(String, String, String)>,
     pub led_states: Vec<String>,
 }
@@ -981,6 +1050,7 @@ pub async fn midi_info(app: S<'_>) -> Res<MidiInfo> {
         Ok(MidiInfo {
             ports: a.midi.get().map(|m| m.ports()).unwrap_or_default(),
             mappings: a.all_mappings_with(&s),
+            active_mapping: a.midi.get().map(|m| m.active_mapping()).unwrap_or_default(),
             actions: crate::midi::actions(),
             led_states: crate::midi::led_states(),
         })

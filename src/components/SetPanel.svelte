@@ -1,15 +1,12 @@
 <script lang="ts">
   import { save } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api";
-  import type { CheckResult } from "../lib/rules";
   import { addToSet, app, audition, spotifyVersions, confirmAction } from "../lib/state.svelte";
-  import { fmtBpm, fmtTime, playback, playedDurationMs, styleOf } from "../lib/tempo";
+  import { entryStyleKeys, NEUTRAL } from "../lib/styles";
+  import { fmtBpm, fmtTime, playback, playedDurationMs } from "../lib/tempo";
   import type { Id, SetlistEntry } from "../lib/types";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
   import Icon from "./Icon.svelte";
-
-  interface Props { checks: CheckResult | null }
-  let { checks }: Props = $props();
 
   const set = $derived(app.current);
   const selSet = $derived(new Set(app.selectedEntries));
@@ -21,13 +18,20 @@
   const rows = $derived(
     (set?.entries ?? []).map((e, i) => {
       const r = e.versionId ? app.versionMap.get(e.versionId) : undefined;
-      const style = styleOf(r?.version, e);
-      const pb = r ? playback(r.track, r.version, e, app.profile) : null;
+      const pb = r ? playback(r.track, r.version, e, app.clubStyleOf) : null;
       const dur = r ? playedDurationMs(r.track, r.version, e, pb!.rate, { fadeSeconds: app.fadeSeconds, trimSilence: app.settings?.trimSilence }) : 0;
-      const issues = checks?.issuesByEntry.get(e.id) ?? [];
-      return { e, i, r, style, pb, dur, issues };
+      const shown = app.shownFor(r?.version, e, pb?.target ?? null);
+      const label = e.label || shown.map((s) => s.short).join(" / ");
+      // A song coming up that the room has already heard in this set.
+      const repeat = e.status === "pending" && !!r && app.playedInSet.has(r.track.id);
+      return { e, i, r, pb, dur, shown, label, repeat };
     }),
   );
+  const totalMs = $derived.by(() => {
+    const songs = rows.filter((x) => x.e.status !== "skipped");
+    const gaps = Math.max(0, songs.length - 1) * (app.perform?.gapSeconds ?? 8) * 1000;
+    return songs.reduce((a, x) => a + x.dur, 0) + gaps;
+  });
   let number = $derived.by(() => {
     // Number songs, not skipped entries.
     const m = new Map<Id, number>();
@@ -61,8 +65,8 @@
     const r = entry.versionId ? app.versionMap.get(entry.versionId) : undefined;
     app.inspectTrack = r?.track.id ?? null;
     // Selecting an empty slot filters the library to its style.
-    if (!entry.versionId && entry.style) {
-      app.styleFilter = [entry.style];
+    if (!entry.versionId && entry.styles?.length) {
+      app.styleFilter = [...entry.styles];
       app.selected = [];
     }
   }
@@ -107,11 +111,25 @@
       ...(app.profile?.tags ?? []).map((t) => ({
         label: t.name, checked: (entry.tags ?? []).includes(t.id), action: () => toggleTag(entry, t.id),
       })),
+      ...styleItems(entry),
       { separator: true },
       { label: "Edit Overrides for This Set…", action: () => { app.inspectEntry = entry.id; app.rightTab = "info"; } },
       { label: "Remove from Set", danger: true, disabled: isCurrent, action: () => remove(ids) },
     ];
     menu = { x: ev.clientX, y: ev.clientY, items };
+  }
+
+  /** Choose which of a song's styles this set shows (for songs danced as several). */
+  function styleItems(entry: SetlistEntry): MenuItem[] {
+    const v = entry.versionId ? app.versionMap.get(entry.versionId)?.version : undefined;
+    const all = v?.styles ?? [];
+    if (all.length < 2) return [];
+    const shown = entryStyleKeys(v, entry);
+    const toggle = (k: string) => {
+      const next = shown.includes(k) ? shown.filter((x) => x !== k) : all.filter((x) => x === k || shown.includes(x));
+      return api.updateEntry(entry.id, { styles: next.length === all.length || !next.length ? null : next });
+    };
+    return [{ separator: true }, ...all.map((k) => ({ label: `Show as ${app.styleName(k)}`, checked: shown.includes(k), action: () => toggle(k) }))];
   }
 
   async function moveNext(ids: Id[]) {
@@ -167,11 +185,15 @@
 
   async function addSlot(style: string) {
     if (!set) return;
-    await app.run(api.insertEntries(set.id, [{ style }]));
+    await app.run(api.insertEntries(set.id, [{ styles: [style] }]));
   }
 
   function slotMenu(ev: MouseEvent) {
-    const items: MenuItem[] = (app.profile?.styles ?? []).map((s) => ({ label: s.name, action: () => addSlot(s.key) }));
+    const items: MenuItem[] = app.myStyles.map((s) => {
+      const club = app.show(s.key);
+      return { label: club.club && club.name !== s.name ? `${s.name} (${club.name})` : s.name, action: () => addSlot(s.key) };
+    });
+    if (!items.length) items.push({ label: "Add dance styles in Settings → Dance Styles", action: () => (app.settingsOpen = "styles") });
     menu = { x: ev.clientX, y: ev.clientY, items };
   }
 
@@ -198,7 +220,7 @@
     const lines = [["#", "Style", "Title", "Artist", "Version", "BPM", "Length", "Tags", "Note", "Status"].map(esc).join(",")];
     for (const x of rows) {
       lines.push([
-        number.get(x.e.id) ?? "", app.styleName(x.style), x.r?.track.title ?? "(slot)", x.r?.track.artist ?? "", x.r?.version.name ?? "",
+        number.get(x.e.id) ?? "", x.e.label || x.shown.map((s) => s.name).join(" / "), x.r?.track.title ?? "(slot)", x.r?.track.artist ?? "", x.r?.version.name ?? "",
         x.pb?.target ? fmtBpm(x.pb.target) : "", x.dur ? fmtTime(x.dur) : "",
         (x.e.tags ?? []).map((t) => app.profile?.tags.find((d) => d.id === t)?.name ?? t).join("; "), x.e.note ?? "", x.e.status,
       ].map(esc).join(","));
@@ -243,10 +265,9 @@
         <button class:on={set.mode === "live"} onclick={() => api.updateSetlist(set.id, { mode: "live" })}>Live</button>
         <button class:on={set.mode === "preset"} onclick={() => api.updateSetlist(set.id, { mode: "preset" })}>Preset</button>
       </div>
-      <select title="Lesson style (some club rules depend on it)" value={set.lessonStyle ?? ""}
-        onchange={(e) => api.updateSetlist(set.id, { lessonStyle: e.currentTarget.value || null })}>
-        <option value="">No lesson</option>
-        {#each app.profile?.styles ?? [] as s}<option value={s.key}>Lesson: {s.name}</option>{/each}
+      <select title="Club: whose style names, tempo ranges and tags this set uses" value={set.profileId}
+        onchange={(e) => api.updateSetlist(set.id, { profileId: e.currentTarget.value })}>
+        {#each app.profiles as p}<option value={p.id}>{p.name}</option>{/each}
       </select>
     </div>
 
@@ -264,7 +285,7 @@
           class:next={isNext}
           class:sel={selSet.has(x.e.id)}
           data-entry={x.e.id}
-          style:--c={app.styleColor(x.style)}
+          style:--c={x.shown[0]?.color ?? NEUTRAL}
           role="option"
           aria-selected={selSet.has(x.e.id)}
           draggable="true"
@@ -280,14 +301,17 @@
           <span class="stripe"></span>
           <div class="body">
             <div class="l1">
-              <span class="sname">{app.style(x.style)?.short ?? (x.style ? app.styleName(x.style) : "—")}</span>
+              <span class="sname" class:unmapped={!x.e.label && x.shown.some((s) => s.unmapped)}
+                title={x.shown.map((s) => (s.unmapped ? `${s.name}: not a ${app.profile?.name} style` : s.club && s.name !== app.styleName(s.key) ? `${s.name} (your ${app.styleName(s.key)})` : s.name)).join("\n")}
+                >{x.label || "—"}</span>
               {#if x.r}
                 <span class="t" title={x.r.track.title}>{x.r.track.title}</span>
               {:else}
-                <span class="t slot">{x.style ? `Pick a ${app.styleName(x.style)}` : "Empty slot"}</span>
+                <span class="t slot">{x.shown.length ? `Pick a ${x.shown.map((s) => s.name).join(" / ")}` : "Empty slot"}</span>
               {/if}
             </div>
             <div class="l2">
+              {#if x.repeat}<span class="badge tag" style:--c="var(--yellow)" title="Already played in this set">played</span>{/if}
               {#if x.r}<span class="a">{x.r.track.artist}{#if app.versionLabel(x.r.version, x.r.track)} · {x.r.version.name}{/if}</span>{/if}
               {#each x.e.tags ?? [] as tag}
                 {@const t = app.profile?.tags.find((d) => d.id === tag)}
@@ -300,10 +324,6 @@
             <span class="bpm">{x.pb?.target ? fmtBpm(x.pb.target) : ""}</span>
             <span class="dur" class:long={x.dur > 270000}>{x.dur ? fmtTime(x.dur) : ""}</span>
           </div>
-          {#if x.issues.some((i) => !i.ok)}
-            <span class="issue" class:err={x.issues.some((i) => !i.ok && i.severity === "error")}
-              title={x.issues.filter((i) => !i.ok).map((i) => `${i.label}: ${i.detail}`).join("\n")}><Icon name="warning" size={12} /></span>
-          {/if}
         </div>
       {/each}
       {#if dropIndex === rows.length}<div class="drop-line"></div>{/if}
@@ -315,7 +335,7 @@
     <div class="foot">
       <button class="small" onclick={slotMenu} title="Add a placeholder for a dance style; choose the song live"><Icon name="plus" size={12} /> Style slot</button>
       <span class="spacer"></span>
-      <span class="dim small num">{number.size} songs · {fmtTime(checks?.totalMs ?? 0)}{#if remainingMs && app.perform?.startedAt} · {fmtTime(remainingMs)} left{/if}</span>
+      <span class="dim small num">{number.size} songs · {fmtTime(totalMs)}{#if remainingMs && app.perform?.startedAt} · {fmtTime(remainingMs)} left{/if}</span>
     </div>
   {/if}
 </div>
@@ -335,7 +355,7 @@
   .subhead { display: flex; gap: 6px; padding: 0 10px 8px; border-bottom: 1px solid var(--border); }
   .subhead select { flex: 1; min-width: 0; }
   .entries { flex: 1; overflow-y: auto; padding: 4px 0; outline: none; }
-  .entry { display: grid; grid-template-columns: 24px 4px 1fr auto 14px; align-items: center; gap: 6px; padding: 4px 8px 4px 4px; min-height: 40px; border-bottom: 1px solid rgba(255,255,255,0.03); }
+  .entry { display: grid; grid-template-columns: 24px 4px 1fr auto; align-items: center; gap: 6px; padding: 4px 8px 4px 4px; min-height: 40px; border-bottom: 1px solid rgba(255,255,255,0.03); }
   .entry:hover { background: var(--bg-hover); }
   .entry.sel { background: var(--bg-selected); }
   .entry.cur { background: color-mix(in srgb, var(--main) 16%, transparent); }
@@ -349,6 +369,7 @@
   .body { min-width: 0; }
   .l1, .l2 { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
   .sname { font-size: var(--fs-xs); font-weight: 700; color: color-mix(in srgb, var(--c) 85%, white); flex: none; }
+  .sname.unmapped { font-style: italic; opacity: 0.7; }
   .t { overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
   .t.slot { color: var(--yellow); font-style: italic; font-weight: 400; }
   .l2 { font-size: var(--fs-sm); color: var(--text-dim); margin-top: 1px; }
@@ -357,8 +378,6 @@
   .note { color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; }
   .right { display: flex; flex-direction: column; align-items: flex-end; font-size: var(--fs-sm); color: var(--text-dim); }
   .dur.long { color: var(--yellow); }
-  .issue { color: var(--yellow); display: flex; }
-  .issue.err { color: var(--red); }
   .drop-line { height: 2px; background: var(--blue); margin: -1px 8px; border-radius: 1px; }
   .foot { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-top: 1px solid var(--border); }
   .spacer { flex: 1; }

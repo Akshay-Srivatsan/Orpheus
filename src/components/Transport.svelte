@@ -3,7 +3,7 @@
   // and what's coming up. Songs never overlap.
   import { api } from "../lib/api";
   import { app } from "../lib/state.svelte";
-  import { MOD, fmtBpm, fmtTime, playback, styleOf } from "../lib/tempo";
+  import { MOD, fmtBpm, fmtTime, playback } from "../lib/tempo";
   import Icon from "./Icon.svelte";
   import StyleBadge from "./StyleBadge.svelte";
 
@@ -19,8 +19,8 @@
   const nextDeck = $derived(app.decks.find((d) => d.entryId && d.entryId === p?.nextEntryId));
   const xf = $derived(p?.crossfader ?? 0);
   const next = $derived(app.entryRow(p?.nextEntryId));
-  const nextStyle = $derived(next ? styleOf(next.row?.version, next.entry) : null);
-  const nextPb = $derived(next?.row ? playback(next.row.track, next.row.version, next.entry, app.profile) : null);
+  const nextPb = $derived(next?.row ? playback(next.row.track, next.row.version, next.entry, app.clubStyleOf) : null);
+  const nextShown = $derived(next ? app.shownFor(next.row?.version, next.entry, nextPb?.target ?? null) : []);
   const inGap = $derived(!!p?.gapStartedAt && !playing);
   const gapMs = $derived(inGap && p?.gapStartedAt ? now - p.gapStartedAt : 0);
   const gapTarget = $derived((p?.gapSeconds ?? 8) * 1000);
@@ -73,7 +73,7 @@
   <div class="upnext">
     <div class="section-title">Up next</div>
     {#if next}
-      <div class="un-style"><StyleBadge style={nextStyle} big /></div>
+      <div class="un-style"><StyleBadge styles={nextShown} label={next.entry.label} big /></div>
       {#if next.row}
         <div class="un-title" title={next.row.track.title}>{next.row.track.title}</div>
         <div class="un-artist dim small num">

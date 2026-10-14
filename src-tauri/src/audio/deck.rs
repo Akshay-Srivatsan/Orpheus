@@ -448,22 +448,31 @@ impl Worker {
     }
 
     fn run(mut self) {
+        // This thread feeds the outputs: it runs at real-time priority so the
+        // interface can never starve it (see `priority.rs`).
+        let mut rt = super::priority::RtThread::promote(self.sh.rate.load(Ordering::Relaxed));
         loop {
-            let timeout = if self.active() { Duration::from_millis(0) } else { Duration::from_millis(50) };
+            let active = self.active();
+            let timeout = if active { Duration::from_millis(0) } else { Duration::from_millis(50) };
             match self.rx.recv_timeout(timeout) {
-                Ok(cmd) => self.handle(cmd),
+                Ok(cmd) => self.handle(cmd, &mut rt),
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return,
             }
+            if !active {
+                rt.did_block();
+            }
             while let Ok(cmd) = self.rx.try_recv() {
-                self.handle(cmd);
+                self.handle(cmd, &mut rt);
             }
             if self.src.is_some() {
                 let produced = if self.eof && self.tail_flushed { false } else { self.produce() };
                 self.update_position();
                 self.check_end();
-                if !produced {
-                    std::thread::sleep(Duration::from_millis(3));
+                if produced {
+                    rt.breathe();
+                } else {
+                    rt.blocked(Duration::from_millis(3));
                 }
             }
         }
@@ -494,9 +503,10 @@ impl Worker {
         *self.sh.cue_tap.ring.lock() = None;
     }
 
-    fn handle(&mut self, cmd: Cmd) {
+    fn handle(&mut self, cmd: Cmd, rt: &mut super::priority::RtThread) {
         match cmd {
-            Cmd::Load(req) => self.load(req),
+            // Opening a song can take a while; don't hold real-time priority for it.
+            Cmd::Load(req) => rt.normal(|| self.load(req)),
             Cmd::Seek(secs) => {
                 if self.src.is_some() {
                     self.seek(secs);

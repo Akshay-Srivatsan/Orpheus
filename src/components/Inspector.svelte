@@ -6,6 +6,7 @@
   import { fmtBpm, fmtTime, foldBpm, playback, rateToFit, resolveSettings, styleCenter } from "../lib/tempo";
   import type { Id, Overrides, Track, Version } from "../lib/types";
   import Icon from "./Icon.svelte";
+  import StyleChips from "./StyleChips.svelte";
   import TimeField from "./TimeField.svelte";
 
   const entry = $derived(app.current?.entries.find((e) => e.id === app.inspectEntry));
@@ -51,7 +52,7 @@
   async function newVersion() {
     if (!track) return;
     const style = app.filterStyle;
-    const v = await app.run(api.createVersion(track.id, { name: style ? app.styleName(style) : "New version", style }));
+    const v = await app.run(api.createVersion(track.id, { name: style ? app.styleName(style) : "New version", styles: style ? [style] : [] }));
     if (v) app.selected = [v.id];
   }
 
@@ -62,7 +63,7 @@
   }
 
   function fitToStyle(v: Version) {
-    const s = app.style(v.style);
+    const s = app.clubStyleOf(v, null, track?.bpm ?? null);
     if (!track?.bpm || !s) return;
     const c = styleCenter(s);
     if (!c) return;
@@ -85,15 +86,23 @@
     <div class="empty">Select a song to see and edit its details.</div>
   {:else}
     {#if entry}
-      {@const r = entryVersion && track ? playback(track, entryVersion, entry, app.profile) : null}
+      {@const r = entryVersion && track ? playback(track, entryVersion, entry, app.clubStyleOf) : null}
+      {@const shownKeys = entry.styles ?? entryVersion?.styles ?? []}
       <section class="box entrybox">
         <div class="section-title">In this set</div>
         <div class="grid">
-          <span class="lbl">Style</span>
-          <select value={entry.style ?? ""} onchange={(e) => api.updateEntry(entry.id, { style: e.currentTarget.value || null })}>
-            <option value="">{entryVersion?.style ? `Version's style (${app.styleName(entryVersion.style)})` : "None"}</option>
-            {#each app.profile?.styles ?? [] as s}<option value={s.key}>{s.name}</option>{/each}
-          </select>
+          <span class="lbl">{entryVersion ? "Show as" : "Slot"}</span>
+          {#if entryVersion && (entryVersion.styles?.length ?? 0) > 0}
+            <StyleChips value={shownKeys} choices={entryVersion.styles} bpm={r?.target ?? null}
+              onchange={(keys) => api.updateEntry(entry.id, { styles: keys.length === entryVersion.styles?.length || !keys.length ? null : keys })} />
+          {:else}
+            <StyleChips value={shownKeys} bpm={r?.target ?? null}
+              onchange={(keys) => api.updateEntry(entry.id, { styles: keys.length ? keys : null })} />
+          {/if}
+          <span class="lbl" title="Text shown instead of the style names (setlist and projector)">Label</span>
+          <input type="text" value={entry.label ?? ""}
+            placeholder={app.shownFor(entryVersion, entry, r?.target ?? null).map((s) => s.name).join(" / ") || "e.g. Mixer"}
+            onchange={(e) => api.updateEntry(entry.id, { label: e.currentTarget.value.trim() || null })} />
           <span class="lbl">Tempo</span>
           <span class="row">
             <input type="number" step="0.5" placeholder={entryVersion?.targetBpm ? fmtBpm(entryVersion.targetBpm) : "orig."}
@@ -189,8 +198,8 @@
       <section class="box">
         <div class="section-title row">Versions <button class="plain small" onclick={newVersion}><Icon name="plus" size={12} /> New</button></div>
         {#each track.versions as v (v.id)}
-          {@const pb = playback(track, v, null, app.profile)}
-          <div class="version" class:hl={app.selected.includes(v.id) || entry?.versionId === v.id} style:--c={app.styleColor(v.style)}>
+          {@const pb = playback(track, v, null, app.clubStyleOf)}
+          <div class="version" class:hl={app.selected.includes(v.id) || entry?.versionId === v.id} style:--c={app.styleColor(v.styles?.[0])}>
             <div class="vhead">
               <input type="text" class="vname" value={v.name} onchange={(e) => patchVersion(v, { name: e.currentTarget.value })} />
               <button class="plain icon" title="Preview this version on the free deck" onclick={() => audition(v.id)}><Icon name="headphones" size={13} /></button>
@@ -199,17 +208,14 @@
                 onclick={() => confirmAction(`Delete version “${v.name}”?`).then((ok) => { if (ok) app.run(api.deleteVersion(v.id)); })}><Icon name="trash" size={13} /></button>
             </div>
             <div class="grid">
-              <span class="lbl">Style</span>
-              <select value={v.style ?? ""} onchange={(e) => patchVersion(v, { style: e.currentTarget.value || null })}>
-                <option value="">None</option>
-                {#each app.profile?.styles ?? [] as s}<option value={s.key}>{s.name}</option>{/each}
-              </select>
+              <span class="lbl">Styles</span>
+              <StyleChips value={v.styles ?? []} bpm={pb.target} onchange={(keys) => patchVersion(v, { styles: keys })} />
               <span class="lbl">Tempo</span>
               <span class="row">
                 <input type="number" step="0.5" placeholder={pb.base ? fmtBpm(pb.base) : "orig."} value={v.targetBpm ?? ""}
                   onchange={(e) => patchVersion(v, { targetBpm: e.currentTarget.value ? +e.currentTarget.value : null })} />
                 {#if v.targetBpm && pb.base}<span class="faint num small">{((pb.rate - 1) * 100).toFixed(1)}%</span>{/if}
-                {#if v.style && app.style(v.style)?.sweet}
+                {#if app.clubStyleOf(v, null, track.bpm)?.sweet}
                   <button class="plain small" title="Set the tempo to the nearest edge of the style's sweet range" onclick={() => fitToStyle(v)}>Fit</button>
                 {/if}
               </span>

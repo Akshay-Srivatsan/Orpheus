@@ -44,6 +44,8 @@ pub struct ProjectorSettings {
     pub show_artist: bool,
     pub show_bpm: bool,
     pub show_clock: bool,
+    /// Cover art of the current song.
+    pub show_artwork: bool,
     pub font_scale: f64,
     pub theme: String,
 }
@@ -59,6 +61,7 @@ impl Default for ProjectorSettings {
             show_artist: true,
             show_bpm: false,
             show_clock: true,
+            show_artwork: true,
             font_scale: 1.0,
             theme: "dark".into(),
         }
@@ -76,7 +79,8 @@ pub struct MidiSettings {
 
 impl Default for MidiSettings {
     fn default() -> Self {
-        Self { enabled: true, mapping_id: "numark-dj2go2".into(), custom_mappings: vec![] }
+        // Empty = automatic: pick the built-in mapping matching the controller.
+        Self { enabled: true, mapping_id: String::new(), custom_mappings: vec![] }
     }
 }
 
@@ -132,7 +136,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             library_dir: None,
-            active_profile_id: "dancebreak".into(),
+            active_profile_id: "none".into(),
             library_folders: vec![],
             audio: AudioSettings::default(),
             gap_seconds: None,
@@ -202,6 +206,7 @@ pub struct TagCore {
 }
 
 pub const BUILTIN_PROFILES: &[&str] = &[
+    include_str!("../profiles/none.json"),
     include_str!("../profiles/dancebreak.json"),
     include_str!("../profiles/powers.json"),
 ];

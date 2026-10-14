@@ -1,9 +1,7 @@
 //! Audio engine.
 //!
-//! Two decks: deck 0 is the main ("on air") deck that plays to the room; deck 1
-//! is the preview deck that only ever plays to the headphone (cue) output. There
-//! is deliberately no crossfader and no way to route the preview deck to the
-//! master output (unless the user points the cue output at the same channels).
+//! Two identical decks. The crossfader sets each deck's master (room) gain; the
+//! deck the room can't hear is cued in the headphone output (PFL).
 //!
 //! Each deck runs a worker thread: source → time-stretch/SRC → gain/fade → lock-free
 //! ring buffers ("taps"). Output streams (one per physical device) mix taps
@@ -12,6 +10,7 @@
 
 pub mod deck;
 pub mod output;
+pub mod priority;
 pub mod source;
 
 use parking_lot::Mutex;

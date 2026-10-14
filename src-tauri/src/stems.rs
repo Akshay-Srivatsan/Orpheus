@@ -217,9 +217,7 @@ impl Stems {
     fn worker(self: Arc<Self>, rx: Receiver<Job>) {
         // Separation saturates the CPU: keep it below the audio threads.
         // ONNX Runtime's threads are created from this thread and inherit it.
-        if let Err(e) = thread_priority::set_current_thread_priority(thread_priority::ThreadPriority::Min) {
-            log::warn!("could not lower the stem thread's priority: {e:?}");
-        }
+        crate::audio::priority::lower_current_thread();
         let (inner, changed) = (self.inner.clone(), self.on_change.clone());
         stem_splitter_core::set_download_progress_callback(move |done, total| {
             inner.lock().model = ModelStatus::Downloading { done, total };

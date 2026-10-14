@@ -14,21 +14,22 @@
   const counts = $derived.by(() => {
     const m = new Map<string, number>();
     for (const r of rows) {
-      const k = r.version.style ?? NO_STYLE;
-      m.set(k, (m.get(k) ?? 0) + 1);
+      const keys = r.version.styles?.length ? r.version.styles : [NO_STYLE];
+      for (const k of keys) m.set(k, (m.get(k) ?? 0) + 1);
     }
     return m;
   });
   const sel = $derived(new Set(app.styleFilter));
-  /** Profile styles plus any unknown style keys found in this view. */
+  /** Your styles plus any unknown style keys found in this view. */
   const chips = $derived.by(() => {
-    const known = (app.profile?.styles ?? []).map((s) => s.key);
+    const known = app.myStyles.map((s) => s.key);
     const extra = [...counts.keys()].filter((k) => k !== NO_STYLE && !known.includes(k));
     // Hide styles with no songs here unless selected, to keep the bar short.
     return [...known, ...extra].filter((k) => counts.get(k) || sel.has(k));
   });
-  const hidden = $derived((app.profile?.styles ?? []).filter((s) => !chips.includes(s.key)));
-  const st = $derived(app.style(app.filterStyle));
+  const hidden = $derived(app.myStyles.filter((s) => !chips.includes(s.key)));
+  const targets = $derived(app.filterStyle ? app.clubTargets(app.filterStyle) : []);
+  const range = (s: { sweet: [number, number] | null }) => (s.sweet ? ` ${s.sweet[0]}–${s.sweet[1]}` : "");
 
   function toggle(e: MouseEvent, key: string) {
     if (e.metaKey || e.ctrlKey || e.shiftKey) {
@@ -52,7 +53,7 @@
     drop = null;
     const ids = dragged(e);
     if (!ids.length) return;
-    if (key === NO_STYLE) await app.run(api.styleRemove(ids));
+    if (key === NO_STYLE) await app.run(api.styleRemove(ids, null));
     else await app.run(api.styleAdd(key, ids));
   }
 </script>
@@ -60,24 +61,24 @@
 <div class="bar" role="toolbar" aria-label="Filter by dance style">
   <button class="chip all" class:on={!app.styleFilter.length} onclick={() => (app.styleFilter = [])}>All styles</button>
   {#each chips as k (k)}
-    {@const s = app.style(k)}
+    {@const s = app.mine(k)}
     <button
       class="chip"
       class:on={sel.has(k)}
       class:drop={drop === k}
       style:--c={app.styleColor(k)}
-      title="{app.styleName(k)}{s?.sweet ? ` · ${s.sweet[0]}–${s.sweet[1]} BPM` : ''} — click to filter, ⌘/Shift-click to add; drop songs here to label them"
+      title="{s.name}{app.hasClub ? ` · ${app.clubTargets(k).map((t) => t.name + range(t)).join(", ") || `not a ${app.profile?.name} style`}` : ''} — click to filter, ⌘/Shift-click to add; drop songs here to label them"
       onclick={(e) => toggle(e, k)}
       ondragover={(e) => { e.preventDefault(); drop = k; }}
       ondragleave={() => (drop = null)}
       ondrop={(e) => dropOn(e, k)}
     >
-      <span class="dot"></span>{s?.short || app.styleName(k)}<span class="n">{counts.get(k) ?? 0}</span>
+      <span class="dot"></span>{s.short}<span class="n">{counts.get(k) ?? 0}</span>
     </button>
   {/each}
   {#if counts.get(NO_STYLE) || sel.has(NO_STYLE)}
     <button class="chip" class:on={sel.has(NO_STYLE)} class:drop={drop === NO_STYLE}
-      title="Songs without a dance style — drop songs here to remove their style"
+      title="Songs without a dance style — drop songs here to remove their styles"
       onclick={(e) => toggle(e, NO_STYLE)}
       ondragover={(e) => { e.preventDefault(); drop = NO_STYLE; }}
       ondragleave={() => (drop = null)}
@@ -91,12 +92,15 @@
     </select>
   {/if}
 </div>
-{#if st}
+{#if app.filterStyle && app.hasClub}
   <div class="info">
-    <span class="sname" style:color={st.color}>{st.name}</span>
-    {#if st.sweet}<span class="num">{st.sweet[0]}–{st.sweet[1]} BPM{#if st.extended} <span class="faint">(ok {st.extended[0]}–{st.extended[1]})</span>{/if}</span>{/if}
-    {#if st.sweet || st.extended}
-      <label class="faint" title="Also list songs without a style whose tempo fits {st.name}">
+    <span class="sname" style:color={app.styleColor(app.filterStyle)}>{app.styleName(app.filterStyle)}</span>
+    {#if !targets.length}<span class="faint">not a {app.profile?.name} style</span>{/if}
+    {#each targets as t}
+      <span class="num"><span style:color={t.color}>{t.name}</span>{#if t.sweet} {t.sweet[0]}–{t.sweet[1]} BPM{#if t.extended} <span class="faint">(ok {t.extended[0]}–{t.extended[1]})</span>{/if}{/if}</span>
+    {/each}
+    {#if targets.some((t) => t.sweet || t.extended)}
+      <label class="faint" title="Also list songs without a style whose tempo fits">
         <input type="checkbox" bind:checked={app.suggestByTempo} /> include unlabelled songs that fit its tempo
       </label>
     {/if}

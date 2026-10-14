@@ -1,7 +1,7 @@
 // Mock projector data for designing the projector page in a plain browser.
 // URL params: ?mode=live|preset&gap=1&message=...&theme=light&scale=1.2&idle=1
 
-import type { DeckState, ProjEntry, ProjectorPayload, ProjectorSettings } from "./types";
+import type { DeckState, Profile, ProjEntry, ProjectorPayload, ProjectorSettings } from "./types";
 
 const STYLES: Record<string, [string, string, string]> = {
   csw: ["Cross-Step Waltz", "CSW", "#a78bfa"],
@@ -59,6 +59,15 @@ const TAGS: Record<string, [string, string]> = {
   last: ["Last of style", "#fca5a5"],
 };
 
+/** A club whose style keys are the mock's (no mapping rules needed). */
+function mockClub(): Profile {
+  return {
+    id: "mock", name: "Mock club", description: "", setMinutes: 120, gap: { targetSeconds: 8, minSeconds: 5, maxSeconds: 10 },
+    autoAdvance: false, fadeOutSeconds: 5, tempo: { maxSpeedupPct: 10, maxSlowdownPct: 8 }, tags: [], announcements: [],
+    styles: Object.entries(STYLES).map(([key, [name, short, color]]) => ({ key, name, short, color, sweet: null, extended: null })),
+  };
+}
+
 export function mockSettings(p: URLSearchParams): ProjectorSettings {
   return {
     title: "Dancebreak — Fall Social",
@@ -69,6 +78,7 @@ export function mockSettings(p: URLSearchParams): ProjectorSettings {
     showArtist: true,
     showBpm: p.has("bpm"),
     showClock: true,
+    showArtwork: true,
     fontScale: Number(p.get("scale") ?? 1),
     theme: p.get("theme") === "light" ? "light" : "dark",
   };
@@ -80,15 +90,13 @@ export function mockPayload(p: URLSearchParams): ProjectorPayload {
   const idle = p.has("idle");
   const cur = Number(p.get("index") ?? 11);
   const entries: ProjEntry[] = SONGS.map(([st, title, artist, tags], i) => {
-    const [name, short, color] = STYLES[st];
     return {
       id: `e${i}`,
+      trackId: null,
       title,
       artist,
-      style: st,
-      styleName: name,
-      styleShort: short,
-      color,
+      styles: [st],
+      label: null,
       tags: (tags ?? []).map((t) => ({ id: t, name: TAGS[t][0], color: TAGS[t][1] })),
       status: i < cur ? (i === 3 ? "skipped" : "played") : i === cur && !gap ? "playing" : "pending",
       bpm: 100 + ((i * 17) % 60),
@@ -108,6 +116,8 @@ export function mockPayload(p: URLSearchParams): ProjectorPayload {
       playing: false,
       message: p.get("message"),
       liveDeck: 0,
+      profile: mockClub(),
+      styleLibrary: { styles: [], mappings: {} },
     };
   }
   const currentIndex = gap ? cur - 1 : cur;
@@ -131,6 +141,8 @@ export function mockPayload(p: URLSearchParams): ProjectorPayload {
     playing: !gap,
     message: p.get("message"),
     liveDeck: 0,
+    profile: mockClub(),
+    styleLibrary: { styles: [], mappings: {} },
   };
 }
 

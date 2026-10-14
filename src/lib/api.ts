@@ -13,6 +13,8 @@ export const api = {
   updateTrack: (id: T.Id, patch: T.TrackPatch) => call<T.Track>("track_update", { id, patch }),
   deleteTracks: (ids: T.Id[]) => call<void>("tracks_delete", { ids }),
   resetBpm: (id: T.Id, from: "detected" | "tag") => call<T.Track>("track_reset_bpm", { id, from }),
+  /** Cover art: a data URL (local files) or a Spotify image URL. */
+  artwork: (id: T.Id) => call<string | null>("track_artwork", { id }),
   waveform: (id: T.Id) => call<number[]>("track_waveform", { id }),
   analyze: (ids: T.Id[]) => call<void>("track_analyze", { ids }),
   rescan: () => call<void>("library_rescan"),
@@ -21,8 +23,8 @@ export const api = {
   importPaths: (paths: string[]) => call<void>("library_import", { paths }),
   scanProgress: () => call<T.ScanProgress>("scan_progress"),
   history: (limit: number) => call<T.HistoryItem[]>("history", { limit }),
-  /** Removes history items ([playedAt, trackId]); omit to clear the whole history. */
-  removeHistory: (items?: [number, T.Id][]) => call<number>("history_remove", { items: items ?? null }),
+  /** "Remove from History": marks those setlist entries as not played. */
+  removeHistory: (entryIds: T.Id[]) => call<void>("history_remove", { entryIds }),
 
   // sources & versions
   linkSpotify: (trackId: T.Id, uri: string) => call<T.Track>("source_link_spotify", { trackId, uri }),
@@ -36,10 +38,10 @@ export const api = {
   crates: () => call<T.Crate[]>("crates_list"),
   createCrate: (name: string, smart: import("./smart").SmartRules | null = null) => call<T.Id>("crate_create", { name, smart }),
   setCrateSmart: (id: T.Id, smart: import("./smart").SmartRules | null) => call<void>("crate_set_smart", { id, smart }),
-  /** Labels songs with a dance style; returns the versions that carry it (new ones for already-styled songs). */
-  styleAdd: (style: string, versionIds: T.Id[]) => call<T.Id[]>("style_add", { style, versionIds }),
-  /** Removes the dance-style label from versions. */
-  styleRemove: (versionIds: T.Id[]) => call<void>("style_remove", { versionIds }),
+  /** Adds one of your dance styles to versions (a version can have several). */
+  styleAdd: (style: string, versionIds: T.Id[]) => call<void>("style_add", { style, versionIds }),
+  /** Removes a dance style from versions; without `style`, all of their styles. */
+  styleRemove: (versionIds: T.Id[], style: string | null = null) => call<void>("style_remove", { versionIds, style }),
   renameCrate: (id: T.Id, name: string) => call<void>("crate_rename", { id, name }),
   deleteCrate: (id: T.Id) => call<void>("crate_delete", { id }),
   addToCrate: (id: T.Id, versionIds: T.Id[]) => call<void>("crate_add", { id, versionIds }),
@@ -48,14 +50,8 @@ export const api = {
   // setlists
   setlists: () => call<T.SetlistSummary[]>("setlists_list"),
   setlist: (id: T.Id) => call<T.Setlist>("setlist_get", { id }),
-  createSetlist: (a: { name: string; mode: T.SetlistMode; profileId: string; lessonStyle?: string | null; eventDate?: string | null }) =>
-    call<T.Setlist>("setlist_create", {
-      name: a.name,
-      mode: a.mode,
-      profileId: a.profileId,
-      lessonStyle: a.lessonStyle ?? null,
-      eventDate: a.eventDate ?? null,
-    }),
+  createSetlist: (a: { name: string; mode: T.SetlistMode; profileId: string; eventDate?: string | null }) =>
+    call<T.Setlist>("setlist_create", { name: a.name, mode: a.mode, profileId: a.profileId, eventDate: a.eventDate ?? null }),
   updateSetlist: (id: T.Id, patch: Partial<Omit<T.SetlistSummary, "id" | "entryCount">>) => call<T.Setlist>("setlist_update", { id, patch }),
   deleteSetlist: (id: T.Id) => call<void>("setlist_delete", { id }),
   duplicateSetlist: (id: T.Id, name: string) => call<T.Setlist>("setlist_duplicate", { id, name }),
@@ -67,6 +63,12 @@ export const api = {
   reorderEntries: (setlistId: T.Id, ids: T.Id[]) => call<void>("entries_reorder", { setlistId, ids }),
   writeTextFile: (path: string, contents: string) => call<void>("write_text_file", { path, contents }),
   readTextFile: (path: string) => call<string>("read_text_file", { path }),
+
+  // your styles
+  styles: () => call<T.StylesInfo>("styles_get"),
+  saveStyles: (library: T.StyleLibrary) => call<void>("styles_save", { library }),
+  /** Renames a style key on every song; `to = null` removes the style from all songs. */
+  rekeyStyle: (from: string, to: string | null) => call<void>("styles_rekey", { from, to }),
 
   // profiles & settings
   profiles: () => call<T.Profile[]>("profiles_list"),
@@ -162,6 +164,7 @@ export interface Events {
   "setlists-changed": null;
   "crates-changed": null;
   "profiles-changed": null;
+  "styles-changed": null;
   "settings-changed": T.Settings;
   "scan-progress": T.ScanProgress;
   "spotify-status": T.SpotifyStatus;

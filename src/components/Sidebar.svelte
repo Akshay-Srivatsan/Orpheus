@@ -21,16 +21,9 @@
     }
   });
 
-  const smartCtx = $derived({
-    profile: app.profile,
-    crates: app.crates,
-    library: app.rows,
-    fadeSeconds: app.fadeSeconds,
-    trimSilence: app.settings?.trimSilence ?? true,
-  });
 
   function count(c: Crate): number {
-    return c.smart ? evaluate(c.smart, app.rows, smartCtx).length : c.versionIds.length;
+    return c.smart ? evaluate(c.smart, app.rows, app.smartCtx).length : c.versionIds.length;
   }
 
   function is(v: SourceView): boolean {
