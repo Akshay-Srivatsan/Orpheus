@@ -87,7 +87,8 @@ impl Default for MidiSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
 pub struct SpotifySettings {
-    /// OAuth client id. Empty = librespot's default client id.
+    /// Your own Spotify app's client id, used for search and playlists (Web
+    /// API). Empty = librespot's shared client id, which Spotify rate-limits.
     pub client_id: String,
     /// Reconnect automatically at startup if credentials are cached.
     pub auto_connect: bool,

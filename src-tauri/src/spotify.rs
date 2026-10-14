@@ -30,8 +30,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// librespot's own client id; its registered redirect is http://127.0.0.1:8898/login.
+/// Used for playback. Many apps share it, so Spotify rate-limits its Web API
+/// use heavily; search and playlists can use your own app instead
+/// (`set_web_client_id`).
 const DEFAULT_CLIENT_ID: &str = "65b708073fc0480ea92a077233ca87bd";
-const REDIRECT_URI: &str = "http://127.0.0.1:8898/login";
+/// Redirect for both sign-ins (register it in your own Spotify app).
+pub const REDIRECT_URI: &str = "http://127.0.0.1:8898/login";
 const SCOPES: &[&str] = &[
     "streaming",
     "user-read-private",
@@ -52,6 +56,8 @@ pub struct SpotifyStatus {
     pub has_cached_credentials: bool,
     /// Search and "your playlists" (Spotify Web API) are available.
     pub web_api: bool,
+    /// Search and playlists use your own Spotify app (not the shared client id).
+    pub own_web_app: bool,
 }
 
 /// OAuth token from the browser sign-in, used for the Web API (search,
@@ -298,6 +304,8 @@ pub struct Spotify {
     web_blocked_until: Mutex<i64>,
     /// Recent search results (query → time, results), so repeated searches don't hit the API.
     search_cache: Mutex<HashMap<String, (i64, Vec<SpotifyTrack>)>>,
+    /// Client id of your own Spotify app for the Web API ("" = the shared one).
+    web_client_id: Mutex<String>,
 }
 
 /// How long search results are reused.
@@ -323,6 +331,7 @@ impl Spotify {
             web_token: Mutex::new(None),
             web_blocked_until: Mutex::new(0),
             search_cache: Mutex::new(HashMap::new()),
+            web_client_id: Mutex::new(String::new()),
         };
         *s.web_token.lock() = std::fs::read_to_string(s.web_token_path()).ok().and_then(|t| serde_json::from_str(&t).ok());
         s
@@ -355,7 +364,9 @@ impl Spotify {
     pub fn status(&self) -> SpotifyStatus {
         let mut s = self.status.lock().clone();
         s.has_cached_credentials = self.dir.join("credentials.json").exists();
-        s.web_api = self.web_token.lock().is_some();
+        let cid = self.web_cid();
+        s.web_api = self.web_token.lock().as_ref().is_some_and(|t| t.client_id == cid);
+        s.own_web_app = cid != DEFAULT_CLIENT_ID;
         s
     }
 
@@ -385,11 +396,27 @@ impl Spotify {
         Ok(())
     }
 
+    /// Uses your own Spotify app (client id) for search and playlists; "" = the shared one.
+    pub fn set_web_client_id(&self, id: &str) {
+        let id = id.trim().to_string();
+        let mut cur = self.web_client_id.lock();
+        if *cur != id {
+            *cur = id;
+            // A rate limit on one client id says nothing about another.
+            *self.web_blocked_until.lock() = 0;
+        }
+    }
+
+    fn web_cid(&self) -> String {
+        let id = self.web_client_id.lock().clone();
+        if id.is_empty() { DEFAULT_CLIENT_ID.to_string() } else { id }
+    }
+
     /// Connects with cached credentials (no browser).
-    pub fn connect_cached(&self, client_id: &str) -> Result<()> {
+    pub fn connect_cached(&self) -> Result<()> {
         let creds = self.cache()?.credentials().ok_or_else(|| anyhow!("no saved Spotify login"))?;
         self.status.lock().connecting = true;
-        let r = self.rt.block_on(self.connect_with(creds, client_id));
+        let r = self.rt.block_on(self.connect_with(creds, ""));
         if let Err(e) = &r {
             let mut st = self.status.lock();
             st.connecting = false;
@@ -398,25 +425,35 @@ impl Spotify {
         r
     }
 
-    /// Interactive OAuth login: opens the system browser.
-    pub fn login(&self, client_id: &str) -> Result<()> {
+    /// Browser sign-in for `client_id`; returns the token (also saved for the
+    /// Web API when it is the client id search uses).
+    fn authorize(&self, client_id: &str) -> Result<WebToken> {
+        let client = librespot_oauth::OAuthClientBuilder::new(client_id, REDIRECT_URI, SCOPES.to_vec())
+            .open_in_browser()
+            .with_custom_message("Orpheus is now connected to Spotify. You can close this tab.")
+            .build()
+            .map_err(|e| anyhow!("{e}"))?;
+        let token = client.get_access_token().map_err(|e| anyhow!("Spotify authorization failed: {e}"))?;
+        let left = token.expires_at.saturating_duration_since(std::time::Instant::now());
+        let t = WebToken {
+            client_id: client_id.to_string(),
+            access_token: token.access_token,
+            refresh_token: token.refresh_token,
+            expires_at: crate::model::now_ms() + left.as_millis() as i64,
+        };
+        if t.client_id == self.web_cid() {
+            self.save_web_token(&t);
+            *self.web_blocked_until.lock() = 0;
+        }
+        Ok(t)
+    }
+
+    /// Interactive sign-in for playback (opens the system browser).
+    pub fn login(&self) -> Result<()> {
         self.status.lock().connecting = true;
-        let cid = if client_id.is_empty() { DEFAULT_CLIENT_ID } else { client_id };
         let r = (|| -> Result<()> {
-            let client = librespot_oauth::OAuthClientBuilder::new(cid, REDIRECT_URI, SCOPES.to_vec())
-                .open_in_browser()
-                .with_custom_message("Orpheus is now connected to Spotify. You can close this tab.")
-                .build()
-                .map_err(|e| anyhow!("{e}"))?;
-            let token = client.get_access_token().map_err(|e| anyhow!("Spotify authorization failed: {e}"))?;
-            let left = token.expires_at.saturating_duration_since(std::time::Instant::now());
-            self.save_web_token(&WebToken {
-                client_id: cid.to_string(),
-                access_token: token.access_token.clone(),
-                refresh_token: token.refresh_token.clone(),
-                expires_at: crate::model::now_ms() + left.as_millis() as i64,
-            });
-            self.rt.block_on(self.connect_with(Credentials::with_access_token(token.access_token), ""))
+            let t = self.authorize(DEFAULT_CLIENT_ID)?;
+            self.rt.block_on(self.connect_with(Credentials::with_access_token(t.access_token), ""))
         })();
         if let Err(e) = &r {
             let mut st = self.status.lock();
@@ -511,7 +548,8 @@ impl Spotify {
                 _ => return Err(anyhow!("Unsupported Spotify link (use a track, album or playlist)")),
             };
             let mut out = Vec::with_capacity(ids.len());
-            for chunk in ids.chunks(16) {
+            // Small batches: bursts of metadata requests get rate-limited.
+            for chunk in ids.chunks(4) {
                 let futs = chunk
                     .iter()
                     .filter(|u| matches!(u, SpotifyUri::Track { .. }))
@@ -527,11 +565,27 @@ impl Spotify {
         })
     }
 
+    /// Separate browser sign-in with your own Spotify app, for search and playlists.
+    pub fn web_login(&self) -> Result<()> {
+        let cid = self.web_cid();
+        if cid == DEFAULT_CLIENT_ID {
+            return Err(anyhow!("Enter your Spotify app's client ID first"));
+        }
+        self.authorize(&cid).map(|_| ())
+    }
+
     /// A Web API access token from the browser sign-in, refreshed as needed.
     /// (librespot's internal "keymaster" tokens are refused for these scopes.)
     async fn web_token(&self) -> Result<String> {
-        let reauth = || anyhow!("Spotify search and playlists need you to sign in once more: Settings → Spotify → Sign In Again.");
-        let tok = self.web_token.lock().clone().ok_or_else(reauth)?;
+        let own = self.web_cid() != DEFAULT_CLIENT_ID;
+        let reauth = move || {
+            if own {
+                anyhow!("Spotify search and playlists need you to sign in with your app: Settings → Spotify → Sign In for Search.")
+            } else {
+                anyhow!("Spotify search and playlists need you to sign in once more: Settings → Spotify → Sign In Again.")
+            }
+        };
+        let tok = self.web_token.lock().clone().filter(|t| t.client_id == self.web_cid()).ok_or_else(reauth)?;
         if tok.expires_at > crate::model::now_ms() + 60_000 {
             return Ok(tok.access_token);
         }
@@ -735,7 +789,7 @@ fn web_track(t: &serde_json::Value) -> Option<SpotifyTrack> {
 fn rate_limited(wait_ms: i64) -> anyhow::Error {
     let secs = (wait_ms + 999) / 1000;
     let wait = if secs >= 120 { format!("{} min", (secs + 59) / 60) } else { format!("{secs} s") };
-    anyhow!("Spotify is limiting requests; try again in {wait}.")
+    anyhow!("Spotify is limiting requests; try again in {wait}. (Using your own Spotify app for search avoids the shared limit: Settings → Spotify.)")
 }
 
 fn urlencode(s: &str) -> String {

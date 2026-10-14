@@ -175,6 +175,16 @@ once none do. Use **+** (or "Add to Library" in the Info tab) to keep it.
 
 Spotify needs an internet connection while playing.
 
+Search and playlists use Spotify's Web API. By default they use the client
+ID librespot shares with many other apps, and Spotify rate-limits it
+("Spotify is limiting requests"). To avoid that, create your own app at
+[developer.spotify.com](https://developer.spotify.com/dashboard) with the
+redirect URI `http://127.0.0.1:8898/login` and the Web API enabled. Enter
+its client ID under Settings → Spotify → Search app, then press
+**Sign In for Search**. Playback keeps using your normal sign-in. Spotify
+waveforms and BPMs are analysed the first time a song is loaded onto a
+deck.
+
 ## Development
 
 You need Rust (stable), Node 20+, and the
@@ -198,7 +208,7 @@ cd src-tauri && cargo test --release   # backend tests
 Useful environment variables:
 
 - `ORPHEUS_DATA_DIR`: use a separate data folder, e.g. for testing.
-- `ORPHEUS_SPOTIFY_CLIENT_ID`: use your own Spotify app.
+- `ORPHEUS_SPOTIFY_CLIENT_ID`: your own Spotify app for search and playlists, if none is set in Settings.
 
 The developer examples in `src-tauri/examples/` work without the UI:
 

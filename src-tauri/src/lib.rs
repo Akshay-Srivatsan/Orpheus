@@ -35,12 +35,9 @@ pub fn run() {
             state.scan_library();
             let s = state.clone();
             std::thread::spawn(move || {
-                let (auto, cid) = {
-                    let st = s.settings.read();
-                    (st.spotify.auto_connect, st.spotify.client_id.clone())
-                };
+                let auto = s.settings.read().spotify.auto_connect;
                 if auto && s.spotify.status().has_cached_credentials {
-                    if let Err(e) = s.spotify.connect_cached(&cid) {
+                    if let Err(e) = s.spotify.connect_cached() {
                         log::warn!("Spotify auto-connect failed: {e:#}");
                     }
                     app::emit(&s.handle, "spotify-status", s.spotify.status());
@@ -135,6 +132,7 @@ pub fn run() {
             commands::projector_close,
             commands::spotify_status,
             commands::spotify_login,
+            commands::spotify_web_login,
             commands::spotify_connect_cached,
             commands::spotify_logout,
             commands::spotify_search,

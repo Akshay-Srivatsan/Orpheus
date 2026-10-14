@@ -431,6 +431,8 @@ export interface SpotifyStatus {
   hasCachedCredentials: boolean;
   /** Search and playlists (Web API) are available; otherwise sign in again. */
   webApi: boolean;
+  /** Search and playlists use your own Spotify app (Settings → Spotify). */
+  ownWebApp: boolean;
 }
 
 export interface SpotifyTrack {

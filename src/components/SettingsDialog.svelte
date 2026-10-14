@@ -392,7 +392,7 @@
           <span class="col">
             {#if app.spotify?.connected}
               <span>Connected as <b>{app.spotify.username}</b></span>
-              {#if !app.spotify.webApi}
+              {#if !app.spotify.webApi && !app.spotify.ownWebApp}
                 <span class="warn small">Sign in once more to enable Spotify search and your playlists.</span>
                 <span><button class="primary" onclick={() => app.run(api.spotifyLogin())}>Sign In Again…</button></span>
               {/if}
@@ -417,9 +417,24 @@
           </span>
           <span class="l">Startup</span>
           <label><input type="checkbox" checked={s.spotify.autoConnect} onchange={(e) => set("spotify", { ...$state.snapshot(s.spotify), autoConnect: e.currentTarget.checked })} /> Reconnect automatically</label>
-          <span class="l">Client ID</span>
-          <span class="col"><input type="text" placeholder="(default)" value={s.spotify.clientId} onchange={(e) => set("spotify", { ...$state.snapshot(s.spotify), clientId: e.currentTarget.value.trim() })} />
-            <span class="faint small">Optional: your own Spotify app's client ID (redirect URI http://127.0.0.1:8898/login).</span></span>
+          <span class="l">Search app</span>
+          <span class="col">
+            <input type="text" placeholder="Shared (default)" value={s.spotify.clientId}
+              onchange={(e) => set("spotify", { ...$state.snapshot(s.spotify), clientId: e.currentTarget.value.trim() })} />
+            <span class="faint small">
+              Search and your playlists use a client ID shared by many apps, which Spotify rate-limits. If you get
+              “Spotify is limiting requests”, enter the client ID of your own app from
+              developer.spotify.com (Dashboard → Create app, with redirect URI <code>http://127.0.0.1:8898/login</code>
+              and the Web API). Playback keeps using your normal sign-in.
+            </span>
+            {#if app.spotify?.ownWebApp}
+              {#if app.spotify.webApi}
+                <span class="small">Search uses your app.</span>
+              {:else}
+                <span><button class="primary" onclick={() => app.run(api.spotifyWebLogin())}>Sign In for Search…</button></span>
+              {/if}
+            {/if}
+          </span>
         </div>
 
       {:else if tab === "projector"}

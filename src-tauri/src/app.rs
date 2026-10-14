@@ -95,6 +95,7 @@ impl App {
         let store = Arc::new(Store::open(&library_dir, &data_dir)?);
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build()?;
         let spotify = Arc::new(Spotify::new(rt.handle().clone(), data_dir.join("spotify")));
+        spotify.set_web_client_id(&crate::commands::spotify_web_client_id(&settings));
         let stems = crate::stems::Stems::new(&data_dir);
         let levels = Arc::new(Levels::default());
         let rate = Arc::new(AtomicU32::new(48000));
@@ -201,6 +202,7 @@ impl App {
             self.buffer_ms.store(new.audio.buffer_ms, Ordering::Relaxed);
             self.apply_outputs();
         }
+        self.spotify.set_web_client_id(&crate::commands::spotify_web_client_id(&new));
         if old.keylock != new.keylock {
             for d in &self.decks {
                 d.set_keylock(new.keylock);

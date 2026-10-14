@@ -963,8 +963,9 @@ pub async fn spotify_status(app: S<'_>) -> Res<SpotifyStatus> {
     Ok(app.spotify.status())
 }
 
-fn spotify_client_id(app: &App) -> String {
-    let id = app.settings.read().spotify.client_id.clone();
+/// Your own Spotify app's client id for search and playlists ("" = the shared one).
+pub fn spotify_web_client_id(settings: &crate::settings::Settings) -> String {
+    let id = settings.spotify.client_id.trim().to_string();
     if !id.is_empty() {
         return id;
     }
@@ -976,8 +977,20 @@ pub async fn spotify_login(app: S<'_>) -> Res<SpotifyStatus> {
     let a = app.inner().clone();
     crate::app::emit(&app.handle, "spotify-status", SpotifyStatus { connecting: true, ..app.spotify.status() });
     let r = blocking(move || {
-        let cid = spotify_client_id(&a);
-        a.spotify.login(&cid)?;
+        a.spotify.login()?;
+        Ok(a.spotify.status())
+    })
+    .await;
+    crate::app::emit(&app.handle, "spotify-status", app.spotify.status());
+    r
+}
+
+/// Sign-in with your own Spotify app, for search and playlists.
+#[tauri::command]
+pub async fn spotify_web_login(app: S<'_>) -> Res<SpotifyStatus> {
+    let a = app.inner().clone();
+    let r = blocking(move || {
+        a.spotify.web_login()?;
         Ok(a.spotify.status())
     })
     .await;
@@ -989,8 +1002,7 @@ pub async fn spotify_login(app: S<'_>) -> Res<SpotifyStatus> {
 pub async fn spotify_connect_cached(app: S<'_>) -> Res<SpotifyStatus> {
     let a = app.inner().clone();
     let r = blocking(move || {
-        let cid = spotify_client_id(&a);
-        a.spotify.connect_cached(&cid)?;
+        a.spotify.connect_cached()?;
         Ok(a.spotify.status())
     })
     .await;

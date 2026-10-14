@@ -136,6 +136,8 @@ export const api = {
   // Spotify
   spotifyStatus: () => call<T.SpotifyStatus>("spotify_status"),
   spotifyLogin: () => call<T.SpotifyStatus>("spotify_login"),
+  /** Sign-in with your own Spotify app, for search and playlists. */
+  spotifyWebLogin: () => call<T.SpotifyStatus>("spotify_web_login"),
   spotifyConnectCached: () => call<T.SpotifyStatus>("spotify_connect_cached"),
   spotifyLogout: () => call<void>("spotify_logout"),
   spotifySearch: (query: string) => call<T.SpotifyTrack[]>("spotify_search", { query }),
