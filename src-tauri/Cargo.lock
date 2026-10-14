@@ -3852,6 +3852,7 @@ dependencies = [
  "rayon",
  "reqwest 0.12.28",
  "rtrb",
+ "rubberband",
  "rustfft",
  "serde",
  "serde_json",
@@ -4780,6 +4781,26 @@ dependencies = [
  "num-integer",
  "num-traits",
  "realfft",
+]
+
+[[package]]
+name = "rubberband"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f92d33defb2bf866abfa97591a33ce58c2159d461661e13c78633c74bb3a7874"
+dependencies = [
+ "bitflags 2.13.2",
+ "rubberband-sys",
+]
+
+[[package]]
+name = "rubberband-sys"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f5da3be376569632abdaa5d772cf0bfe2d80d618c61072df0cbde38e215044e"
+dependencies = [
+ "bindgen 0.71.1",
+ "cc",
 ]
 
 [[package]]

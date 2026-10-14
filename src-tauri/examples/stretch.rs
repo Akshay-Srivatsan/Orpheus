@@ -12,7 +12,7 @@ fn main() -> anyhow::Result<()> {
     let mut input = vec![];
     while input.len() < (len * rate as f64) as usize * 2 && src.read(&mut input)? {}
     input.truncate((len * rate as f64) as usize * 2);
-    for engine in [Engine::Signalsmith, Engine::SoundTouch, Engine::Bungee] {
+    for engine in [Engine::Signalsmith, Engine::SoundTouch, Engine::Bungee, Engine::RubberBand] {
         let mut s = create(engine, rate);
         s.set_pitch(1.0);
         let ratio = 1.0 / tempo;

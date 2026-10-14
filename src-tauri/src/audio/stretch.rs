@@ -5,6 +5,7 @@
 //! - **SoundTouch**: time-domain (WSOLA); keeps attacks and rhythm crisp, often
 //!   better for larger slow-downs of rhythmic music.
 //! - **Bungee**: modern granular phase vocoder; clean across a wide range.
+//! - **Rubber Band** (R3 engine): high quality, the most CPU.
 //!
 //! All take stereo interleaved input at the source rate and produce output at
 //! the deck rate: the deck passes the frequency factor (`set_pitch`) that also
@@ -19,6 +20,7 @@ pub enum Engine {
     Signalsmith,
     SoundTouch,
     Bungee,
+    RubberBand,
 }
 
 impl Engine {
@@ -26,6 +28,7 @@ impl Engine {
         match s {
             "soundtouch" => Engine::SoundTouch,
             "bungee" => Engine::Bungee,
+            "rubberband" => Engine::RubberBand,
             _ => Engine::Signalsmith,
         }
     }
@@ -49,6 +52,7 @@ pub fn create(engine: Engine, src_rate: u32) -> Box<dyn TimeStretch> {
     match engine {
         Engine::Signalsmith => Box::new(Signalsmith { s: signalsmith_stretch::Stretch::preset_default(2, src_rate) }),
         Engine::SoundTouch => Box::new(Fifo::new(SoundTouchEngine::new(src_rate))),
+        Engine::RubberBand => Box::new(Fifo::new(RubberBandEngine::new(src_rate))),
         Engine::Bungee => match BungeeEngine::new(src_rate) {
             Some(b) => Box::new(Fifo::new(b)),
             None => {
@@ -284,6 +288,89 @@ impl PushEngine for BungeeEngine {
     }
 }
 
+// ---------------------------------------------------------------- Rubber Band
+
+struct RubberBandEngine {
+    rb: rubberband::Stretcher,
+    rate: u32,
+    /// Output frames still to drop: the engine's start delay.
+    skip: usize,
+    started: bool,
+    planar: [Vec<f32>; 2],
+    out: [Vec<f32>; 2],
+}
+
+impl RubberBandEngine {
+    fn new(src_rate: u32) -> Self {
+        use rubberband::Options as O;
+        let opts = O::PROCESS_REALTIME | O::ENGINE_FINER | O::PITCH_HIGH_CONSISTENCY | O::CHANNELS_TOGETHER | O::THREADING_NEVER;
+        let rb = rubberband::Stretcher::new(src_rate, 2, opts, 1.0, 1.0);
+        Self { rb, rate: src_rate, skip: 0, started: false, planar: Default::default(), out: Default::default() }
+    }
+
+    fn feed(&mut self, frames: &[f32], last: bool) {
+        for (c, ch) in self.planar.iter_mut().enumerate() {
+            ch.clear();
+            ch.extend(frames.chunks_exact(2).map(|f| f[c]));
+        }
+        self.rb.process(&[&self.planar[0], &self.planar[1]], last);
+    }
+
+    fn collect(&mut self, out: &mut Vec<f32>) {
+        while let Some(n) = self.rb.available().filter(|&n| n > 0) {
+            let n = n as usize;
+            for ch in self.out.iter_mut() {
+                ch.resize(n, 0.0);
+            }
+            let [l, r] = &mut self.out;
+            let got = self.rb.retrieve(&mut [&mut l[..], &mut r[..]]) as usize;
+            for i in 0..got {
+                if self.skip > 0 {
+                    self.skip -= 1;
+                    continue;
+                }
+                out.push(self.out[0][i]);
+                out.push(self.out[1][i]);
+            }
+            if got == 0 {
+                break;
+            }
+        }
+    }
+}
+
+impl PushEngine for RubberBandEngine {
+    fn push(&mut self, input: &[f32], ratio: f64, pitch: f64, out: &mut Vec<f32>) {
+        self.rb.set_time_ratio(ratio);
+        self.rb.set_pitch_scale(pitch);
+        if !self.started {
+            // Start cleanly: pad with silence, then drop the engine's delay.
+            self.started = true;
+            let pad = self.rb.preferred_start_pad() as usize;
+            self.skip = self.rb.start_delay() as usize;
+            if pad > 0 {
+                self.feed(&vec![0.0; pad * 2], false);
+            }
+        }
+        for chunk in input.chunks(self.rb.process_size_limit().max(256) as usize * 2) {
+            self.feed(chunk, false);
+            self.collect(out);
+        }
+    }
+    fn drain(&mut self, ratio: f64, pitch: f64, out: &mut Vec<f32>) {
+        self.rb.set_time_ratio(ratio);
+        self.rb.set_pitch_scale(pitch);
+        self.feed(&[], true);
+        self.collect(out);
+    }
+    fn reset(&mut self) {
+        self.rb.reset();
+        self.started = false;
+        self.skip = 0;
+        let _ = self.rate;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,7 +386,7 @@ mod tests {
                 [v, v]
             })
             .collect();
-        for engine in [Engine::Signalsmith, Engine::SoundTouch, Engine::Bungee] {
+        for engine in [Engine::Signalsmith, Engine::SoundTouch, Engine::Bungee, Engine::RubberBand] {
             let mut s = create(engine, sr as u32);
             s.set_pitch(1.0);
             let ratio = 1.0 / 0.8; // slow down to 80 %

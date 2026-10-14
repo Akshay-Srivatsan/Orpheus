@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { clubStyle, clubTargets, entryLabel, projStyle, showStyles } from "./styles";
 import type { Profile, StyleLibrary, Version } from "./types";
 
-const profileModules = import.meta.glob("../../examples/clubs/*.json", { eager: true, import: "default" });
+// Example clubs, plus the built-in "No club" profile.
+const profileModules = import.meta.glob(["../../examples/clubs/*.json", "../../src-tauri/profiles/*.json"], { eager: true, import: "default" });
 const builtin = (id: string) =>
   structuredClone(Object.entries(profileModules).find(([p]) => p.endsWith(`/${id}.json`))![1]) as Profile;
 

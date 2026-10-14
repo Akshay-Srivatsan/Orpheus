@@ -578,7 +578,8 @@ impl App {
             title: vt.map(|(_, t)| t.rec.title.clone()).unwrap_or_default(),
             artist: vt.map(|(_, t)| t.rec.artist.clone()).unwrap_or_default(),
             styles,
-            label: e.label.clone(),
+            // Entry label, else the version's display name (e.g. a line dance's name).
+            label: e.label.clone().or_else(|| vt.and_then(|(v, _)| v.display_name.clone())),
             tags: e
                 .tags
                 .iter()
