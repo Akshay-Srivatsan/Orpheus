@@ -117,6 +117,12 @@ pub struct Settings {
     pub trim_silence: bool,
     /// Require pressing Play Next twice when a song is still playing.
     pub confirm_next_while_playing: bool,
+    /// Load the up-next song onto the free deck automatically.
+    pub auto_load_next: bool,
+    /// While the on-air deck is playing, ignore jog scrubbing, CUE and jumps on it.
+    pub protect_on_air: bool,
+    /// When a deck goes on air, switch headphone cueing to the other deck.
+    pub headphones_follow_free_deck: bool,
     pub projector: ProjectorSettings,
     pub midi: MidiSettings,
     pub spotify: SpotifySettings,
@@ -139,6 +145,9 @@ impl Default for Settings {
             target_loudness_db: -14.0,
             trim_silence: true,
             confirm_next_while_playing: true,
+            auto_load_next: true,
+            protect_on_air: true,
+            headphones_follow_free_deck: true,
             projector: ProjectorSettings::default(),
             midi: MidiSettings::default(),
             spotify: SpotifySettings { client_id: String::new(), auto_connect: true },

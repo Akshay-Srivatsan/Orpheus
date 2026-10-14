@@ -59,11 +59,13 @@ pub struct TapRing {
     pub frac: f64,
     pub prev: [f32; 2],
     pub cur: [f32; 2],
+    /// Smoothed routing gain (avoids clicks when a deck goes on/off air).
+    pub gain: f32,
 }
 
 impl TapRing {
     pub fn new(consumer: rtrb::Consumer<f32>) -> Self {
-        Self { consumer, ramp: 0.0, frac: 1.0, prev: [0.0; 2], cur: [0.0; 2] }
+        Self { consumer, ramp: 0.0, frac: 1.0, prev: [0.0; 2], cur: [0.0; 2], gain: 0.0 }
     }
 }
 

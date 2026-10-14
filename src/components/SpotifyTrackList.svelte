@@ -2,7 +2,7 @@
   // Spotify search / playlist results. Previewing or adding a song to the set
   // does NOT add it to the library; use the + button for that.
   import { api } from "../lib/api";
-  import { addToSet, app, spotifyVersions } from "../lib/state.svelte";
+  import { addToSet, app, audition, spotifyVersions } from "../lib/state.svelte";
   import { fmtTime } from "../lib/tempo";
   import type { Id, SpotifyTrack } from "../lib/types";
   import Icon from "./Icon.svelte";
@@ -20,7 +20,7 @@
 
   async function preview(t: SpotifyTrack) {
     const [v] = await spotifyVersions([t], false);
-    if (v) app.run(api.previewLoad(v, { play: true }));
+    if (v) await audition(v);
   }
 
   async function toSet(t: SpotifyTrack, where: "next" | "end") {

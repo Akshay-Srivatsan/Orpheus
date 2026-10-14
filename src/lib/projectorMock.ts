@@ -107,6 +107,7 @@ export function mockPayload(p: URLSearchParams): ProjectorPayload {
       inGap: false,
       playing: false,
       message: p.get("message"),
+      liveDeck: 0,
     };
   }
   const currentIndex = gap ? cur - 1 : cur;
@@ -129,6 +130,7 @@ export function mockPayload(p: URLSearchParams): ProjectorPayload {
     inGap: gap,
     playing: !gap,
     message: p.get("message"),
+    liveDeck: 0,
   };
 }
 
@@ -144,6 +146,8 @@ export function mockDeck(): DeckState {
     startMs: 230,
     endMs: 163530,
     fadeAtMs: null,
+    cueMs: 230,
+    onAir: true,
     fading: false,
     tempo: 1,
     keylock: true,

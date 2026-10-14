@@ -1,7 +1,7 @@
 //! Tauri commands (the UI's API). Slow work runs on its own thread so the UI
 //! and the main thread never block.
 
-use crate::app::{App, PerformState, ProjectorPayload, MAIN};
+use crate::app::{App, PerformState, ProjectorPayload};
 use crate::audio::output::OutputStatus;
 use crate::audio::DeckSnapshot;
 use crate::store::NewTrack;
@@ -499,53 +499,42 @@ pub async fn deck_states(app: S<'_>) -> Res<[DeckSnapshot; 2]> {
     Ok(app.deck_snapshots())
 }
 
+/// Loads a version onto a deck (paused unless `play`). Refused for the deck
+/// the room is hearing.
 #[tauri::command]
-pub async fn preview_load(app: S<'_>, version_id: Id, entry_id: Option<Id>, play: bool) -> Res<()> {
+pub async fn deck_load(app: S<'_>, deck: usize, version_id: Id, entry_id: Option<Id>, play: bool) -> Res<()> {
     let a = app.inner().clone();
-    blocking(move || a.preview_load(&version_id, entry_id.as_deref(), play)).await
+    blocking(move || a.deck_load(deck.min(1), &version_id, entry_id.as_deref(), play)).await
 }
 
-/// Transport actions: `play`, `pause`, `toggle`, `fadeOut`, `cancelFade`, `stop`.
+/// Transport actions: `toggle`, `play`, `pause`, `fadeOut`, `cancelFade`, `stop`, `unload`.
 #[tauri::command]
 pub async fn deck_action(app: S<'_>, deck: usize, action: String) -> Res<()> {
-    let d = &app.decks[deck.min(1)];
+    let deck = deck.min(1);
+    let d = &app.decks[deck];
     match action.as_str() {
+        "toggle" => app.deck_play_pause(deck),
         "play" => {
-            if deck == MAIN && matches!(d.status().as_str(), "empty" | "ended" | "error") {
-                app.play_next().map_err(ae)?;
-            } else {
-                d.play();
+            if d.status() != "playing" {
+                app.deck_play_pause(deck)
             }
         }
         "pause" => d.pause(),
-        "toggle" => {
-            if deck == MAIN && matches!(d.status().as_str(), "empty" | "ended" | "error") {
-                app.play_next().map_err(ae)?;
-            } else {
-                d.toggle();
-            }
-        }
-        "fadeOut" => {
-            if deck == MAIN {
-                app.main_fade_out()
-            } else {
-                d.fade_out(1.5)
-            }
-        }
+        "fadeOut" => d.fade_out(if app.audible(deck) { app.fade_secs() } else { 1.0 }),
         "cancelFade" => {
             d.cancel_fade();
             app.perform.lock().pending = None;
         }
         "stop" => {
-            if deck == MAIN && d.status() == "playing" {
-                return Err("Fade out or pause the main deck first".into());
+            if app.protected(deck) {
+                return Err("Fade out or pause the on-air deck first".into());
             }
             d.pause();
-            d.seek(d.snapshot().start_ms as f64 / 1000.0);
+            d.seek(d.cue_secs());
         }
         "unload" => {
-            if deck == MAIN && d.status() == "playing" {
-                return Err("The main deck is playing".into());
+            if app.audible(deck) {
+                return Err("This deck is on air".into());
             }
             d.unload();
         }
@@ -555,10 +544,57 @@ pub async fn deck_action(app: S<'_>, deck: usize, action: String) -> Res<()> {
     Ok(())
 }
 
+/// CUE button (press / release).
+#[tauri::command]
+pub async fn deck_cue(app: S<'_>, deck: usize, down: bool) -> Res<()> {
+    app.deck_cue(deck.min(1), down);
+    Ok(())
+}
+
+/// Hot cue pad: `trigger` (jump if set, else set here) or `clear`.
+#[tauri::command]
+pub async fn deck_hotcue(app: S<'_>, deck: usize, slot: u8, action: String) -> Res<()> {
+    let deck = deck.min(1);
+    match action.as_str() {
+        "clear" => app.deck_hotcue_clear(deck, slot),
+        _ => app.deck_hotcue(deck, slot),
+    }
+    .map_err(ae)
+}
+
+/// Relative jump in seconds (negative = back).
+#[tauri::command]
+pub async fn deck_jump(app: S<'_>, deck: usize, secs: f64) -> Res<()> {
+    app.deck_nudge_position(deck.min(1), secs).map_err(ae)
+}
+
+/// Scrub to a position (waveform drag); plays snippets when paused.
+#[tauri::command]
+pub async fn deck_scrub(app: S<'_>, deck: usize, ms: f64) -> Res<()> {
+    app.deck_scrub_to(deck.min(1), ms / 1000.0).map_err(ae)
+}
+
+/// Seek without protection checks beyond the UI's own (click on waveform).
 #[tauri::command]
 pub async fn deck_seek(app: S<'_>, deck: usize, ms: i64) -> Res<()> {
-    app.decks[deck.min(1)].seek(ms as f64 / 1000.0);
+    let deck = deck.min(1);
+    if app.protected(deck) {
+        return Err("Seeking is disabled on the on-air deck while it plays (Settings → General)".into());
+    }
+    app.decks[deck].seek(ms as f64 / 1000.0);
     Ok(())
+}
+
+#[tauri::command]
+pub async fn deck_go_live(app: S<'_>, deck: usize) -> Res<String> {
+    let a = app.inner().clone();
+    blocking(move || a.go_live(deck.min(1))).await
+}
+
+/// Sets the loaded version's `start`, `end` or `fade` point here, or `clear`s them.
+#[tauri::command]
+pub async fn deck_set_point(app: S<'_>, deck: usize, kind: String) -> Res<()> {
+    app.deck_set_point(deck.min(1), &kind).map_err(ae)
 }
 
 #[tauri::command]
@@ -571,15 +607,17 @@ pub async fn deck_set(
     fade_at_ms: Option<i64>,
     clear_fade_at: Option<bool>,
 ) -> Res<()> {
-    let d = &app.decks[deck.min(1)];
+    let deck = deck.min(1);
+    let d = &app.decks[deck];
     if let Some(t) = tempo {
         d.set_tempo(t);
+        app.untake(&[&format!("deck{deck}.tempo")]);
     }
     if let Some(g) = trim_db {
         d.set_trim_db(g);
     }
     if let Some(p) = pfl {
-        d.set_pfl(p);
+        app.deck_set_pfl(deck, p);
     }
     if let Some(f) = fade_at_ms {
         d.set_fade_at(Some(f as f64 / 1000.0));
@@ -590,12 +628,23 @@ pub async fn deck_set(
 }
 
 #[tauri::command]
-pub async fn levels_set(app: S<'_>, master: Option<f32>, cue: Option<f32>) -> Res<()> {
+pub async fn deck_tempo_reset(app: S<'_>, deck: usize) -> Res<()> {
+    app.deck_tempo_reset(deck.min(1));
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn levels_set(app: S<'_>, master: Option<f32>, cue: Option<f32>, crossfader: Option<f64>) -> Res<()> {
     if let Some(m) = master {
         app.levels.master.set(m.clamp(0.0, 1.5));
     }
     if let Some(c) = cue {
         app.levels.cue.set(c.clamp(0.0, 1.5));
+    }
+    if let Some(x) = crossfader {
+        app.set_crossfader(x);
+        app.untake(&["cue.crossfader"]);
+        app.emit_perform();
     }
     Ok(())
 }
@@ -644,7 +693,9 @@ pub async fn perform_cancel_pending(app: S<'_>) -> Res<()> {
         p.pending = None;
         p.armed_until = None;
     }
-    app.decks[MAIN].cancel_fade();
+    for d in &app.decks {
+        d.cancel_fade();
+    }
     app.emit_perform();
     Ok(())
 }
@@ -813,8 +864,8 @@ pub async fn midi_info(app: S<'_>) -> Res<MidiInfo> {
         Ok(MidiInfo {
             ports: a.midi.get().map(|m| m.ports()).unwrap_or_default(),
             mappings: a.all_mappings_with(&s),
-            actions: crate::midi::ACTIONS.iter().map(|(a, b, c)| (a.to_string(), b.to_string(), c.to_string())).collect(),
-            led_states: crate::midi::LED_STATES.iter().map(|s| s.to_string()).collect(),
+            actions: crate::midi::actions(),
+            led_states: crate::midi::led_states(),
         })
     })
     .await

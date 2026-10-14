@@ -110,6 +110,15 @@ pub struct VersionPatch {
     pub tags: Option<Vec<String>>,
 }
 
+/// A saved cue point (hot cue) on a track; shared by all its versions.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HotCue {
+    /// 1-based pad number.
+    pub slot: u8,
+    pub ms: i64,
+}
+
 /// A track as stored in `tracks/<id>.json`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
@@ -154,6 +163,8 @@ pub struct TrackRecord {
     pub added_at: i64,
     pub sources: Vec<SourceRef>,
     pub versions: Vec<Version>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hot_cues: Vec<HotCue>,
     /// IDs of tracks merged into this one (keeps history references valid).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<Id>,

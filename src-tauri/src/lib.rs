@@ -4,11 +4,13 @@ pub mod analysis;
 pub mod app;
 pub mod audio;
 pub mod commands;
+pub mod controls;
 pub mod store;
 pub mod decode;
 pub mod library;
 pub mod midi;
 pub mod model;
+pub mod perform;
 pub mod settings;
 pub mod spotify;
 
@@ -88,10 +90,17 @@ pub fn run() {
             commands::audio_reopen,
             commands::audio_test,
             commands::deck_states,
-            commands::preview_load,
+            commands::deck_load,
             commands::deck_action,
+            commands::deck_cue,
+            commands::deck_hotcue,
+            commands::deck_jump,
+            commands::deck_scrub,
             commands::deck_seek,
+            commands::deck_go_live,
+            commands::deck_set_point,
             commands::deck_set,
+            commands::deck_tempo_reset,
             commands::levels_set,
             commands::perform_open,
             commands::perform_state,

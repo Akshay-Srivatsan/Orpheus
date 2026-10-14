@@ -74,10 +74,17 @@ export const api = {
   audioReopen: () => call<T.OutputStatus>("audio_reopen"),
   audioTest: (deck: 0 | 1) => call<void>("audio_test", { deck }),
   deckStates: () => call<[T.DeckState, T.DeckState]>("deck_states"),
-  previewLoad: (versionId: T.Id, opts: { entryId?: T.Id | null; play?: boolean } = {}) =>
-    call<void>("preview_load", { versionId, entryId: opts.entryId ?? null, play: opts.play ?? true }),
+  deckLoad: (deck: 0 | 1, versionId: T.Id, opts: { entryId?: T.Id | null; play?: boolean } = {}) =>
+    call<void>("deck_load", { deck, versionId, entryId: opts.entryId ?? null, play: opts.play ?? false }),
   deckAction: (deck: 0 | 1, action: "play" | "pause" | "toggle" | "fadeOut" | "cancelFade" | "stop" | "unload") =>
     call<void>("deck_action", { deck, action }),
+  deckCue: (deck: 0 | 1, down: boolean) => call<void>("deck_cue", { deck, down }),
+  deckHotcue: (deck: 0 | 1, slot: number, action: "trigger" | "clear") => call<void>("deck_hotcue", { deck, slot, action }),
+  deckJump: (deck: 0 | 1, secs: number) => call<void>("deck_jump", { deck, secs }),
+  deckScrub: (deck: 0 | 1, ms: number) => call<void>("deck_scrub", { deck, ms }),
+  deckGoLive: (deck: 0 | 1) => call<string>("deck_go_live", { deck }),
+  deckSetPoint: (deck: 0 | 1, kind: "start" | "end" | "fade" | "clear") => call<void>("deck_set_point", { deck, kind }),
+  deckTempoReset: (deck: 0 | 1) => call<void>("deck_tempo_reset", { deck }),
   deckSeek: (deck: 0 | 1, ms: number) => call<void>("deck_seek", { deck, ms: Math.round(ms) }),
   deckSet: (deck: 0 | 1, o: { tempo?: number; trimDb?: number; pfl?: boolean; fadeAtMs?: number | null }) =>
     call<void>("deck_set", {
@@ -88,7 +95,8 @@ export const api = {
       fadeAtMs: o.fadeAtMs ?? null,
       clearFadeAt: "fadeAtMs" in o && o.fadeAtMs === null,
     }),
-  setLevels: (o: { master?: number; cue?: number }) => call<void>("levels_set", { master: o.master ?? null, cue: o.cue ?? null }),
+  setLevels: (o: { master?: number; cue?: number; crossfader?: number }) =>
+    call<void>("levels_set", { master: o.master ?? null, cue: o.cue ?? null, crossfader: o.crossfader ?? null }),
 
   // performance
   performOpen: (setlistId: T.Id | null) => call<T.PerformState>("perform_open", { setlistId }),
@@ -139,7 +147,8 @@ export interface Events {
   "scan-progress": T.ScanProgress;
   "spotify-status": T.SpotifyStatus;
   "output-status": T.OutputStatus;
-  "midi-ui": { action: string; delta?: number };
+  "midi-ui": { action: string; delta?: number; deck?: 0 | 1 };
+  "toast-info": string;
   toast: string;
   imported: T.Id[];
 }

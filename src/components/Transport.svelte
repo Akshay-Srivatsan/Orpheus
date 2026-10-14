@@ -14,8 +14,10 @@
   });
 
   const p = $derived(app.perform);
-  const main = $derived(app.decks[0]);
-  const playing = $derived(main.status === "playing" || main.status === "loading");
+  /** Something is audible in the room. */
+  const playing = $derived(app.decks.some((d) => d.onAir && (d.status === "playing" || d.status === "loading")));
+  const nextDeck = $derived(app.decks.find((d) => d.entryId && d.entryId === p?.nextEntryId));
+  const xf = $derived(p?.crossfader ?? 0);
   const next = $derived(app.entryRow(p?.nextEntryId));
   const nextStyle = $derived(next ? styleOf(next.row?.version, next.entry) : null);
   const nextPb = $derived(next?.row ? playback(next.row.track, next.row.version, next.entry, app.profile) : null);
@@ -44,7 +46,7 @@
     class:live={playing}
     disabled={!next || (!next.row && !playing)}
     onclick={playNext}
-    title="Play the next song ({MOD}Enter). Songs never overlap: a playing song is faded out first."
+    title="Play the next song on the free deck ({MOD}Enter). A playing song is faded out first."
   >
     <Icon name="next" size={20} />
     <span>{label}</span>
@@ -74,14 +76,22 @@
       <div class="un-style"><StyleBadge style={nextStyle} big /></div>
       {#if next.row}
         <div class="un-title" title={next.row.track.title}>{next.row.track.title}</div>
-        <div class="un-artist dim">{next.row.track.artist}</div>
-        {#if nextPb?.target}<div class="dim small num">{fmtBpm(nextPb.target)} BPM</div>{/if}
+        <div class="un-artist dim small num">
+          {next.row.track.artist}{#if nextPb?.target} · {fmtBpm(nextPb.target)} BPM{/if}{#if nextDeck}<span class="ondeck"> · deck {nextDeck.deck === 0 ? "A" : "B"}</span>{/if}
+        </div>
       {:else}
         <div class="slot">Pick a song for this slot</div>
       {/if}
     {:else}
       <div class="dim small">{app.current ? "End of setlist" : "No setlist open — add songs to start a live set"}</div>
     {/if}
+  </div>
+
+  <div class="xfader" title="Crossfader: which deck the room hears. Play Next and Go Live move it for you.">
+    <span class="xl" class:on={xf < 0.5}>A</span>
+    <input type="range" min="0" max="1" step="0.01" value={xf} aria-label="Crossfader"
+      oninput={(e) => api.setLevels({ crossfader: +e.currentTarget.value })} />
+    <span class="xl" class:on={xf > 0.5}>B</span>
   </div>
 
   <div class="row">
@@ -121,4 +131,9 @@
   .row { flex: none; display: flex; gap: 6px; }
   .row button { flex: 1; }
   button.on { color: var(--teal); border-color: color-mix(in srgb, var(--teal) 50%, transparent); }
+  .ondeck { color: var(--text-faint); }
+  .xfader { flex: none; display: flex; align-items: center; gap: 6px; }
+  .xfader input { flex: 1; min-width: 0; }
+  .xl { font-weight: 800; font-size: var(--fs-sm); color: var(--text-faint); width: 10px; text-align: center; }
+  .xl.on { color: var(--text); }
 </style>

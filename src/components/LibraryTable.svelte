@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api } from "../lib/api";
-  import { addToSet, app } from "../lib/state.svelte";
+  import { addToSet, app, audition, loadDeck } from "../lib/state.svelte";
   import { bpmForStyle, fmtBpm, fmtPct, fmtTime, playback, playedDurationMs, tempoFit } from "../lib/tempo";
   import type { HistoryItem, Id, Row } from "../lib/types";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
@@ -154,11 +154,7 @@
   }
 
   function preview(r: Row) {
-    if (r.track.missing) {
-      app.toast(`"${r.track.title}" has no playable source on this computer.`);
-      return;
-    }
-    app.run(api.previewLoad(r.version.id, { play: true }));
+    audition(r.version.id);
   }
 
   function dragStart(e: DragEvent, r: Row) {
@@ -195,7 +191,8 @@
     if (m.n === lastNav) return;
     lastNav = m.n;
     if (m.action === "browse.scroll") move(m.delta ?? 0);
-    else if (m.action === "browse.loadPreview") { const r = selectedRow(); if (r) preview(r); }
+    else if (m.action === "browse.audition") { const r = selectedRow(); if (r) preview(r); }
+    else if (m.action === "deck.load" && m.deck != null) { const r = selectedRow(); if (r) loadDeck(m.deck, r.version.id); }
     else if (m.action === "browse.queueNext" && app.selected.length) addToSet(app.selected, "next");
     else if (m.action === "browse.queueEnd" && app.selected.length) addToSet(app.selected, "end");
   });
@@ -214,7 +211,9 @@
     if (!selSet.has(r.version.id)) select(e, idx);
     const ids = app.selected.slice();
     const items: MenuItem[] = [
-      { label: "Preview in Headphones", action: () => preview(r) },
+      { label: "Preview in Headphones (free deck)", action: () => preview(r) },
+      { label: "Load onto Deck A", disabled: app.decks[0].onAir && app.decks[0].status === "playing", action: () => loadDeck(0, r.version.id) },
+      { label: "Load onto Deck B", disabled: app.decks[1].onAir && app.decks[1].status === "playing", action: () => loadDeck(1, r.version.id) },
       { label: "Play Next", action: () => addToSet(ids, "next") },
       { label: "Add to End of Set", action: () => addToSet(ids, "end") },
       { separator: true },
@@ -273,8 +272,8 @@
           class:missing={r.track.missing}
           class:suggested={r.suggested}
           title={r.suggested ? `Not labelled ${app.styleName((app.view as { key: string }).key)} yet — its tempo fits` : undefined}
-          class:playing={app.decks[0].versionId === r.version.id && app.decks[0].status === "playing"}
-          class:previewing={app.decks[1].versionId === r.version.id}
+          class:playing={app.decks.some((d) => d.versionId === r.version.id && d.onAir && d.status === "playing")}
+          class:previewing={app.decks.some((d) => d.versionId === r.version.id && !(d.onAir && d.status === "playing"))}
           style:top="{idx * ROW_H}px"
           role="row"
           tabindex="-1"
@@ -305,7 +304,7 @@
             {#if r.playedAt}{new Date(r.playedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}{:else}{r.track.playCount || ""}{/if}
           </span>
           <span class="c actions">
-            <button class="plain icon mini" title="Preview" onclick={(e) => { e.stopPropagation(); preview(r); }}><Icon name="headphones" size={13} /></button>
+            <button class="plain icon mini" title="Preview on the free deck" onclick={(e) => { e.stopPropagation(); preview(r); }}><Icon name="headphones" size={13} /></button>
             <button class="plain icon mini" title="Play next" onclick={(e) => { e.stopPropagation(); addToSet([r.version.id], "next"); }}><Icon name="plus" size={13} /></button>
           </span>
         </div>

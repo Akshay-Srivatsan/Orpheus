@@ -3,99 +3,23 @@
 use crate::audio::output::{OutputConfig, OutputStatus, Outputs};
 use crate::audio::source::{LocalSource, Source, ToneSource};
 use crate::audio::{Deck, DeckEvent, DeckSnapshot, Levels, LoadRequest};
+use crate::settings::ProfileCore;
 use crate::store::Store;
-use crate::midi::{self, Midi, Value};
+use crate::midi::{self, Midi};
 use crate::model::*;
-use crate::settings::{ProfileCore, ProjectorSettings, Settings, BUILTIN_PROFILES};
+use crate::settings::{Settings, BUILTIN_PROFILES};
 use crate::spotify::{Spotify, SpotifySource};
 use anyhow::{anyhow, Result};
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use parking_lot::{Mutex, RwLock};
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
-pub const MAIN: usize = 0;
-pub const PREVIEW: usize = 1;
-
-#[derive(Default)]
-pub struct Perform {
-    pub setlist_id: Option<Id>,
-    /// Epoch ms when the main deck stopped (the pause between songs).
-    pub gap_started: Option<i64>,
-    /// Entry to start once the current fade-out completes.
-    pub pending: Option<PendingNext>,
-    /// "Play Next" was pressed once while a song was playing; press again to confirm.
-    pub armed_until: Option<Instant>,
-    pub auto_advance_override: Option<bool>,
-    pub message: Option<String>,
-}
-
-#[derive(Clone, Debug)]
-pub enum PendingNext {
-    Next,
-    Entry(Id),
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PerformState {
-    pub setlist_id: Option<Id>,
-    pub mode: String,
-    pub current_entry_id: Option<Id>,
-    pub next_entry_id: Option<Id>,
-    pub gap_started_at: Option<i64>,
-    pub gap_seconds: f64,
-    pub auto_advance: bool,
-    pub auto_advance_at: Option<i64>,
-    pub pending_next: bool,
-    pub armed: bool,
-    pub message: Option<String>,
-    pub started_at: Option<i64>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjTag {
-    pub id: String,
-    pub name: String,
-    pub color: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjEntry {
-    pub id: Id,
-    pub title: String,
-    pub artist: String,
-    pub style: Option<String>,
-    pub style_name: String,
-    pub style_short: String,
-    pub color: String,
-    pub tags: Vec<ProjTag>,
-    pub status: String,
-    pub bpm: Option<f64>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectorPayload {
-    pub title: String,
-    pub mode: String,
-    pub settings: ProjectorSettings,
-    pub current: Option<ProjEntry>,
-    pub next: Option<ProjEntry>,
-    pub history: Vec<ProjEntry>,
-    pub entries: Vec<ProjEntry>,
-    pub current_index: Option<usize>,
-    pub in_gap: bool,
-    pub playing: bool,
-    pub message: Option<String>,
-}
+pub use crate::perform::{PendingNext, Perform, PerformState, ProjectorPayload};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -104,12 +28,6 @@ pub struct LevelsSnapshot {
     pub cue: f32,
     pub master_volume: f32,
     pub cue_volume: f32,
-}
-
-#[derive(Default)]
-struct Takeover {
-    engaged: HashSet<String>,
-    last_hw: HashMap<String, f64>,
 }
 
 pub struct App {
@@ -128,8 +46,10 @@ pub struct App {
     pub perform: Mutex<Perform>,
     pub scan_progress: Mutex<crate::library::ScanProgress>,
     analysis_tx: Sender<(Id, bool)>,
-    takeover: Mutex<Takeover>,
-    pending_seek: Mutex<Option<f64>>,
+    pub(crate) takeover: Mutex<crate::controls::Takeover>,
+    pub(crate) deck_ctl: Mutex<[crate::controls::DeckControlState; 2]>,
+    /// Pace decks by the headphone output (set when no master device is open).
+    pub clock_cue: Arc<std::sync::atomic::AtomicBool>,
     _rt: tokio::runtime::Runtime,
 }
 
@@ -175,9 +95,10 @@ impl App {
         let rate = Arc::new(AtomicU32::new(48000));
         let buffer_ms = Arc::new(AtomicU32::new(settings.audio.buffer_ms));
         let (deck_tx, deck_rx) = unbounded();
+        let clock_cue = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let decks = [
-            Deck::new(MAIN, rate.clone(), buffer_ms.clone(), deck_tx.clone()),
-            Deck::new(PREVIEW, rate.clone(), buffer_ms.clone(), deck_tx),
+            Deck::new(0, rate.clone(), buffer_ms.clone(), clock_cue.clone(), deck_tx.clone()),
+            Deck::new(1, rate.clone(), buffer_ms.clone(), clock_cue.clone(), deck_tx),
         ];
         for d in &decks {
             d.set_keylock(settings.keylock);
@@ -200,10 +121,14 @@ impl App {
             perform: Mutex::new(Perform::default()),
             scan_progress: Mutex::new(Default::default()),
             analysis_tx,
-            takeover: Mutex::new(Takeover::default()),
-            pending_seek: Mutex::new(None),
+            takeover: Mutex::new(Default::default()),
+            deck_ctl: Mutex::new(Default::default()),
+            clock_cue,
             _rt: rt,
         });
+        // Start with deck A in the room and headphones on deck B.
+        app.decks[1].set_pfl(true);
+        app.update_routing();
         app.apply_outputs();
         app.start_threads(deck_rx, analysis_rx);
         let weak = Arc::downgrade(&app);
@@ -307,7 +232,7 @@ impl App {
             .unwrap_or_default()
     }
 
-    fn active_profile(&self) -> ProfileCore {
+    pub(crate) fn active_profile(&self) -> ProfileCore {
         let sid = self.perform.lock().setlist_id.clone();
         let id = sid
             .and_then(|s| self.store.setlist(&s).ok())
@@ -326,14 +251,14 @@ impl App {
             cue_device: s.cue_device,
             cue_channels: s.cue_channels,
         };
-        let master_taps = vec![self.decks[MAIN].shared.master_tap.clone()];
-        let cue_taps = vec![self.decks[MAIN].shared.cue_tap.clone(), self.decks[PREVIEW].shared.cue_tap.clone()];
+        let master_taps = self.decks.iter().map(|d| d.shared.master_tap.clone()).collect();
+        let cue_taps = self.decks.iter().map(|d| d.shared.cue_tap.clone()).collect();
         let (rate, status) = self.outputs.apply(cfg, master_taps, cue_taps);
-        let changed = self.rate.swap(rate, Ordering::SeqCst) != rate;
+        self.rate.store(rate, Ordering::SeqCst);
+        // Without a room output, let the headphone output pace playback.
+        self.clock_cue.store(status.master.is_none() && status.cue.is_some(), Ordering::SeqCst);
         for d in &self.decks {
-            if changed || true {
-                d.reconfigure();
-            }
+            d.reconfigure();
         }
         emit(&self.handle, "output-status", &status);
     }
@@ -342,7 +267,7 @@ impl App {
         self.outputs.status.lock().clone()
     }
 
-    fn fade_secs(&self) -> f64 {
+    pub(crate) fn fade_secs(&self) -> f64 {
         let s = self.settings.read();
         match s.fade_out_ms {
             Some(ms) => ms as f64 / 1000.0,
@@ -424,16 +349,6 @@ impl App {
         })
     }
 
-    pub fn preview_load(&self, version_id: &str, entry_id: Option<&str>, play: bool) -> Result<()> {
-        let (version, track_id) = self.store.version(version_id)?;
-        let track = self.store.track(&track_id)?;
-        let entry = entry_id.and_then(|id| self.store.entry(id).ok()).map(|(e, _)| e);
-        let req = self.load_request(PREVIEW, &track, &version, entry.as_ref(), play)?;
-        self.untake(&["preview.tempo"]);
-        self.decks[PREVIEW].load(req);
-        Ok(())
-    }
-
     pub fn test_tone(&self, deck: usize) {
         let req = LoadRequest {
             track_id: None,
@@ -448,480 +363,27 @@ impl App {
             gain_db: 0.0,
             play: true,
         };
-        if deck == MAIN && self.decks[MAIN].status() == "playing" {
+        if self.audible(deck) {
             return;
         }
         self.decks[deck].load(req);
-    }
-
-    // ------------------------------------------------------------ performance
-
-    pub fn auto_advance(&self) -> bool {
-        if let Some(v) = self.perform.lock().auto_advance_override {
-            return v;
-        }
-        let s = self.settings.read().auto_advance;
-        s.unwrap_or_else(|| self.active_profile().auto_advance)
-    }
-
-    pub fn gap_seconds(&self) -> f64 {
-        let s = self.settings.read().gap_seconds;
-        s.unwrap_or_else(|| self.active_profile().gap.target_seconds)
-    }
-
-    pub fn open_setlist(&self, id: Option<Id>) -> Result<()> {
-        if let Some(id) = &id {
-            self.store.setlist(id)?;
-        }
-        {
-            let mut p = self.perform.lock();
-            p.setlist_id = id.clone();
-            p.pending = None;
-        }
-        crate::store::write_atomic(&self.local_dir.join("active-setlist"), id.clone().unwrap_or_default().as_bytes())?;
-        self.emit_perform();
-        Ok(())
-    }
-
-    fn entries(&self) -> Vec<SetlistEntry> {
-        let id = self.perform.lock().setlist_id.clone();
-        id.map(|id| self.store.entries(&id)).unwrap_or_default()
-    }
-
-    /// The entry that would play next.
-    pub fn next_entry(&self) -> Option<SetlistEntry> {
-        let entries = self.entries();
-        let current = self.decks[MAIN].entry_id();
-        let cursor = current
-            .and_then(|c| entries.iter().position(|e| e.id == c))
-            .or_else(|| entries.iter().rposition(|e| e.status != "pending"));
-        let after = cursor.map(|c| c + 1).unwrap_or(0);
-        entries[after.min(entries.len())..]
-            .iter()
-            .find(|e| e.status == "pending")
-            .or_else(|| entries.iter().find(|e| e.status == "pending"))
-            .cloned()
-    }
-
-    /// "Play Next": start the next entry. If a song is still playing it is
-    /// faded out first (songs never overlap).
-    pub fn play_next(&self) -> Result<String> {
-        self.request_entry(PendingNext::Next)
-    }
-
-    pub fn play_entry(&self, entry_id: Id) -> Result<String> {
-        self.request_entry(PendingNext::Entry(entry_id))
-    }
-
-    fn request_entry(&self, target: PendingNext) -> Result<String> {
-        let main = &self.decks[MAIN];
-        let status = main.status();
-        if status == "playing" || status == "loading" {
-            if main.is_fading() {
-                self.perform.lock().pending = Some(target);
-                self.emit_perform();
-                return Ok("queued".into());
-            }
-            let confirm = self.settings.read().confirm_next_while_playing;
-            {
-                let mut p = self.perform.lock();
-                let armed = p.armed_until.map(|t| t > Instant::now()).unwrap_or(false);
-                if confirm && !armed {
-                    p.armed_until = Some(Instant::now() + Duration::from_secs(3));
-                    drop(p);
-                    self.emit_perform();
-                    return Ok("armed".into());
-                }
-                p.armed_until = None;
-                p.pending = Some(target);
-            }
-            let ms = self.settings.read().manual_next_fade_ms;
-            main.fade_out(ms as f64 / 1000.0);
-            self.emit_perform();
-            return Ok("fading".into());
-        }
-        let entry = match target {
-            PendingNext::Next => self.next_entry().ok_or_else(|| anyhow!("Nothing left in the setlist"))?,
-            PendingNext::Entry(id) => self.store.entry(&id)?.0,
-        };
-        self.start_entry(&entry)?;
-        Ok("started".into())
-    }
-
-    fn start_entry(&self, entry: &SetlistEntry) -> Result<()> {
-        let version_id = entry.version_id.clone().ok_or_else(|| {
-            let style = entry
-                .style
-                .as_deref()
-                .map(|s| self.active_profile().style_name(s))
-                .unwrap_or_else(|| "this".into());
-            anyhow!("Choose a song for the {style} slot first")
-        })?;
-        let (version, track_id) = self.store.version(&version_id)?;
-        let track = self.store.track(&track_id)?;
-        let req = self.load_request(MAIN, &track, &version, Some(entry), true)?;
-        let tempo = req.tempo;
-        self.finish_current_entry();
-        self.untake(&["main.tempo"]);
-        self.decks[MAIN].load(req);
-        self.store.entry_set_playing(&entry.id)?;
-        let setlist = self.perform.lock().setlist_id.clone();
-        let target = Self::resolve_settings(&version, Some(entry)).target_bpm;
-        let bpm = track.rec.bpm.map(|b| {
-            let base = target.map(|t| fold_bpm(b, t)).unwrap_or(b);
-            (base * tempo * 10.0).round() / 10.0
-        });
-        let style = entry.style.clone().or(version.style.clone());
-        self.store.mark_played(HistoryItem {
-            played_at: now_ms(),
-            track_id: track.rec.id.clone(),
-            version_id: Some(version.id.clone()),
-            style,
-            bpm,
-            setlist_id: setlist.clone(),
-        })?;
-        {
-            let mut p = self.perform.lock();
-            p.gap_started = None;
-            p.pending = None;
-            p.armed_until = None;
-        }
-        if let Some(sid) = setlist {
-            self.emit_setlist(&sid);
-        }
-        emit(&self.handle, "library-changed", vec![track.rec.id.clone()]);
-        self.emit_perform();
-        Ok(())
-    }
-
-    /// Marks the main deck's entry as played.
-    fn finish_current_entry(&self) {
-        if let Some(id) = self.decks[MAIN].entry_id() {
-            if let Ok((e, _)) = self.store.entry(&id) {
-                if e.status == "playing" {
-                    let _ = self.store.entry_update(
-                        &id,
-                        &EntryPatch { status: Some("played".into()), ..Default::default() },
-                    );
-                }
-            }
-        }
-    }
-
-    pub fn skip_next(&self) -> Result<()> {
-        if let Some(e) = self.next_entry() {
-            let (_, sid) = self.store.entry(&e.id)?;
-            self.store.entry_update(&e.id, &EntryPatch { status: Some("skipped".into()), ..Default::default() })?;
-            self.emit_setlist(&sid);
-            self.emit_perform();
-        }
-        Ok(())
-    }
-
-    pub fn main_fade_out(&self) {
-        let secs = self.fade_secs();
-        self.decks[MAIN].fade_out(secs);
-    }
-
-    fn on_deck_event(&self, ev: DeckEvent) {
-        match ev {
-            DeckEvent::Ended { deck: MAIN, entry_id, .. } => {
-                self.finish_current_entry();
-                let _ = entry_id;
-                // Only an explicit "Play Next" during a fade starts the next song;
-                // otherwise we wait in the pause between songs.
-                let pending = self.perform.lock().pending.take();
-                if let Some(t) = pending {
-                    if let Err(e) = self.request_entry(t) {
-                        emit(&self.handle, "toast", format!("{e:#}"));
-                        self.perform.lock().gap_started = Some(now_ms());
-                    }
-                } else {
-                    self.perform.lock().gap_started = Some(now_ms());
-                }
-                let sid = self.perform.lock().setlist_id.clone();
-                if let Some(id) = sid {
-                    self.emit_setlist(&id);
-                }
-                self.emit_perform();
-            }
-            DeckEvent::Error { deck, message, .. } => {
-                let which = if deck == MAIN { "Main deck" } else { "Preview" };
-                emit(&self.handle, "toast", format!("{which}: {message}"));
-                if deck == MAIN {
-                    self.perform.lock().gap_started = Some(now_ms());
-                    self.emit_perform();
-                }
-            }
-            DeckEvent::Loaded { .. } | DeckEvent::Ended { .. } => {}
-        }
-    }
-
-    pub fn perform_state(&self) -> PerformState {
-        let auto = self.auto_advance();
-        let gap_secs = self.gap_seconds();
-        let p = self.perform.lock();
-        let setlist = p.setlist_id.as_ref().and_then(|id| self.store.setlist(id).ok());
-        let mode = setlist.as_ref().map(|s| s.mode.clone()).unwrap_or_else(|| "live".into());
-        let gap = p.gap_started;
-        let pending = p.pending.is_some();
-        let armed = p.armed_until.map(|t| t > Instant::now()).unwrap_or(false);
-        let message = p.message.clone();
-        let setlist_id = p.setlist_id.clone();
-        drop(p);
-        let entries = self.entries();
-        let started_at = entries.iter().filter_map(|e| e.played_at).min();
-        let next = self.next_entry();
-        let next_ready = next.as_ref().map(|e| e.version_id.is_some()).unwrap_or(false);
-        PerformState {
-            setlist_id,
-            mode,
-            current_entry_id: self.decks[MAIN].entry_id(),
-            next_entry_id: next.map(|e| e.id),
-            gap_started_at: gap,
-            gap_seconds: gap_secs,
-            auto_advance: auto,
-            auto_advance_at: if auto && next_ready { gap.map(|g| g + (gap_secs * 1000.0) as i64) } else { None },
-            pending_next: pending,
-            armed,
-            message,
-            started_at,
-        }
-    }
-
-    pub fn emit_perform(&self) {
-        emit(&self.handle, "perform-state", self.perform_state());
-        emit(&self.handle, "projector", self.projector_payload());
-    }
-
-    pub fn emit_setlist(&self, id: &str) {
-        emit(&self.handle, "setlist-changed", id);
-        if self.perform.lock().setlist_id.as_deref() == Some(id) {
-            emit(&self.handle, "projector", self.projector_payload());
-        }
-    }
-
-    fn proj_entry(&self, e: &SetlistEntry, profile: &ProfileCore, lookup: &HashMap<Id, (Version, Track)>) -> ProjEntry {
-        let vt = e.version_id.as_ref().and_then(|id| lookup.get(id));
-        let style_key = e.style.clone().or_else(|| vt.and_then(|(v, _)| v.style.clone()));
-        let st = style_key.as_deref().and_then(|s| profile.style(s));
-        let target = vt.and_then(|(v, _)| Self::resolve_settings(v, Some(e)).target_bpm);
-        ProjEntry {
-            id: e.id.clone(),
-            title: vt.map(|(_, t)| t.rec.title.clone()).unwrap_or_default(),
-            artist: vt.map(|(_, t)| t.rec.artist.clone()).unwrap_or_default(),
-            style_name: style_key.as_deref().map(|s| profile.style_name(s)).unwrap_or_default(),
-            style: style_key,
-            style_short: st.map(|s| s.short.clone()).unwrap_or_default(),
-            color: st.map(|s| s.color.clone()).unwrap_or_else(|| "#9ca3af".into()),
-            tags: e
-                .tags
-                .iter()
-                .filter_map(|tid| profile.tags.iter().find(|t| &t.id == tid && t.announce))
-                .map(|t| ProjTag { id: t.id.clone(), name: t.name.clone(), color: t.color.clone() })
-                .collect(),
-            status: e.status.clone(),
-            bpm: target.or_else(|| vt.and_then(|(_, t)| t.rec.bpm)),
-        }
-    }
-
-    pub fn projector_payload(&self) -> ProjectorPayload {
-        let settings = self.settings.read().projector.clone();
-        let profile = self.active_profile();
-        let (setlist_id, gap, message) = {
-            let p = self.perform.lock();
-            (p.setlist_id.clone(), p.gap_started, p.message.clone())
-        };
-        let setlist = setlist_id.as_ref().and_then(|id| self.store.setlist(id).ok());
-        let entries = self.entries();
-        let ids: HashSet<Id> = entries.iter().filter_map(|e| e.version_id.clone()).collect();
-        let mut lookup: HashMap<Id, (Version, Track)> = HashMap::new();
-        for vid in ids {
-            if let Ok((v, tid)) = self.store.version(&vid) {
-                if let Ok(t) = self.store.track(&tid) {
-                    lookup.insert(vid, (v, t));
-                }
-            }
-        }
-        let proj: Vec<ProjEntry> = entries.iter().map(|e| self.proj_entry(e, &profile, &lookup)).collect();
-        let current_id = self.decks[MAIN].entry_id();
-        let current_index = current_id.as_ref().and_then(|c| entries.iter().position(|e| &e.id == c));
-        let main_status = self.decks[MAIN].status();
-        let playing = main_status == "playing";
-        let current = current_index.map(|i| proj[i].clone()).filter(|_| main_status != "empty");
-        let next = self.next_entry().and_then(|n| proj.iter().find(|p| p.id == n.id).cloned());
-        let mut history: Vec<ProjEntry> = entries
-            .iter()
-            .zip(proj.iter())
-            .filter(|(e, _)| e.status == "played" && Some(&e.id) != current_id.as_ref())
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .take(settings.history_count as usize)
-            .map(|(_, p)| p.clone())
-            .collect();
-        history.retain(|h| !h.title.is_empty() || !h.style_name.is_empty());
-        let mode = match settings.display_mode.as_str() {
-            "live" | "preset" => settings.display_mode.clone(),
-            _ => setlist.as_ref().map(|s| s.mode.clone()).unwrap_or_else(|| "live".into()),
-        };
-        let title = if settings.title.trim().is_empty() {
-            setlist.as_ref().map(|s| s.name.clone()).unwrap_or_else(|| profile.name.clone())
-        } else {
-            settings.title.clone()
-        };
-        ProjectorPayload {
-            title,
-            mode,
-            settings,
-            current,
-            next,
-            history,
-            entries: proj,
-            current_index,
-            in_gap: gap.is_some() && !playing,
-            playing,
-            message,
-        }
     }
 
     pub fn deck_snapshots(&self) -> [DeckSnapshot; 2] {
         [self.decks[0].snapshot(), self.decks[1].snapshot()]
     }
 
-    // ------------------------------------------------------------ MIDI
-
-    fn untake(&self, actions: &[&str]) {
-        let mut t = self.takeover.lock();
-        for a in actions {
-            t.engaged.remove(*a);
-        }
-    }
-
-    /// Soft takeover: a hardware fader only takes control once it reaches the
-    /// current software value, so loading a song with a preset tempo doesn't
-    /// jump to wherever the fader happens to be.
-    fn takeover(&self, action: &str, hw: f64, current: f64) -> bool {
-        let mut t = self.takeover.lock();
-        let prev = t.last_hw.insert(action.to_string(), hw);
-        if t.engaged.contains(action) {
-            return true;
-        }
-        let close = (hw - current).abs() < 0.03;
-        let crossed = prev.map(|p| (p - current).signum() != (hw - current).signum()).unwrap_or(false);
-        if close || crossed {
-            t.engaged.insert(action.to_string());
-            return true;
-        }
-        false
-    }
-
-    pub fn on_midi(&self, action: &str, value: Value) {
-        let range = self.settings.read().tempo_range_pct / 100.0;
-        let tempo_to_hw = |t: f64| ((t - 1.0) / (2.0 * range) + 0.5).clamp(0.0, 1.0);
-        let hw_to_tempo = |v: f64| {
-            let v = if (v - 0.5).abs() < 0.01 { 0.5 } else { v };
-            1.0 + (v - 0.5) * 2.0 * range
-        };
-        let trim_db = |v: f64| if v <= 0.5 { -40.0 + 40.0 * (v / 0.5) } else { 6.0 * (v - 0.5) / 0.5 };
-        let trim_to_hw = |db: f64| if db <= 0.0 { ((db + 40.0) / 40.0 * 0.5).max(0.0) } else { 0.5 + db / 6.0 * 0.5 };
-        let mut result: Result<()> = Ok(());
-        match (action, value) {
-            ("perform.playNext", Value::Press) => result = self.play_next().map(|_| ()),
-            ("perform.skipNext", Value::Press) => result = self.skip_next(),
-            ("perform.toggleAutoAdvance", Value::Press) => {
-                let v = !self.auto_advance();
-                self.perform.lock().auto_advance_override = Some(v);
-                self.emit_perform();
-            }
-            ("main.playPause", Value::Press) => {
-                let d = &self.decks[MAIN];
-                if d.status() == "playing" {
-                    d.pause();
-                } else if d.status() == "paused" {
-                    d.play();
-                } else {
-                    result = self.play_next().map(|_| ());
+    fn on_deck_event(&self, ev: DeckEvent) {
+        match ev {
+            DeckEvent::Ended { deck, .. } => self.on_deck_ended(deck),
+            DeckEvent::Error { deck, message, .. } => {
+                emit(&self.handle, "toast", format!("Deck {}: {message}", crate::perform::deck_name(deck)));
+                if deck == self.live_deck() {
+                    self.perform.lock().gap_started = Some(now_ms());
                 }
                 self.emit_perform();
             }
-            ("main.fadeOut", Value::Press) => self.main_fade_out(),
-            ("main.stop", Value::Press) => {
-                let d = &self.decks[MAIN];
-                if d.status() == "paused" {
-                    d.seek(d.snapshot().start_ms as f64 / 1000.0);
-                }
-            }
-            ("main.tempo", Value::Abs(v)) | ("preview.tempo", Value::Abs(v)) => {
-                let deck = if action.starts_with("main") { MAIN } else { PREVIEW };
-                let cur = tempo_to_hw(self.decks[deck].tempo());
-                if self.takeover(action, v, cur) {
-                    self.decks[deck].set_tempo(hw_to_tempo(v));
-                }
-            }
-            ("main.tempoNudge", Value::Rel(n)) => {
-                let d = &self.decks[MAIN];
-                d.set_tempo(d.tempo() + n as f64 * 0.001);
-                self.untake(&["main.tempo"]);
-            }
-            ("main.tempoReset", Value::Press) => {
-                let d = &self.decks[MAIN];
-                if let (Some(tid), Some(vid)) = (d.track_id(), d.version_id()) {
-                    if let (Ok(t), Ok((v, _))) = (self.store.track(&tid), self.store.version(&vid)) {
-                        let e = d.entry_id().and_then(|id| self.store.entry(&id).ok()).map(|(e, _)| e);
-                        let target = Self::resolve_settings(&v, e.as_ref()).target_bpm;
-                        let tempo = match (target, t.rec.bpm) {
-                            (Some(x), Some(b)) if b > 0.0 => x / fold_bpm(b, x),
-                            _ => 1.0,
-                        };
-                        d.set_tempo(tempo);
-                        self.untake(&["main.tempo"]);
-                    }
-                }
-            }
-            ("main.trim", Value::Abs(v)) | ("preview.trim", Value::Abs(v)) => {
-                let deck = if action.starts_with("main") { MAIN } else { PREVIEW };
-                let cur = trim_to_hw(self.decks[deck].shared.trim_db.get());
-                if self.takeover(action, v, cur) {
-                    self.decks[deck].set_trim_db(trim_db(v));
-                }
-            }
-            ("main.pfl", Value::Press) => {
-                let d = &self.decks[MAIN];
-                d.set_pfl(!d.shared.pfl.load(Ordering::Relaxed));
-            }
-            ("preview.playPause", Value::Press) => self.decks[PREVIEW].toggle(),
-            ("preview.cue", Value::Press) => {
-                let d = &self.decks[PREVIEW];
-                d.seek(d.snapshot().start_ms as f64 / 1000.0);
-            }
-            ("preview.seek", Value::Rel(n)) => {
-                let d = &self.decks[PREVIEW];
-                let mut ps = self.pending_seek.lock();
-                let base = ps.unwrap_or_else(|| d.position_secs());
-                *ps = Some((base + n as f64 * 0.25).max(0.0));
-            }
-            (a, Value::Press) if a.starts_with("preview.jump:") => {
-                if let Ok(frac) = a["preview.jump:".len()..].parse::<f64>() {
-                    let d = &self.decks[PREVIEW];
-                    let snap = d.snapshot();
-                    let end = snap.end_ms.unwrap_or(snap.duration_ms) as f64 / 1000.0;
-                    d.seek(end * frac);
-                }
-            }
-            ("master.volume", Value::Abs(v)) => self.levels.master.set((v * v) as f32),
-            ("cue.volume", Value::Abs(v)) => self.levels.cue.set((v * v) as f32),
-            (a, v) if a.starts_with("browse.") => {
-                let payload = match v {
-                    Value::Rel(n) => serde_json::json!({ "action": a, "delta": n }),
-                    _ => serde_json::json!({ "action": a }),
-                };
-                emit(&self.handle, "midi-ui", payload);
-            }
-            _ => {}
-        }
-        if let Err(e) = result {
-            emit(&self.handle, "toast", format!("{e:#}"));
+            DeckEvent::Loaded { .. } => {}
         }
     }
 
@@ -964,11 +426,15 @@ impl App {
             .spawn(move || {
                 let mut last: Option<String> = None;
                 let mut last_armed = false;
+                let mut tick: u64 = 0;
                 loop {
                     std::thread::sleep(Duration::from_millis(50));
                     let Some(app) = weak.upgrade() else { return };
-                    if let Some(secs) = app.pending_seek.lock().take() {
-                        app.decks[PREVIEW].seek(secs);
+                    tick += 1;
+                    app.apply_pending_seeks();
+                    app.register_audible();
+                    if tick % 5 == 0 {
+                        app.auto_load();
                     }
                     let snaps = app.deck_snapshots();
                     let key = serde_json::to_string(&snaps).unwrap_or_default();
@@ -993,7 +459,8 @@ impl App {
                     if let Some(g) = gap {
                         if !pending && app.auto_advance() && now_ms() - g >= (app.gap_seconds() * 1000.0) as i64 {
                             let ready = app.next_entry().map(|e| e.version_id.is_some()).unwrap_or(false);
-                            if ready && app.decks[MAIN].status() != "playing" {
+                            let busy = (0..2).any(|d| app.audible(d));
+                            if ready && !busy {
                                 if let Err(e) = app.play_next() {
                                     emit(&app.handle, "toast", format!("{e:#}"));
                                     app.perform.lock().gap_started = None;
@@ -1007,17 +474,9 @@ impl App {
                         app.emit_perform();
                     }
                     if let Some(midi) = app.midi.get() {
-                        let main = &snaps[MAIN];
-                        let next_ready = main.status != "playing"
-                            && app.next_entry().map(|e| e.version_id.is_some()).unwrap_or(false);
-                        let mut st = HashMap::new();
-                        st.insert("main.playing", main.status == "playing");
-                        st.insert("main.fading", main.fading);
-                        st.insert("main.pfl", main.pfl);
-                        st.insert("preview.playing", snaps[PREVIEW].status == "playing");
-                        st.insert("perform.nextReady", next_ready && (now_ms() / 500) % 2 == 0);
-                        st.insert("perform.autoAdvance", app.auto_advance());
-                        midi.set_leds(&st);
+                        if tick % 2 == 0 {
+                            midi.set_leds(&app.led_states());
+                        }
                     }
                 }
             })

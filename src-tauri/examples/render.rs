@@ -13,7 +13,8 @@ fn main() -> anyhow::Result<()> {
     let out_rate: u32 = a[3].parse()?;
     let rate = Arc::new(AtomicU32::new(out_rate));
     let (tx, rx) = crossbeam_channel::unbounded();
-    let deck = Deck::new(0, rate, Arc::new(AtomicU32::new(80)), tx);
+    let deck = Deck::new(0, rate, Arc::new(AtomicU32::new(80)), Arc::new(std::sync::atomic::AtomicBool::new(false)), tx);
+    deck.shared.master_tap.gain.set(1.0);
     let p2 = path.clone();
     deck.load(LoadRequest {
         track_id: None, version_id: None, entry_id: None,

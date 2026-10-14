@@ -57,6 +57,8 @@ export interface Track {
   sources: SourceRef[];
   versions: Version[];
   aliases?: Id[];
+  /** Saved cue points (pads 1–4), shared by all versions. */
+  hotCues?: { slot: number; ms: number }[];
   /** false = used only in setlists (e.g. a Spotify song added straight to a set). Absent = true. */
   inLibrary?: boolean;
   /** Paths of this track's files on this machine. */
@@ -246,7 +248,7 @@ export interface MidiControl {
   status: number;
   data1: number;
   action: string;
-  kind: "button" | "absolute" | "relative";
+  kind: "button" | "hold" | "absolute" | "relative";
   invert?: boolean;
 }
 
@@ -284,6 +286,12 @@ export interface Settings {
   targetLoudnessDb: number;
   trimSilence: boolean;
   confirmNextWhilePlaying: boolean;
+  /** Load the up-next song onto the free deck automatically. */
+  autoLoadNext: boolean;
+  /** Ignore jog / CUE / jumps on the on-air deck while it plays. */
+  protectOnAir: boolean;
+  /** Switch headphones to the free deck when a deck goes on air. */
+  headphonesFollowFreeDeck: boolean;
   projector: ProjectorSettings;
   midi: { enabled: boolean; mappingId: string; customMappings: MidiMapping[] };
   spotify: { clientId: string; autoConnect: boolean };
@@ -304,6 +312,10 @@ export interface DeckState {
   startMs: number;
   endMs: number | null;
   fadeAtMs: number | null;
+  /** Main cue point (CUE button). */
+  cueMs: number;
+  /** The room can hear this deck (crossfader). */
+  onAir: boolean;
   fading: boolean;
   /** Playback rate (1 = original tempo). */
   tempo: number;
@@ -337,6 +349,10 @@ export interface PerformState {
   armed: boolean;
   message: string | null;
   startedAt: number | null;
+  /** 0 = deck A in the room, 1 = deck B. */
+  crossfader: number;
+  /** The deck the room heard last (the current song's deck). */
+  liveDeck: 0 | 1;
 }
 
 export interface ProjTag {
@@ -370,6 +386,8 @@ export interface ProjectorPayload {
   inGap: boolean;
   playing: boolean;
   message: string | null;
+  /** Deck whose position drives the progress bar. */
+  liveDeck: 0 | 1;
 }
 
 export interface ScanProgress {

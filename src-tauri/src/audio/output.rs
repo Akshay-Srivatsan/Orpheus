@@ -319,6 +319,8 @@ where
     let device_rate = sc.sample_rate as f64;
     let mut mix: Vec<f32> = vec![0.0; 8192 * channels];
     let ramp_step = (1.0 / (0.008 * device_rate)) as f32;
+    // One-pole smoothing with a ~5 ms time constant.
+    let gain_step = (1.0 - (-1.0 / (0.005 * device_rate)).exp()) as f32;
     let err_status = status.clone();
     let stream = dev.build_output_stream::<T, _, _>(
         sc.clone(),
@@ -332,7 +334,8 @@ where
             let mut master_peak = 0.0f32;
             let mut cue_peak = 0.0f32;
             for a in &assigns {
-                let vol = if a.cue { levels.cue.get() } else { levels.master.get() } * a.tap.gain.get();
+                let level = if a.cue { levels.cue.get() } else { levels.master.get() };
+                let target_gain = a.tap.gain.get();
                 let playing = a.tap.playing.load(Ordering::Relaxed);
                 let Some(mut guard) = a.tap.ring.try_lock() else { continue };
                 let Some(ring) = guard.as_mut() else { continue };
@@ -364,7 +367,8 @@ where
                         ring.frac += step;
                         v
                     };
-                    let g = vol * ring.ramp;
+                    ring.gain += (target_gain - ring.gain) * gain_step;
+                    let g = level * ring.gain * ring.ramp;
                     let (l, r) = (fr[0] * g, fr[1] * g);
                     let base = f * channels;
                     if a.ch[0] == a.ch[1] {

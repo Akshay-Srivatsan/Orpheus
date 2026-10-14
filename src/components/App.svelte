@@ -88,7 +88,8 @@
       if (e.key === "Escape") (e.target as HTMLElement).blur();
       return;
     }
-    if (e.key === " ") { e.preventDefault(); api.deckAction(1, "toggle"); }
+    // Space plays / pauses the free deck (in headphones), never the room.
+    if (e.key === " ") { e.preventDefault(); api.deckAction(app.freeDeck, "toggle"); }
   }
 </script>
 
@@ -157,7 +158,7 @@
 
 <style>
   .app { display: grid; grid-template-rows: 42px 262px 1fr; height: 100vh; }
-  .decks { display: grid; grid-template-columns: minmax(0, 1.3fr) 250px minmax(0, 1fr); gap: 8px; padding: 8px; min-height: 0; }
+  .decks { display: grid; grid-template-columns: minmax(0, 1fr) 240px minmax(0, 1fr); gap: 8px; padding: 8px; min-height: 0; }
   .decks > :global(*) { min-height: 0; overflow: hidden; }
   .bottom { display: grid; grid-template-columns: 220px minmax(0, 1fr) 380px; min-height: 0; border-top: 1px solid var(--border); }
   .browser { display: flex; flex-direction: column; min-height: 0; min-width: 0; }

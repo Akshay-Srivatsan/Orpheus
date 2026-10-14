@@ -12,7 +12,10 @@
   const animMs = !inTauri && new URLSearchParams(location.search).has("noanim") ? 0 : 400;
 
   let payload = $state<ProjectorPayload | null>(null);
-  let deck = $state<DeckState | null>(null);
+  let decks = $state<DeckState[] | null>(null);
+  let mockDeckState = $state<DeckState | null>(null);
+  // The progress bar follows the deck the room is hearing.
+  const deck = $derived(decks ? (decks[payload?.liveDeck ?? 0] ?? null) : mockDeckState);
   let cursorHidden = $state(false);
 
   const settings = $derived(payload?.settings);
@@ -34,13 +37,13 @@
         const { api, on } = await import("../../lib/api");
         const subs = await Promise.all([
           on("projector", (p) => (payload = p)),
-          on("deck-state", (d) => (deck = d[0])),
+          on("deck-state", (d) => (decks = d)),
         ]);
         if (cancelled) subs.forEach((u) => u());
         else unsubs.push(...subs);
         try {
           payload = await api.projectorState();
-          deck = (await api.deckStates())[0];
+          decks = await api.deckStates();
         } catch (e) {
           console.error("projector: initial state failed", e);
         }
@@ -51,10 +54,11 @@
         const params = new URLSearchParams(location.search);
         payload = m.mockPayload(params);
         if (!params.has("gap") && !params.has("idle")) {
-          deck = m.mockDeck();
+          mockDeckState = m.mockDeck();
           // Animate the progress bar in the mock.
           const t = setInterval(() => {
-            if (deck) deck = { ...deck, positionMs: (deck.positionMs + 500) % (deck.endMs ?? deck.durationMs) };
+            const d = mockDeckState;
+            if (d) mockDeckState = { ...d, positionMs: (d.positionMs + 500) % (d.endMs ?? d.durationMs) };
           }, 500);
           unsubs.push(() => clearInterval(t));
         }

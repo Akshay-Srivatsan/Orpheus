@@ -528,6 +528,18 @@ impl Store {
         })
     }
 
+    /// Sets (`Some`) or clears (`None`) hot cue `slot` on a track.
+    pub fn set_hot_cue(&self, id: &str, slot: u8, ms: Option<i64>) -> Result<()> {
+        self.with_track(id, |t| {
+            t.hot_cues.retain(|c| c.slot != slot);
+            if let Some(ms) = ms {
+                t.hot_cues.push(HotCue { slot, ms: ms.max(0) });
+                t.hot_cues.sort_by_key(|c| c.slot);
+            }
+            Ok(())
+        })
+    }
+
     pub fn set_in_library(&self, id: &str, value: bool) -> Result<()> {
         self.with_track(id, |t| {
             t.in_library = value;
@@ -1023,7 +1035,7 @@ impl Store {
 }
 
 /// Days since 1970-01-01 → (year, month, day). (Howard Hinnant's algorithm.)
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
+pub fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719468;
     let era = z.div_euclid(146097);
     let doe = z.rem_euclid(146097);

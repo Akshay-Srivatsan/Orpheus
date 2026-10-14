@@ -15,12 +15,20 @@
     revision?: unknown;
     /** Called with a position when the user clicks (null = seeking disabled). */
     onseek?: ((ms: number) => void) | null;
+    /** Called repeatedly while dragging across the waveform. */
+    onscrub?: ((ms: number) => void) | null;
+    /** Main cue point. */
+    cueMs?: number | null;
+    /** Hot cues (pad number + position). */
+    hotCues?: { slot: number; ms: number }[];
     seekHint?: string;
   }
   let {
     trackId, durationMs, positionMs = 0, startMs = 0, endMs = null, fadeAtMs = null, accent = "var(--accent)",
-    height = 56, onseek = null, seekHint = "", revision = null,
+    height = 56, onseek = null, seekHint = "", revision = null, onscrub = null, cueMs = null, hotCues = [],
   }: Props = $props();
+  let dragging = $state(false);
+  const CUE_COLORS = ["#ff453a", "#ff9f0a", "#30d158", "#64d2ff"];
 
   let canvas: HTMLCanvasElement | undefined = $state();
   let data = $state<number[]>([]);
@@ -92,6 +100,27 @@
         ctx.stroke();
         ctx.setLineDash([]);
       }
+      // Hot cues: coloured lines with their pad number; main cue: a triangle.
+      ctx.font = "bold 9px -apple-system, system-ui, sans-serif";
+      for (const c of hotCues) {
+        const x = Math.round(px(c.ms)) + 0.5;
+        const col = CUE_COLORS[(c.slot - 1) % 4];
+        ctx.fillStyle = col;
+        ctx.fillRect(x - 0.5, 0, 1, height);
+        ctx.fillRect(x - 0.5, height - 11, 9, 11);
+        ctx.fillStyle = "#000";
+        ctx.fillText(String(c.slot), x + 1.5, height - 2.5);
+      }
+      if (cueMs != null) {
+        const x = px(cueMs);
+        ctx.fillStyle = "#ff9f0a";
+        ctx.beginPath();
+        ctx.moveTo(x - 5, 0);
+        ctx.lineTo(x + 5, 0);
+        ctx.lineTo(x, 7);
+        ctx.closePath();
+        ctx.fill();
+      }
       const p = px(positionMs);
       ctx.fillStyle = getComputedStyle(canvas).getPropertyValue("--ph").trim() || "#fff";
       ctx.fillRect(Math.round(p) - 1, 0, 2, height);
@@ -102,10 +131,30 @@
     }
   });
 
-  function click(e: MouseEvent) {
-    if (!onseek || durationMs <= 0) return;
+  function at(e: PointerEvent): number {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    onseek(((e.clientX - rect.left) / rect.width) * durationMs);
+    return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) * durationMs;
+  }
+
+  let lastScrub = 0;
+  function down(e: PointerEvent) {
+    if (!onseek || durationMs <= 0 || e.button !== 0) return;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    dragging = true;
+    onseek(at(e));
+  }
+  function move(e: PointerEvent) {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    hover = onseek ? e.clientX - r.left : null;
+    if (!dragging || !onscrub) return;
+    const now = performance.now();
+    if (now - lastScrub < 40) return;
+    lastScrub = now;
+    onscrub(at(e));
+  }
+  function up(e: PointerEvent) {
+    if (dragging && onscrub) onscrub(at(e));
+    dragging = false;
   }
 </script>
 
@@ -122,13 +171,11 @@
   aria-valuemax={durationMs}
   aria-valuenow={positionMs}
   tabindex="-1"
-  onclick={click}
+  onpointerdown={down}
+  onpointermove={move}
+  onpointerup={up}
+  onpointercancel={() => (dragging = false)}
   onkeydown={() => {}}
-  onmousemove={(e) => {
-    if (!onseek) return;
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    hover = e.clientX - r.left;
-  }}
   onmouseleave={() => (hover = null)}
 >
   <canvas bind:this={canvas} style:width="{width}px" style:height="{height}px"></canvas>

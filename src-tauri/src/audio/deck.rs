@@ -61,6 +61,10 @@ pub struct DeckSnapshot {
     pub start_ms: i64,
     pub end_ms: Option<i64>,
     pub fade_at_ms: Option<i64>,
+    /// Main cue point (CUE button).
+    pub cue_ms: i64,
+    /// This deck plays to the room.
+    pub on_air: bool,
     pub fading: bool,
     pub tempo: f64,
     pub keylock: bool,
@@ -80,6 +84,7 @@ struct Info {
     start: f64,
     end: Option<f64>,
     fade_at: Option<f64>,
+    cue: f64,
     fading: bool,
     error: Option<String>,
 }
@@ -94,6 +99,10 @@ pub struct DeckShared {
     pub trim_db: AtomicF64,
     pub track_gain_db: AtomicF64,
     pub pfl: AtomicBool,
+    /// Set by the app: this deck is the one the room hears.
+    pub on_air: AtomicBool,
+    /// Pace the deck by the headphone output (no master device available).
+    pub clock_cue: Arc<AtomicBool>,
     /// Engine output rate (Hz).
     pub rate: Arc<AtomicU32>,
     pub buffer_ms: Arc<AtomicU32>,
@@ -108,10 +117,16 @@ pub struct Deck {
 }
 
 impl Deck {
-    pub fn new(index: usize, rate: Arc<AtomicU32>, buffer_ms: Arc<AtomicU32>, events: Sender<DeckEvent>) -> Self {
+    pub fn new(
+        index: usize,
+        rate: Arc<AtomicU32>,
+        buffer_ms: Arc<AtomicU32>,
+        clock_cue: Arc<AtomicBool>,
+        events: Sender<DeckEvent>,
+    ) -> Self {
         let playing = Arc::new(AtomicBool::new(false));
-        // Main deck: clock = master tap; its cue tap carries PFL (off by default).
-        // Preview deck: clock = cue tap; its master tap is never connected.
+        // Both decks feed both outputs. Tap gains (set by the app) decide what
+        // is audible: only the on-air deck has a non-zero master gain.
         let shared = Arc::new(DeckShared {
             index,
             playing: playing.clone(),
@@ -121,11 +136,13 @@ impl Deck {
             keylock: AtomicBool::new(true),
             trim_db: AtomicF64::new(0.0),
             track_gain_db: AtomicF64::new(0.0),
-            pfl: AtomicBool::new(index == 1),
+            pfl: AtomicBool::new(false),
+            on_air: AtomicBool::new(false),
+            clock_cue,
             rate,
             buffer_ms,
-            master_tap: Tap::new(playing.clone(), 1.0),
-            cue_tap: Tap::new(playing, if index == 1 { 1.0 } else { 0.0 }),
+            master_tap: Tap::new(playing.clone(), 0.0),
+            cue_tap: Tap::new(playing, 0.0),
             load_gen: AtomicU64::new(0),
         });
         let (tx, rx) = unbounded();
@@ -155,7 +172,8 @@ impl Deck {
     pub fn play(&self) -> bool {
         let mut i = self.shared.info.lock();
         match i.status.as_str() {
-            "paused" => {
+            // "ended": callers queue a seek first; the worker resets on seek.
+            "paused" | "ended" => {
                 i.status = "playing".into();
                 self.shared.playing.store(true, Ordering::SeqCst);
                 true
@@ -246,11 +264,41 @@ impl Deck {
         self.shared.trim_db.set(db.clamp(-24.0, 12.0));
     }
 
+    /// Records the headphone-cue state; the app derives tap gains from it.
     pub fn set_pfl(&self, on: bool) {
         self.shared.pfl.store(on, Ordering::Relaxed);
-        if self.shared.index == 0 {
-            self.shared.cue_tap.gain.set(if on { 1.0 } else { 0.0 });
-        }
+    }
+
+    pub fn pfl(&self) -> bool {
+        self.shared.pfl.load(Ordering::Relaxed)
+    }
+
+    pub fn is_on_air(&self) -> bool {
+        self.shared.on_air.load(Ordering::Relaxed)
+    }
+
+    /// Sets the main cue point (seconds).
+    pub fn set_cue(&self, secs: f64) {
+        self.shared.info.lock().cue = secs.max(0.0);
+    }
+
+    pub fn cue_secs(&self) -> f64 {
+        self.shared.info.lock().cue
+    }
+
+    /// Lets audio flow (or not) without changing the play/pause status; used
+    /// for short "scrub" previews while paused.
+    pub fn set_audible(&self, on: bool) {
+        self.shared.playing.store(on, Ordering::SeqCst);
+    }
+
+    /// Changes whenever a new track is loaded.
+    pub fn load_generation(&self) -> u64 {
+        self.shared.load_gen.load(Ordering::SeqCst)
+    }
+
+    pub fn loaded(&self) -> bool {
+        !matches!(self.status().as_str(), "empty" | "error")
     }
 
     pub fn position_secs(&self) -> f64 {
@@ -271,6 +319,8 @@ impl Deck {
             start_ms: (i.start * 1000.0) as i64,
             end_ms: i.end.map(|e| (e * 1000.0) as i64),
             fade_at_ms: i.fade_at.map(|e| (e * 1000.0) as i64),
+            cue_ms: (i.cue * 1000.0) as i64,
+            on_air: s.on_air.load(Ordering::Relaxed),
             fading: i.fading,
             tempo: s.tempo.get(),
             keylock: s.keylock.load(Ordering::Relaxed),
@@ -385,11 +435,11 @@ impl Worker {
         let ms = self.sh.buffer_ms.load(Ordering::Relaxed).clamp(20, 500);
         let frames = ((rate as u64 * ms as u64 / 1000) as usize).max(4096);
         self.prods.clear();
-        let taps: Vec<(Arc<Tap>, bool)> = if self.sh.index == 0 {
-            vec![(self.sh.master_tap.clone(), true), (self.sh.cue_tap.clone(), false)]
-        } else {
-            vec![(self.sh.cue_tap.clone(), true)]
-        };
+        // The master output paces playback; the headphone copy follows (and
+        // drops samples if that device runs slightly fast or slow).
+        let cue_clock = self.sh.clock_cue.load(Ordering::Relaxed);
+        let taps: Vec<(Arc<Tap>, bool)> =
+            vec![(self.sh.master_tap.clone(), !cue_clock), (self.sh.cue_tap.clone(), cue_clock)];
         for (tap, clock) in taps {
             let (p, c) = rtrb::RingBuffer::<f32>::new(frames * 2);
             tap.rate.store(rate, Ordering::Relaxed);
@@ -496,6 +546,7 @@ impl Worker {
             let mut i = self.sh.info.lock();
             i.duration = duration;
             i.start = req.start_secs;
+            i.cue = req.start_secs;
             i.end = self.end;
             i.fade_at = self.fade_at;
             i.fading = false;

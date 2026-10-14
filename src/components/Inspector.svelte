@@ -2,7 +2,7 @@
   // Info tab: the selected track (recording), its versions, and — when a set
   // entry is selected — that entry's per-setlist overrides.
   import { api } from "../lib/api";
-  import { app } from "../lib/state.svelte";
+  import { app, audition } from "../lib/state.svelte";
   import { fmtBpm, fmtTime, foldBpm, playback, rateToFit, resolveSettings, styleCenter } from "../lib/tempo";
   import type { Id, Overrides, Track, Version } from "../lib/types";
   import Icon from "./Icon.svelte";
@@ -73,8 +73,8 @@
 
   /** Uses the preview deck's position, if it has this version loaded. */
   function previewPos(v: Version): number | null {
-    const d = app.decks[1];
-    return d.versionId === v.id && d.status !== "empty" ? d.positionMs : null;
+    const d = app.decks.find((x) => x.versionId === v.id && x.status !== "empty");
+    return d ? d.positionMs : null;
   }
 
   const preferred = $derived(track?.preferredSource ?? "");
@@ -193,7 +193,7 @@
           <div class="version" class:hl={app.selected.includes(v.id) || entry?.versionId === v.id} style:--c={app.styleColor(v.style)}>
             <div class="vhead">
               <input type="text" class="vname" value={v.name} onchange={(e) => patchVersion(v, { name: e.currentTarget.value })} />
-              <button class="plain icon" title="Preview this version" onclick={() => api.previewLoad(v.id, { play: true })}><Icon name="headphones" size={13} /></button>
+              <button class="plain icon" title="Preview this version on the free deck" onclick={() => audition(v.id)}><Icon name="headphones" size={13} /></button>
               <button class="plain icon" title="Duplicate" onclick={() => duplicateVersion(v)}><Icon name="copy" size={13} /></button>
               <button class="plain icon danger" title="Delete version" disabled={track.versions.length < 2}
                 onclick={() => confirm(`Delete version “${v.name}”?`) && app.run(api.deleteVersion(v.id))}><Icon name="trash" size={13} /></button>
@@ -218,15 +218,15 @@
                 <TimeField value={v.cueInMs} placeholder="auto" onchange={(x) => patchVersion(v, { cueInMs: x })} />
                 <TimeField value={v.cueOutMs} placeholder="auto" onchange={(x) => patchVersion(v, { cueOutMs: x })} />
                 {#if previewPos(v) != null}
-                  <button class="plain small" title="Set start to the preview position" onclick={() => patchVersion(v, { cueInMs: Math.round(previewPos(v)!) })}>⇤</button>
-                  <button class="plain small" title="Set end to the preview position" onclick={() => patchVersion(v, { cueOutMs: Math.round(previewPos(v)!) })}>⇥</button>
+                  <button class="plain small" title="Set start to the deck position" onclick={() => patchVersion(v, { cueInMs: Math.round(previewPos(v)!) })}>⇤</button>
+                  <button class="plain small" title="Set end to the deck position" onclick={() => patchVersion(v, { cueOutMs: Math.round(previewPos(v)!) })}>⇥</button>
                 {/if}
               </span>
               <span class="lbl">Fade at</span>
               <span class="row">
                 <TimeField value={v.fadeOutMs} placeholder="none" onchange={(x) => patchVersion(v, { fadeOutMs: x })} />
                 {#if previewPos(v) != null}
-                  <button class="plain small" title="Fade out from the preview position" onclick={() => patchVersion(v, { fadeOutMs: Math.round(previewPos(v)!) })}>here</button>
+                  <button class="plain small" title="Fade out from the deck position" onclick={() => patchVersion(v, { fadeOutMs: Math.round(previewPos(v)!) })}>here</button>
                 {/if}
               </span>
               <span class="lbl">Gain</span>

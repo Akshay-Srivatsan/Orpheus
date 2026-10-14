@@ -172,6 +172,12 @@
             <span>Fade the current song over <input type="number" min="0" step="0.5" value={s.manualNextFadeMs / 1000}
               onchange={(e) => set("manualNextFadeMs", Math.round(+e.currentTarget.value * 1000))} /> s first</span>
           </span>
+          <span class="l">Decks</span>
+          <span class="col">
+            <label><input type="checkbox" checked={s.autoLoadNext} onchange={(e) => set("autoLoadNext", e.currentTarget.checked)} /> Load the next song in the set onto the free deck automatically</label>
+            <label><input type="checkbox" checked={s.protectOnAir} onchange={(e) => set("protectOnAir", e.currentTarget.checked)} /> Protect the on-air deck: ignore jog wheels, CUE and cue jumps while the room hears it</label>
+            <label><input type="checkbox" checked={s.headphonesFollowFreeDeck} onchange={(e) => set("headphonesFollowFreeDeck", e.currentTarget.checked)} /> Switch headphones to the free deck when a deck goes on air</label>
+          </span>
           <span class="l">Fade-out length</span>
           <span><input type="number" min="0.5" step="0.5" placeholder={String(app.profile?.fadeOutSeconds ?? 5)} value={s.fadeOutMs != null ? s.fadeOutMs / 1000 : ""}
             onchange={(e) => set("fadeOutMs", e.currentTarget.value ? Math.round(+e.currentTarget.value * 1000) : null)} /> seconds</span>
@@ -226,7 +232,7 @@
 
       {:else if tab === "audio"}
         <h2>Audio</h2>
-        <p class="dim">The main deck plays to the room. The preview deck only plays to headphones. With a DJ controller such as the Numark DJ2GO2, choose it for both and use channels 1–2 for the room and 3–4 for headphones.</p>
+        <p class="dim">The crossfader decides which deck the room hears; the headphone (cue) output plays whichever decks have their headphone button on. With a DJ controller such as the Numark DJ2GO2, choose it for both and use channels 1–2 for the room and 3–4 for headphones.</p>
         <div class="form">
           <span class="l">Room (master)</span>
           <span class="row">
@@ -237,7 +243,7 @@
             <select value={s.audio.masterChannels.join(",")} onchange={(e) => setAudio({ masterChannels: e.currentTarget.value.split(",").map(Number) as [number, number] })}>
               {#each pairs(masterDev?.channels ?? 2) as p}<option value={p.join(",")}>Channels {p[0] + 1}–{p[1] + 1}</option>{/each}
             </select>
-            <button onclick={() => api.audioTest(0)} disabled={app.decks[0].status === "playing"}>Test</button>
+            <button onclick={() => api.audioTest(app.liveDeck)} disabled={app.decks.some((d) => d.onAir && d.status === "playing")}>Test</button>
           </span>
           <span class="l">Headphones (cue)</span>
           <span class="row">
@@ -249,7 +255,7 @@
               <select value={s.audio.cueChannels.join(",")} onchange={(e) => setAudio({ cueChannels: e.currentTarget.value.split(",").map(Number) as [number, number] })}>
                 {#each pairs(cueDev?.channels ?? 2) as p}<option value={p.join(",")}>Channels {p[0] + 1}–{p[1] + 1}</option>{/each}
               </select>
-              <button onclick={() => api.audioTest(1)}>Test</button>
+              <button onclick={() => api.audioTest(app.freeDeck)} disabled={app.decks[app.freeDeck].onAir && app.decks[app.freeDeck].status === "playing"}>Test</button>
             {/if}
           </span>
           {#if app.outputs?.cueOnMasterChannels}
@@ -281,7 +287,7 @@
           </select>
         </div>
         {#if mapping}
-          <p class="dim small">Left deck = main (on air), right deck = preview. The crossfader is intentionally unused. {mapping.builtin ? "Editing a built-in mapping creates a custom copy." : ""}</p>
+          <p class="dim small">Left = deck A, right = deck B. SYNC = Go Live. Pads: Cues mode = hot cues (hold PAD MODE to clear), Auto Loop = jump −15/−5/+5/+15 s, Manual Loop = set start / end / fade / clear, Sampler = Play Next / Fade / Skip / Auto. Faders and the crossfader use soft takeover. {mapping.builtin ? "Editing a built-in mapping creates a custom copy." : ""}</p>
           <table class="mtable">
             <thead><tr><th>Message</th><th>Kind</th><th>Action</th><th></th></tr></thead>
             <tbody>
@@ -290,7 +296,7 @@
                   <td class="num">{hex(c.status)} {hex(c.data1)}</td>
                   <td>
                     <select value={c.kind} onchange={(e) => updateControl(i, { kind: e.currentTarget.value as MidiControl["kind"] })}>
-                      <option value="button">Button</option><option value="absolute">Fader/knob</option><option value="relative">Encoder/jog</option>
+                      <option value="button">Button</option><option value="hold">Button (press &amp; release)</option><option value="absolute">Fader/knob</option><option value="relative">Encoder/jog</option>
                     </select>
                     <label class="small"><input type="checkbox" checked={!!c.invert} onchange={(e) => updateControl(i, { invert: e.currentTarget.checked })} /> invert</label>
                   </td>

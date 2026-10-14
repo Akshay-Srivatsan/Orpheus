@@ -2,7 +2,7 @@
   import { save } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api";
   import type { CheckResult } from "../lib/rules";
-  import { addToSet, app, spotifyVersions } from "../lib/state.svelte";
+  import { addToSet, app, audition, spotifyVersions } from "../lib/state.svelte";
   import { fmtBpm, fmtTime, playback, playedDurationMs, styleOf } from "../lib/tempo";
   import type { Id, SetlistEntry } from "../lib/types";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
@@ -68,12 +68,12 @@
   }
 
   function preview(entry: SetlistEntry) {
-    if (entry.versionId) app.run(api.previewLoad(entry.versionId, { entryId: entry.id, play: true }));
+    if (entry.versionId) audition(entry.versionId, entry.id);
   }
 
   async function remove(ids: Id[]) {
     if (!set) return;
-    const playing = ids.includes(app.perform?.currentEntryId ?? "") && app.decks[0].status === "playing";
+    const playing = app.decks.some((d) => d.entryId && ids.includes(d.entryId) && d.onAir && d.status === "playing");
     if (playing) return app.toast("That song is playing right now.");
     await app.run(api.deleteEntries(set.id, ids));
     app.selectedEntries = [];
@@ -91,7 +91,12 @@
     const isCurrent = entry.id === app.perform?.currentEntryId;
     const items: MenuItem[] = [
       { label: "Play Now", disabled: !entry.versionId || isCurrent, action: () => app.run(api.playEntry(entry.id)) },
-      { label: "Preview in Headphones", disabled: !entry.versionId, action: () => preview(entry) },
+      { label: "Preview in Headphones (free deck)", disabled: !entry.versionId, action: () => preview(entry) },
+      ...([0, 1] as const).map((d) => ({
+        label: `Load onto Deck ${d === 0 ? "A" : "B"}`,
+        disabled: !entry.versionId || (app.decks[d].onAir && app.decks[d].status === "playing"),
+        action: () => entry.versionId && api.deckLoad(d, entry.versionId, { entryId: entry.id }),
+      })),
       { label: "Move to Play Next", disabled: isCurrent, action: () => moveNext(ids) },
       { separator: true },
       entry.status === "skipped"
@@ -271,7 +276,7 @@
           onkeydown={() => {}}
           tabindex="-1"
         >
-          <span class="num n">{#if isCur && app.decks[0].status === "playing"}<Icon name="play" size={10} />{:else}{number.get(x.e.id) ?? ""}{/if}</span>
+          <span class="num n">{#if isCur && app.decks[app.liveDeck].status === "playing"}<Icon name="play" size={10} />{:else}{number.get(x.e.id) ?? ""}{/if}</span>
           <span class="stripe"></span>
           <div class="body">
             <div class="l1">

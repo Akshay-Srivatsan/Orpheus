@@ -25,7 +25,8 @@ export interface Toast {
 
 const emptyDeck = (deck: 0 | 1): DeckState => ({
   deck, status: "empty", trackId: null, versionId: null, entryId: null, positionMs: 0, durationMs: 0, startMs: 0,
-  endMs: null, fadeAtMs: null, fading: false, tempo: 1, keylock: true, gainDb: 0, trimDb: 0, pfl: deck === 1, error: null,
+  endMs: null, fadeAtMs: null, cueMs: 0, onAir: deck === 0, fading: false, tempo: 1, keylock: true, gainDb: 0, trimDb: 0,
+  pfl: deck === 1, error: null,
 });
 
 class AppState {
@@ -62,7 +63,7 @@ class AppState {
   settingsOpen = $state<false | string>(false);
   newSetlistOpen = $state(false);
   /** Bumped by MIDI browse actions; the library table reacts. */
-  midiNav = $state<{ action: string; delta?: number; n: number }>({ action: "", n: 0 });
+  midiNav = $state<{ action: string; delta?: number; deck?: 0 | 1; n: number }>({ action: "", n: 0 });
 
   trackMap = $derived(new Map(this.tracks.map((t) => [t.id, t])));
   versionMap = $derived.by(() => {
@@ -95,6 +96,10 @@ class AppState {
   styleColor(key: string | null | undefined): string {
     return (key && this.styleMap.get(key)?.color) || "#8e8e93";
   }
+
+  /** The deck the room heard last, and the free (cueing) deck. */
+  liveDeck = $derived<0 | 1>(this.perform?.liveDeck ?? 0);
+  freeDeck = $derived<0 | 1>(this.liveDeck === 0 ? 1 : 0);
 
   fadeSeconds = $derived(this.settings?.fadeOutMs != null ? this.settings.fadeOutMs / 1000 : this.profile?.fadeOutSeconds ?? 5);
 
@@ -175,6 +180,7 @@ class AppState {
     on("spotify-status", (s) => (this.spotify = s));
     on("output-status", (s) => (this.outputs = s));
     on("toast", (t) => this.toast(t));
+    on("toast-info", (t) => this.toast(t, "info"));
     on("midi-ui", (m) => (this.midiNav = { ...m, n: this.midiNav.n + 1 }));
   }
 
@@ -243,4 +249,19 @@ export async function spotifyVersions(tracks: import("./types").SpotifyTrack[], 
   const ids = (await app.run(api.spotifyImport(tracks, inLibrary))) ?? [];
   await app.reloadTracks(ids);
   return ids.map((id) => app.trackMap.get(id)?.versions[0]?.id).filter(Boolean) as Id[];
+}
+
+/** Loads a version onto the free deck and plays it in the headphones. */
+export async function audition(versionId: Id, entryId?: Id | null) {
+  const row = app.versionMap.get(versionId);
+  if (row?.track.missing) {
+    app.toast(`"${row.track.title}" has no playable source on this computer.`);
+    return;
+  }
+  await app.run(api.deckLoad(app.freeDeck, versionId, { entryId, play: true }));
+}
+
+/** Loads a version onto a specific deck (paused). */
+export async function loadDeck(deck: 0 | 1, versionId: Id, entryId?: Id | null) {
+  await app.run(api.deckLoad(deck, versionId, { entryId, play: false }));
 }

@@ -11,16 +11,23 @@ Runs on macOS, Linux and Windows (Tauri 2, Rust and Svelte).
 
 ## How it differs from club DJ software
 
-- **No crossfading.** Songs never overlap. Each one ends, or fades out, and
-  a pause follows.
+- **No crossfading by default.** Each song ends, or fades out, and a pause
+  follows. You can still crossfade by hand when you want to.
 - **The next song is manual by default.** Press **Play Next** when the floor
   is ready. If a song is still playing, Play Next asks for a second press,
   then fades the song out before continuing. Auto-advance after a set pause
   is optional.
-- **Two decks:**
-  - **On Air** plays to the room.
-  - **Preview** plays only in your headphones, for auditioning songs.
-  - There is no crossfader.
+- **Two identical decks (A and B) and a crossfader.** The crossfader decides
+  which deck the room hears; the other deck is the *free deck*, for cueing in
+  headphones. **Play Next** and **Go Live** move the crossfader for you once
+  the previous song has faded, so songs don't overlap unless you crossfade
+  by hand.
+- **The next song in the set is loaded onto the free deck automatically**,
+  paused at its start, so you can check it in headphones. Play Next always
+  starts it from its cue point.
+- **A song counts as played only once the room can hear it.** Playing
+  something in headphones doesn't add it to the set; making it audible does,
+  and songs that weren't planned are inserted into the set at that point.
 - **Dance styles and tempos come first.** The library is organised around the
   styles a club dances. Each style has a sweet-spot and an acceptable tempo
   range.
@@ -76,15 +83,39 @@ Machine-specific state stays in the app data folder:
 
 ## Controllers and audio
 
+- **Deck controls:**
+  - **CUE** works CDJ-style. While playing, it returns to the cue point and
+    stops. While paused away from the cue point, it sets the cue point. Held
+    at the cue point, it previews until released.
+  - **Four hot cues per song**, saved with the track. Click a pad to set or
+    jump; ⌥-click or right-click to clear.
+  - **Scrubbing:** jog wheels, or dragging on the waveform. A paused deck
+    plays short snippets so you can hear where you are.
+  - **On-air protection** (Settings → General, on by default): jog, CUE and
+    cue jumps are ignored on the deck the room is hearing.
 - **MIDI:** controllers are detected and connected automatically, with LED
-  feedback.
-  - There is a built-in mapping for the **Numark DJ2GO2 / DJ2GO2 Touch**.
-    The left deck is On Air, the right deck is Preview.
-    - The left pitch fader sets the main tempo, with soft takeover.
-    - SYNC / pad 1 = Play Next, CUE / pad 2 = fade out, pad 3 = skip,
-      pad 4 = auto-advance.
-    - The browse knob scrolls the library and LOAD queues songs.
-    - The crossfader is deliberately unused.
+  feedback. A device exposed twice (e.g. through PipeWire's Midi-Bridge)
+  only connects once.
+  - Built-in mapping for the **Numark DJ2GO2 / DJ2GO2 Touch** (left = deck A,
+    right = deck B):
+
+    | Control | Function |
+    |---|---|
+    | PLAY / CUE / PFL | Per deck |
+    | SYNC | Go Live |
+    | Pitch faders | Tempo |
+    | Level knobs | Gain |
+    | Crossfader | Crossfader |
+    | Master / headphone knobs | Volumes |
+    | LOAD A / B | Load the selected song |
+    | Browse knob | Scrolls; press auditions on the free deck |
+    | Jog wheels | Scrub (touch = fine, edge = fast) |
+    | Pads, Cues mode | Hot cues (hold PAD MODE to clear) |
+    | Pads, Auto Loop mode | Jump −15 / −5 / +5 / +15 s |
+    | Pads, Manual Loop mode | Set the version's start / end / fade, or clear |
+    | Pads, Sampler mode | Play Next / Fade / Skip / Auto-advance |
+
+    Faders and the crossfader use soft takeover.
   - Any other controller works through MIDI Learn (Settings → Controllers).
 - **Audio:** choose any output device and channel pair separately for the
   room and for headphones. For example, with a DJ2GO2 use channels 1–2 for
@@ -154,7 +185,9 @@ The developer examples in `src-tauri/examples/` work without the UI:
 
 ```
 src-tauri/src/
-  app.rs        performance logic: Play Next, pauses, fades, auto-advance, projector state, MIDI actions
+  app.rs        app state, settings, audio routing, loading, background jobs
+  perform.rs    two-deck model: crossfader, Play Next / Go Live, auto-load, pauses, set history, projector state
+  controls.rs   deck controls (CUE, hot cues, scrubbing, edit points) and controller actions
   store.rs      file-based library (tracks, setlists, crates, profiles, history)
   library.rs    folder scanning, content-addressed import, analysis jobs
   decode.rs     symphonia decoding + audio-content hashing

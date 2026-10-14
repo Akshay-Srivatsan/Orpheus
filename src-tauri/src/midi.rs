@@ -57,43 +57,62 @@ pub struct Mapping {
     pub leds: Vec<Led>,
 }
 
-/// Actions a control can trigger. Kept here so the UI can list them.
-pub const ACTIONS: &[(&str, &str, &str)] = &[
-    ("perform.playNext", "Play next song", "button"),
-    ("perform.skipNext", "Skip the up-next song", "button"),
-    ("perform.toggleAutoAdvance", "Toggle auto-advance", "button"),
-    ("main.playPause", "Main: play / pause", "button"),
-    ("main.fadeOut", "Main: fade out", "button"),
-    ("main.stop", "Main: stop (only while paused)", "button"),
-    ("main.tempo", "Main: tempo fader", "absolute"),
-    ("main.tempoNudge", "Main: fine tempo (encoder)", "relative"),
-    ("main.tempoReset", "Main: reset tempo to setlist value", "button"),
-    ("main.trim", "Main: gain trim", "absolute"),
-    ("main.pfl", "Main: headphone cue on/off", "button"),
-    ("preview.playPause", "Preview: play / pause", "button"),
-    ("preview.cue", "Preview: back to start", "button"),
-    ("preview.seek", "Preview: scrub (jog wheel)", "relative"),
-    ("preview.jump:0.25", "Preview: jump to 25%", "button"),
-    ("preview.jump:0.5", "Preview: jump to 50%", "button"),
-    ("preview.jump:0.75", "Preview: jump to 75%", "button"),
-    ("preview.tempo", "Preview: tempo fader", "absolute"),
-    ("preview.trim", "Preview: gain trim", "absolute"),
-    ("master.volume", "Master volume", "absolute"),
-    ("cue.volume", "Headphone volume", "absolute"),
-    ("browse.scroll", "Library: move selection", "relative"),
-    ("browse.loadPreview", "Library: preview selected song", "button"),
-    ("browse.queueNext", "Library: play selected song next", "button"),
-    ("browse.queueEnd", "Library: add selected song to end of set", "button"),
-];
+/// Actions a control can trigger: `(id, label, kind)`. Deck actions use the
+/// prefix `deck0.` (Deck A) or `deck1.` (Deck B).
+pub fn actions() -> Vec<(String, String, String)> {
+    let mut v: Vec<(String, String, String)> = vec![];
+    let mut add = |id: &str, label: &str, kind: &str| v.push((id.into(), label.into(), kind.into()));
+    add("perform.playNext", "Play next song", "button");
+    add("perform.fadeOut", "Fade out the on-air deck", "button");
+    add("perform.skipNext", "Skip the up-next song", "button");
+    add("perform.toggleAutoAdvance", "Toggle auto-advance", "button");
+    add("master.volume", "Master volume", "absolute");
+    add("cue.volume", "Headphone volume", "absolute");
+    add("cue.crossfader", "Crossfader (deck A ↔ deck B in the room)", "absolute");
+    add("browse.scroll", "Library: move selection", "relative");
+    add("browse.audition", "Library: audition selected song on the free deck", "button");
+    add("browse.queueNext", "Library: play selected song next", "button");
+    add("browse.queueEnd", "Library: add selected song to end of set", "button");
+    for (d, name) in [(0, "A"), (1, "B")] {
+        let p = format!("deck{d}.");
+        let mut dk = |id: &str, label: &str, kind: &str| {
+            v.push((format!("{p}{id}"), format!("Deck {name}: {label}"), kind.into()))
+        };
+        dk("playPause", "play / pause", "button");
+        dk("cue", "cue (CDJ style; hold to preview)", "hold");
+        dk("goLive", "go live (put on air)", "button");
+        dk("pfl", "headphone cue on/off", "button");
+        dk("load", "load selected song", "button");
+        dk("tempo", "tempo fader", "absolute");
+        dk("tempoNudge", "fine tempo", "relative");
+        dk("tempoReset", "reset tempo", "button");
+        dk("trim", "gain", "absolute");
+        dk("jog", "jog wheel (scrub)", "relative");
+        dk("jogTouch", "jog wheel touch (fine scrub)", "hold");
+        for n in 1..=4 {
+            dk(&format!("hotcue{n}"), &format!("hot cue {n} (set / jump)"), "button");
+            dk(&format!("hotcueClear{n}"), &format!("clear hot cue {n}"), "button");
+        }
+        for (s, l) in [("-15", "back 15 s"), ("-5", "back 5 s"), ("+5", "forward 5 s"), ("+15", "forward 15 s")] {
+            dk(&format!("jump{s}"), &format!("jump {l}"), "button");
+        }
+        dk("setStart", "set the version's start here", "button");
+        dk("setEnd", "set the version's end here", "button");
+        dk("setFade", "set the version's fade-out here", "button");
+        dk("clearPoints", "clear the version's start / end / fade", "button");
+    }
+    v
+}
 
-pub const LED_STATES: &[&str] = &[
-    "main.playing",
-    "main.fading",
-    "main.pfl",
-    "preview.playing",
-    "perform.nextReady",
-    "perform.autoAdvance",
-];
+pub fn led_states() -> Vec<String> {
+    let mut v: Vec<String> = vec!["perform.nextReady".into(), "perform.autoAdvance".into()];
+    for d in 0..2 {
+        for s in ["playing", "onAir", "sync", "pfl", "cueReady", "hotcue1", "hotcue2", "hotcue3", "hotcue4"] {
+            v.push(format!("deck{d}.{s}"));
+        }
+    }
+    v
+}
 
 pub fn builtin_mappings() -> Vec<Mapping> {
     let c = |status: u8, data1: u8, action: &str, kind: &str| Control {
@@ -103,57 +122,65 @@ pub fn builtin_mappings() -> Vec<Mapping> {
         kind: kind.into(),
         invert: false,
     };
-    let inv = |mut x: Control| {
-        x.invert = true;
-        x
-    };
     let led = |status: u8, data1: u8, state: &str| Led { status, data1, state: state.into(), on: 0x7f, off: 0 };
     // Numark DJ2GO2 / DJ2GO2 Touch (MIDI layout from Mixxx's mapping).
-    // Left deck = main ("on air"), right deck = preview (headphones only).
-    // The crossfader is intentionally unmapped: songs never overlap.
+    let mut controls = vec![];
+    let mut leds = vec![];
+    for d in 0u8..2 {
+        let p = |a: &str| format!("deck{d}.{a}");
+        let (note, cc, pad) = (0x90 + d, 0xB0 + d, 0x94 + d);
+        controls.push(c(note, 0x00, &p("playPause"), "button"));
+        controls.push(c(note, 0x01, &p("cue"), "hold"));
+        controls.push(c(note, 0x02, &p("goLive"), "button"));
+        controls.push(c(note, 0x1B, &p("pfl"), "button"));
+        controls.push(c(0x9F, 0x02 + d, &p("load"), "button"));
+        let mut tempo = c(cc, 0x09, &p("tempo"), "absolute");
+        tempo.invert = true;
+        controls.push(tempo);
+        controls.push(c(cc, 0x16, &p("trim"), "absolute"));
+        controls.push(c(cc, 0x06, &p("jog"), "relative"));
+        controls.push(c(note, 0x06, &p("jogTouch"), "hold"));
+        for n in 1..=4u8 {
+            // Cues mode; holding PAD MODE offsets the notes by 8 (clear).
+            controls.push(c(pad, n, &p(&format!("hotcue{n}")), "button"));
+            controls.push(c(pad, 0x08 + n, &p(&format!("hotcueClear{n}")), "button"));
+            leds.push(led(pad, n, &p(&format!("hotcue{n}"))));
+        }
+        // Auto Loop mode: quick jumps for auditioning.
+        for (n, j) in [(0x11u8, "-15"), (0x12, "-5"), (0x13, "+5"), (0x14, "+15")] {
+            controls.push(c(pad, n, &p(&format!("jump{j}")), "button"));
+        }
+        // Manual Loop mode: edit points of the loaded version.
+        controls.push(c(pad, 0x21, &p("setStart"), "button"));
+        controls.push(c(pad, 0x22, &p("setEnd"), "button"));
+        controls.push(c(pad, 0x23, &p("setFade"), "button"));
+        controls.push(c(pad, 0x24, &p("clearPoints"), "button"));
+        // Sampler mode: performance controls (same on both sides).
+        controls.push(c(pad, 0x31, "perform.playNext", "button"));
+        controls.push(c(pad, 0x32, "perform.fadeOut", "button"));
+        controls.push(c(pad, 0x33, "perform.skipNext", "button"));
+        controls.push(c(pad, 0x34, "perform.toggleAutoAdvance", "button"));
+        leds.push(led(pad, 0x31, "perform.nextReady"));
+        leds.push(led(pad, 0x34, "perform.autoAdvance"));
+        leds.push(led(note, 0x00, &p("playing")));
+        leds.push(led(note, 0x01, &p("cueReady")));
+        leds.push(led(note, 0x02, &p("sync")));
+        leds.push(led(note, 0x1B, &p("pfl")));
+    }
+    controls.push(c(0xBF, 0x00, "browse.scroll", "relative"));
+    controls.push(c(0x9F, 0x06, "browse.audition", "button"));
+    controls.push(c(0xBF, 0x0A, "master.volume", "absolute"));
+    controls.push(c(0xBF, 0x0C, "cue.volume", "absolute"));
+    // A normal crossfader (with soft takeover: Play Next moves it in software).
+    controls.push(c(0xBF, 0x08, "cue.crossfader", "absolute"));
     let dj2go2 = Mapping {
         id: "numark-dj2go2".into(),
         name: "Numark DJ2GO2 / DJ2GO2 Touch".into(),
         builtin: true,
         device_match: vec!["dj2go2".into()],
         init: vec![vec![0xF0, 0x00, 0x01, 0x3F, 0x3C, 0x48, 0xF7]],
-        controls: vec![
-            c(0x90, 0x00, "main.playPause", "button"),
-            c(0x90, 0x01, "main.fadeOut", "button"),
-            c(0x90, 0x02, "perform.playNext", "button"),
-            c(0x90, 0x1B, "main.pfl", "button"),
-            inv(c(0xB0, 0x09, "main.tempo", "absolute")),
-            c(0xB0, 0x16, "main.trim", "absolute"),
-            c(0x94, 0x01, "perform.playNext", "button"),
-            c(0x94, 0x02, "main.fadeOut", "button"),
-            c(0x94, 0x03, "perform.skipNext", "button"),
-            c(0x94, 0x04, "perform.toggleAutoAdvance", "button"),
-            c(0x9F, 0x02, "browse.queueNext", "button"),
-            c(0x91, 0x00, "preview.playPause", "button"),
-            c(0x91, 0x01, "preview.cue", "button"),
-            c(0x91, 0x02, "browse.queueEnd", "button"),
-            inv(c(0xB1, 0x09, "preview.tempo", "absolute")),
-            c(0xB1, 0x16, "preview.trim", "absolute"),
-            c(0xB1, 0x06, "preview.seek", "relative"),
-            c(0x95, 0x01, "preview.cue", "button"),
-            c(0x95, 0x02, "preview.jump:0.25", "button"),
-            c(0x95, 0x03, "preview.jump:0.5", "button"),
-            c(0x95, 0x04, "preview.jump:0.75", "button"),
-            c(0x9F, 0x03, "browse.loadPreview", "button"),
-            c(0xBF, 0x00, "browse.scroll", "relative"),
-            c(0x9F, 0x06, "browse.loadPreview", "button"),
-            c(0xBF, 0x0A, "master.volume", "absolute"),
-            c(0xBF, 0x0C, "cue.volume", "absolute"),
-        ],
-        leds: vec![
-            led(0x90, 0x00, "main.playing"),
-            led(0x90, 0x01, "main.fading"),
-            led(0x90, 0x02, "perform.nextReady"),
-            led(0x90, 0x1B, "main.pfl"),
-            led(0x91, 0x00, "preview.playing"),
-            led(0x94, 0x01, "perform.nextReady"),
-            led(0x94, 0x04, "perform.autoAdvance"),
-        ],
+        controls,
+        leds,
     };
     let generic = Mapping {
         id: "generic".into(),
@@ -171,6 +198,8 @@ pub fn builtin_mappings() -> Vec<Mapping> {
 pub enum Value {
     /// Button press.
     Press,
+    /// Button release (only for `hold` controls).
+    Release,
     /// Absolute position 0..=1.
     Abs(f64),
     /// Relative ticks (positive = clockwise).
@@ -201,6 +230,9 @@ struct State {
     led_state: HashMap<String, bool>,
     learn: Option<Sender<LearnedMessage>>,
     enabled: bool,
+    /// Last message and the port it came from, to drop copies of the same
+    /// event arriving through a second port (e.g. PipeWire's Midi-Bridge).
+    last: Option<([u8; 3], std::time::Instant, String)>,
 }
 
 pub struct Midi {
@@ -211,6 +243,31 @@ pub struct Midi {
 fn is_through_port(name: &str) -> bool {
     let n = name.to_lowercase();
     n.contains("midi through") || n.contains("through port")
+}
+
+/// Identifies the physical device behind a port name, so the same controller
+/// exposed twice (directly and via PipeWire's "Midi-Bridge") connects once.
+fn device_key(name: &str) -> String {
+    let mut n = base_name(name);
+    if let Some(rest) = n.strip_prefix("midi-bridge:") {
+        n = rest.to_string();
+    }
+    let last = n.rsplit(':').next().unwrap_or(&n).to_string();
+    let mut out = String::new();
+    let mut depth = 0;
+    for ch in last.chars() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            _ if depth == 0 => out.push(ch),
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn is_bridge(name: &str) -> bool {
+    name.to_lowercase().starts_with("midi-bridge")
 }
 
 fn base_name(name: &str) -> String {
@@ -241,6 +298,7 @@ impl Midi {
                 led_state: HashMap::new(),
                 learn: None,
                 enabled,
+                last: None,
             })),
             handler,
         });
@@ -305,6 +363,19 @@ impl Midi {
             .filter(|n| !is_through_port(n))
             .collect();
         drop(probe);
+        // One port per physical device; prefer direct ports over bridged copies.
+        let mut chosen: HashMap<String, String> = HashMap::new();
+        for n in &names {
+            let key = device_key(n);
+            match chosen.get(&key) {
+                Some(existing) if !is_bridge(existing) => {}
+                Some(_) if is_bridge(n) => {}
+                _ => {
+                    chosen.insert(key, n.clone());
+                }
+            }
+        }
+        let names: Vec<String> = names.into_iter().filter(|n| chosen.values().any(|c| c == n)).collect();
         // Drop vanished ports.
         {
             let mut st = self.state.lock();
@@ -320,7 +391,8 @@ impl Midi {
             };
             let state = self.state.clone();
             let handler = self.handler.clone();
-            match input.connect(&port, "orpheus-in", move |_ts, msg, _| on_message(&state, &handler, msg), ()) {
+            let port_name = name.clone();
+            match input.connect(&port, "orpheus-in", move |_ts, msg, _| on_message(&state, &handler, msg, &port_name), ()) {
                 Ok(conn) => {
                     log::info!("MIDI input connected: {name}");
                     self.state.lock().inputs.insert(name.clone(), conn);
@@ -355,7 +427,7 @@ impl Midi {
     }
 
     /// Updates controller LEDs; only changed states are sent.
-    pub fn set_leds(&self, states: &HashMap<&str, bool>) {
+    pub fn set_leds(&self, states: &HashMap<String, bool>) {
         let mut st = self.state.lock();
         if st.outputs.is_empty() {
             return;
@@ -391,11 +463,22 @@ impl Midi {
     }
 }
 
-fn on_message(state: &Arc<Mutex<State>>, handler: &Handler, msg: &[u8]) {
+fn on_message(state: &Arc<Mutex<State>>, handler: &Handler, msg: &[u8], port: &str) {
     if msg.len() < 3 {
         return;
     }
     let (status, d1, d2) = (msg[0], msg[1], msg[2]);
+    {
+        let mut st = state.lock();
+        let now = std::time::Instant::now();
+        let bytes = [status, d1, d2];
+        if let Some((b, t, p)) = &st.last {
+            if *b == bytes && p != port && now.duration_since(*t) < Duration::from_millis(8) {
+                return; // the same event delivered through another port
+            }
+        }
+        st.last = Some((bytes, now, port.to_string()));
+    }
     let kind = status & 0xF0;
     let ch = status & 0x0F;
     if kind != 0x80 && kind != 0x90 && kind != 0xB0 {
@@ -436,6 +519,15 @@ fn on_message(state: &Arc<Mutex<State>>, handler: &Handler, msg: &[u8]) {
                 return;
             }
         }
+        "hold" => {
+            if kind == 0xB0 {
+                if d2 >= 64 { Value::Press } else { Value::Release }
+            } else if is_press {
+                Value::Press
+            } else {
+                Value::Release
+            }
+        }
         "relative" => {
             let v = if d2 >= 64 { d2 as i32 - 128 } else { d2 as i32 };
             if v == 0 {
@@ -462,6 +554,27 @@ mod tests {
     }
 
     #[test]
+    fn bridged_ports_are_the_same_device() {
+        let direct = "DJ2GO2 Touch:DJ2GO2 Touch MIDI 1 24:0";
+        let bridged = "Midi-Bridge:DJ2GO2 Touch:(capture_0) DJ2GO2 Touch MIDI 1 14:1";
+        assert_eq!(device_key(direct), device_key(bridged));
+        assert_ne!(device_key(direct), device_key("Launchpad:Launchpad MIDI 1 28:0"));
+    }
+
+    #[test]
+    fn dj2go2_mapping_has_no_duplicate_messages() {
+        let m = builtin_mappings().remove(0);
+        let mut seen = std::collections::HashSet::new();
+        for c in &m.controls {
+            assert!(seen.insert((c.status, c.data1)), "duplicate {:02X} {:02X}", c.status, c.data1);
+        }
+        let ids: std::collections::HashSet<String> = actions().into_iter().map(|a| a.0).collect();
+        for c in &m.controls {
+            assert!(ids.contains(&c.action), "unknown action {}", c.action);
+        }
+    }
+
+    #[test]
     fn dispatches_mapped_controls() {
         let got: Arc<Mutex<Vec<(String, Value)>>> = Arc::default();
         let g = got.clone();
@@ -473,15 +586,27 @@ mod tests {
             led_state: HashMap::new(),
             learn: None,
             enabled: true,
+            last: None,
         }));
-        on_message(&state, &handler, &[0x90, 0x00, 0x7f]); // main play press
-        on_message(&state, &handler, &[0x80, 0x00, 0x00]); // release: ignored
-        on_message(&state, &handler, &[0xB0, 0x09, 127]); // tempo fader (inverted)
-        on_message(&state, &handler, &[0xBF, 0x00, 127]); // browse knob -1
+        on_message(&state, &handler, &[0x90, 0x00, 0x7f], "a"); // deck A play press
+        on_message(&state, &handler, &[0x90, 0x00, 0x7f], "bridge"); // same event via a 2nd port: dropped
+        on_message(&state, &handler, &[0x80, 0x00, 0x00], "a"); // release: ignored for buttons
+        on_message(&state, &handler, &[0xB1, 0x09, 127], "a"); // deck B tempo fader (inverted)
+        on_message(&state, &handler, &[0xBF, 0x00, 127], "a"); // browse knob -1
+        on_message(&state, &handler, &[0x91, 0x01, 0x7f], "a"); // deck B cue press
+        on_message(&state, &handler, &[0x91, 0x01, 0x00], "a"); // ... and release
+        on_message(&state, &handler, &[0xB0, 0x06, 0x7f], "a"); // jog -1
+        on_message(&state, &handler, &[0xB0, 0x06, 0x7f], "a"); // repeated tick on the same port is kept
         let got = got.lock();
-        assert_eq!(got[0], ("main.playPause".into(), Value::Press));
-        assert_eq!(got[1], ("main.tempo".into(), Value::Abs(0.0)));
-        assert_eq!(got[2], ("browse.scroll".into(), Value::Rel(-1)));
-        assert_eq!(got.len(), 3);
+        let want: Vec<(String, Value)> = vec![
+            ("deck0.playPause".into(), Value::Press),
+            ("deck1.tempo".into(), Value::Abs(0.0)),
+            ("browse.scroll".into(), Value::Rel(-1)),
+            ("deck1.cue".into(), Value::Press),
+            ("deck1.cue".into(), Value::Release),
+            ("deck0.jog".into(), Value::Rel(-1)),
+            ("deck0.jog".into(), Value::Rel(-1)),
+        ];
+        assert_eq!(*got, want);
     }
 }
