@@ -19,26 +19,30 @@
 
   const rows = $derived(
     (set?.entries ?? []).map((e, i) => {
-      const r = e.versionId ? app.versionMap.get(e.versionId) : undefined;
+      const isPause = e.kind === "pause";
+      const r = e.versionId && !isPause ? app.versionMap.get(e.versionId) : undefined;
       const pb = r ? playback(r.track, r.version, e, app.clubStyleOf) : null;
-      const dur = r ? playedDurationMs(r.track, r.version, e, pb!.rate, { fadeSeconds: app.fadeSeconds, trimSilence: app.settings?.trimSilence }) : 0;
+      const dur = isPause
+        ? (e.pauseBefore ?? app.perform?.gapSeconds ?? 0) * 1000
+        : r ? playedDurationMs(r.track, r.version, e, pb!.rate, { fadeSeconds: app.fadeSeconds, trimSilence: app.settings?.trimSilence }) : 0;
       const shown = app.shownFor(r?.version, e, pb?.target ?? null);
       const label = customLabel(r?.version, e) || shown.map((s) => s.short).join(" / ");
       // A song coming up that the room has already heard in this set.
       const repeat = e.status === "pending" && !!r && app.playedInSet.has(r.track.id);
-      return { e, i, r, pb, dur, shown, label, repeat };
+      return { e, i, r, pb, dur, shown, label, repeat, isPause };
     }),
   );
   const totalMs = $derived.by(() => {
-    const songs = rows.filter((x) => x.e.status !== "skipped");
-    const gaps = Math.max(0, songs.length - 1) * (app.perform?.gapSeconds ?? 8) * 1000;
-    return songs.reduce((a, x) => a + x.dur, 0) + gaps;
+    const kept = rows.filter((x) => x.e.status !== "skipped");
+    const songs = kept.filter((x) => !x.isPause).length;
+    const gaps = Math.max(0, songs - 1) * (app.perform?.gapSeconds ?? 8) * 1000;
+    return kept.reduce((a, x) => a + x.dur, 0) + gaps;
   });
   let number = $derived.by(() => {
     // Number songs, not skipped entries.
     const m = new Map<Id, number>();
     let n = 0;
-    for (const x of rows) if (x.e.status !== "skipped") m.set(x.e.id, ++n);
+    for (const x of rows) if (x.e.status !== "skipped" && !x.isPause) m.set(x.e.id, ++n);
     return m;
   });
   const remainingMs = $derived(
@@ -214,6 +218,17 @@
     await app.run(api.insertEntries(set.id, [{ styles: [style] }]));
   }
 
+  async function addPause() {
+    if (!set) return;
+    const ids = await app.run(api.insertEntries(set.id, [{ kind: "pause", pauseBefore: 30 }]));
+    if (ids?.[0]) {
+      app.selectedEntries = [ids[0]];
+      app.inspectEntry = ids[0];
+      app.inspectTrack = null;
+      app.rightTab = "info";
+    }
+  }
+
   function slotMenu(ev: MouseEvent) {
     const items: MenuItem[] = app.myStyles.map((s) => {
       const club = app.show(s.key);
@@ -341,15 +356,19 @@
             <div class="l1">
               <span class="sname" class:unmapped={!customLabel(x.r?.version, x.e) && x.shown.some((s) => s.unmapped)}
                 title={x.shown.map((s) => (s.unmapped ? `${s.name}: not a ${app.profile?.name} style` : s.club && s.name !== app.styleName(s.key) ? `${s.name} (your ${app.styleName(s.key)})` : s.name)).join("\n")}
-                >{x.label || "—"}</span>
-              {#if x.r}
+                >{x.isPause ? "" : x.label || "—"}</span>
+              {#if x.isPause}
+                <span class="t pausename"><Icon name="pause" size={11} /> {x.e.label || "Pause"}</span>
+              {:else if x.r}
                 <span class="t" title={x.r.track.title}>{x.r.track.title}</span>
               {:else}
                 <span class="t slot">{x.shown.length ? `${x.shown.map((s) => s.name).join(" / ")} slot` : "Empty slot"}</span>
               {/if}
             </div>
             <div class="l2">
-              {#if !x.r}
+              {#if x.e.announcement}<span class="say" title="Announced before it: {x.e.announcement}"><Icon name="speaker" size={10} /> {x.e.announcement}</span>
+              {:else if x.e.announcement === ""}<span class="say faint">no announcement</span>{/if}
+              {#if !x.r && !x.isPause}
                 <button class="small pick" class:on={app.fillingSlot === x.e.id}
                   onclick={(ev) => { ev.stopPropagation(); if (app.fillingSlot === x.e.id) app.fillingSlot = null; else startFillingSlot(x.e); }}>
                   {app.fillingSlot === x.e.id ? "Choosing… (Cancel)" : "Choose Song…"}
@@ -378,6 +397,7 @@
 
     <div class="foot">
       <button class="small" onclick={slotMenu} title="Add a placeholder for a dance style; choose the song live"><Icon name="plus" size={12} /> Style slot</button>
+      <button class="small" onclick={addPause} title="Add a pause without a song: for a break, an extra pause, an announcement or a stop for auto mode"><Icon name="pause" size={12} /> Pause</button>
       <span class="spacer"></span>
       <span class="dim small num">{number.size} songs · {fmtTime(totalMs)}{#if remainingMs && app.perform?.startedAt} · {fmtTime(remainingMs)} left{/if}</span>
     </div>
@@ -429,6 +449,8 @@
   .note { color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; }
   .right { display: flex; flex-direction: column; align-items: flex-end; font-size: var(--fs-sm); color: var(--text-dim); }
   .dur.long { color: var(--yellow); }
+  .pausename { color: var(--text-dim); font-style: italic; display: inline-flex; align-items: center; gap: 4px; }
+  .say { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; display: inline-flex; align-items: center; gap: 3px; }
   .hold { display: flex; align-items: center; gap: 5px; margin: 2px 8px 2px 32px; padding: 1px 6px; font-size: var(--fs-xs);
     color: var(--yellow); border-top: 1px dashed color-mix(in srgb, var(--yellow) 60%, transparent); }
   .hold .x { padding: 0 3px; height: 14px; color: inherit; min-width: 0; }

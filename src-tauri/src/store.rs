@@ -1022,6 +1022,9 @@ impl Store {
                     overrides: n.overrides.clone(),
                     note: n.note.clone(),
                     tags: n.tags.clone(),
+                    kind: n.kind,
+                    pause_before: n.pause_before,
+                    announcement: n.announcement.clone(),
                     ..Default::default()
                 })
                 .collect();
@@ -1042,6 +1045,9 @@ impl Store {
             if let Some(v) = &p.note { e.note = v.clone(); }
             if let Some(v) = &p.tags { e.tags = v.clone(); }
             if let Some(v) = p.hold { e.hold = v; }
+            if let Some(v) = p.pause_before { e.pause_before = v.map(|x| x.max(0.0)); }
+            if let Some(v) = p.pause_after { e.pause_after = v.map(|x| x.max(0.0)); }
+            if let Some(v) = &p.announcement { e.announcement = v.clone(); }
             if let Some(v) = &p.status {
                 e.status = v.clone();
                 if v == "pending" {

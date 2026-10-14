@@ -187,10 +187,19 @@ button under Play Next for the current session).
     (about 25 MB plus 20–120 MB per voice) into the app data folder, or you
     can point it at a Piper you already have. Downloading needs the
     internet; speaking doesn't.
-- **Stops:** right-click a song in a setlist and choose **Auto Mode Stops
-  Before This Song** for points where you want to start the next song
-  yourself (e.g. before a mixer that needs explaining). Auto mode waits
-  there until you press Play Next.
+- **Per entry** (Info tab, "Auto mode", for an entry in a set):
+  - the pause before it;
+  - what is announced: a random sentence, your own text (`{dance}`
+    allowed), or nothing;
+  - the pause after the announcement;
+  - and whether auto mode **stops before it**. You can also right-click it
+    and choose **Auto Mode Stops Before This Song**, e.g. before a mixer
+    that needs explaining. Auto mode waits there until you press Play Next.
+- **Pause entries** (the **Pause** button under a set) have no song. Use
+  them for a break, an extra pause, an announcement ("We'll take a
+  10-minute break") or a stop. Auto mode runs their pause and announcement
+  and moves on. With Play Next, a pause entry says its announcement and is
+  done.
 
 ## Spotify
 

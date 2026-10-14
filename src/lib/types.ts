@@ -134,14 +134,24 @@ export interface SetlistEntry {
   overrides?: Overrides;
   note?: string;
   tags?: string[];
+  /** "pause": no song, only a pause, an announcement and/or a stop. Absent = a song or style slot. */
+  kind?: "song" | "pause";
   /** Auto mode stops before this entry: start it with Play Next. */
   hold?: boolean;
+  /** Pause before this entry (before its announcement), overriding the default; a pause entry's length. */
+  pauseBefore?: number | null;
+  /** Pause between this entry's announcement and its start. */
+  pauseAfter?: number | null;
+  /** Said before this entry instead of a random sentence ({dance} allowed); "" = nothing. */
+  announcement?: string | null;
   status: EntryStatus;
   playedAt?: number | null;
 }
 
-export type NewEntry = Partial<Pick<SetlistEntry, "versionId" | "styles" | "label" | "overrides" | "note" | "tags">>;
-export type EntryPatch = Partial<Pick<SetlistEntry, "versionId" | "styles" | "label" | "overrides" | "note" | "tags" | "status" | "hold">>;
+export type NewEntry = Partial<Pick<SetlistEntry, "versionId" | "styles" | "label" | "overrides" | "note" | "tags" | "kind" | "pauseBefore" | "announcement">>;
+export type EntryPatch = Partial<
+  Pick<SetlistEntry, "versionId" | "styles" | "label" | "overrides" | "note" | "tags" | "status" | "hold" | "pauseBefore" | "pauseAfter" | "announcement">
+>;
 
 /** A song played in a setlist (history is derived from setlists). */
 export interface HistoryItem {
@@ -427,6 +437,7 @@ export interface ProjTag {
 
 export interface ProjEntry {
   id: Id;
+  kind?: "song" | "pause";
   trackId: Id | null;
   title: string;
   artist: string;

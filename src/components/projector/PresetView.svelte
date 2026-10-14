@@ -30,7 +30,7 @@
     let n = 0;
     payload.entries.forEach((e, i) => {
       if (i % rows === 0) out.push([]);
-      out[out.length - 1].push({ e, n: e.status === "skipped" ? null : ++n });
+      out[out.length - 1].push({ e, n: e.status === "skipped" || e.kind === "pause" ? null : ++n });
     });
     return out;
   });

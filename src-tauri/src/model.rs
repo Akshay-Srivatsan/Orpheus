@@ -35,6 +35,20 @@ fn is_true(b: &bool) -> bool {
     *b
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum EntryKind {
+    #[default]
+    Song,
+    Pause,
+}
+
+impl EntryKind {
+    fn is_song(&self) -> bool {
+        *self == EntryKind::Song
+    }
+}
+
 fn is_false(b: &bool) -> bool {
     !*b
 }
@@ -340,9 +354,24 @@ pub struct SetlistEntry {
     pub note: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// `song` (a song or a style slot) or `pause`: no song, only a pause, an
+    /// announcement and/or a hold.
+    #[serde(skip_serializing_if = "EntryKind::is_song")]
+    pub kind: EntryKind,
     /// Auto mode stops before this entry: the DJ starts it with Play Next.
     #[serde(skip_serializing_if = "is_false")]
     pub hold: bool,
+    /// Pause before this entry (before its announcement), overriding the
+    /// default; for a pause entry, its length.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pause_before: Option<f64>,
+    /// Pause between this entry's announcement and its start.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pause_after: Option<f64>,
+    /// What auto mode says before this entry (may contain `{dance}`), instead
+    /// of a random pattern; empty = no announcement.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub announcement: Option<String>,
     /// `pending`, `playing`, `played`, `skipped`.
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -360,7 +389,11 @@ impl Default for SetlistEntry {
             overrides: Overrides::default(),
             note: String::new(),
             tags: vec![],
+            kind: EntryKind::Song,
             hold: false,
+            pause_before: None,
+            pause_after: None,
+            announcement: None,
             status: "pending".into(),
             played_at: None,
         }
@@ -434,6 +467,10 @@ pub struct SetlistPatch {
 #[serde(rename_all = "camelCase")]
 pub struct NewEntry {
     pub version_id: Option<Id>,
+    #[serde(default)]
+    pub kind: EntryKind,
+    pub pause_before: Option<f64>,
+    pub announcement: Option<String>,
     pub styles: Option<Vec<String>>,
     pub label: Option<String>,
     #[serde(default)]
@@ -457,6 +494,12 @@ pub struct EntryPatch {
     pub overrides: Option<Overrides>,
     pub note: Option<String>,
     pub hold: Option<bool>,
+    #[serde(default, with = "double_option")]
+    pub pause_before: Option<Option<f64>>,
+    #[serde(default, with = "double_option")]
+    pub pause_after: Option<Option<f64>>,
+    #[serde(default, with = "double_option")]
+    pub announcement: Option<Option<String>>,
     pub tags: Option<Vec<String>>,
     pub status: Option<String>,
 }

@@ -92,9 +92,18 @@
     {#if entry}
       {@const r = entryVersion && track ? playback(track, entryVersion, entry, app.clubStyleOf) : null}
       {@const shownKeys = entry.styles ?? entryVersion?.styles ?? []}
+      {@const isPause = entry.kind === "pause"}
+      {@const ann = app.settings?.announce}
+      {@const speaks = entry.announcement != null ? entry.announcement !== "" : !!ann?.enabled && !isPause}
+      {@const defBefore = speaks || ann?.enabled ? (ann?.pauseBeforeSecs ?? 3) : (app.perform?.gapSeconds ?? 8)}
       <section class="box entrybox">
-        <div class="section-title">In this set</div>
+        <div class="section-title">{isPause ? "Pause in this set" : "In this set"}</div>
         <div class="grid">
+          {#if isPause}
+            <span class="lbl">Name</span>
+            <input type="text" value={entry.label ?? ""} placeholder="Pause (e.g. Break, Lesson)"
+              onchange={(e) => api.updateEntry(entry.id, { label: e.currentTarget.value.trim() || null })} />
+          {:else}
           <span class="lbl">{entryVersion ? "Show as" : "Slot"}</span>
           {#if entryVersion && (entryVersion.styles?.length ?? 0) > 0}
             <StyleChips value={shownKeys} choices={entryVersion.styles} bpm={r?.target ?? null}
@@ -124,6 +133,7 @@
           <span class="lbl">Gain</span>
           <span class="row"><input type="number" step="0.5" placeholder="inherit" value={entry.overrides?.gainDb ?? ""}
             onchange={(e) => patchEntry({ gainDb: e.currentTarget.value ? +e.currentTarget.value : null })} /> dB</span>
+          {/if}
           <span class="lbl">Note</span>
           <input type="text" value={entry.note ?? ""} placeholder="e.g. announce the jam"
             onchange={(e) => api.updateEntry(entry.id, { note: e.currentTarget.value })} />
@@ -137,6 +147,36 @@
               </button>
             {/each}
           </span>
+        </div>
+        <div class="section-title sub">Auto mode</div>
+        <div class="grid">
+          <span class="lbl" title={isPause ? "How long the pause lasts" : "Pause before this song (before its announcement)"}>{isPause ? "Length" : "Pause before"}</span>
+          <span class="row"><input type="number" min="0" step="1" placeholder={String(defBefore)} value={entry.pauseBefore ?? ""}
+            onchange={(e) => api.updateEntry(entry.id, { pauseBefore: e.currentTarget.value === "" ? null : +e.currentTarget.value })} /> s</span>
+          <span class="lbl">Announce</span>
+          <span class="col">
+            <select value={isPause ? (entry.announcement ? "custom" : "none") : entry.announcement == null ? "default" : entry.announcement === "" ? "none" : "custom"}
+              onchange={(e) => {
+                const v = e.currentTarget.value;
+                api.updateEntry(entry.id, { announcement: v === "default" ? null : v === "none" ? "" : (entry.announcement || (isPause ? "We'll take a short break." : "The next dance is a {dance}.")) });
+              }}>
+              {#if !isPause}<option value="default">{ann?.enabled ? "A random sentence" : "Nothing (announcements off)"}</option>{/if}
+              <option value="custom">This text:</option>
+              <option value="none">{isPause ? "Nothing" : "Nothing for this song"}</option>
+            </select>
+            {#if entry.announcement}
+              <input type="text" value={entry.announcement} onchange={(e) => api.updateEntry(entry.id, { announcement: e.currentTarget.value })} />
+              <span class="faint small">{"{dance}"} is replaced by the dance's name.</span>
+            {/if}
+          </span>
+          {#if speaks}
+            <span class="lbl" title="Pause between the announcement and the start">Then pause</span>
+            <span class="row"><input type="number" min="0" step="1" placeholder={String(ann?.pauseAfterSecs ?? 4)} value={entry.pauseAfter ?? ""}
+              onchange={(e) => api.updateEntry(entry.id, { pauseAfter: e.currentTarget.value === "" ? null : +e.currentTarget.value })} /> s</span>
+          {/if}
+          <span class="lbl"></span>
+          <label class="small"><input type="checkbox" checked={!!entry.hold} onchange={(e) => api.updateEntry(entry.id, { hold: e.currentTarget.checked })} />
+            Stop before {isPause ? "this pause" : "this song"} (start it with Play Next)</label>
         </div>
         {#if entry.overrides && Object.keys(entry.overrides).length}
           <button class="plain small" onclick={() => api.updateEntry(entry.id, { overrides: {} })}>Clear overrides</button>
@@ -337,6 +377,8 @@
   .box { display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: var(--radius); }
   .setonly { flex-direction: row; align-items: center; justify-content: space-between; font-size: var(--fs-sm); color: var(--text-dim); }
   .entrybox { border-color: color-mix(in srgb, var(--main) 40%, var(--border)); }
+  .section-title.sub { margin-top: 6px; }
+  .col { display: flex; flex-direction: column; gap: 4px; }
   .section-title.row { display: flex; justify-content: space-between; align-items: center; }
   .grid { display: grid; grid-template-columns: 74px 1fr; gap: 5px 8px; align-items: center; }
   .lbl { color: var(--text-dim); font-size: var(--fs-sm); }
