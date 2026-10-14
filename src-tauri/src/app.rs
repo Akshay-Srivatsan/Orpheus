@@ -174,6 +174,10 @@ impl App {
                 app.emit_tts_status();
             }
         }));
+        let announce = app.settings.read().announce.clone();
+        if announce.enabled {
+            app.tts.warm_up(announce.tts_config());
+        }
         let (mapping, enabled, auto) = app.current_mapping();
         let _ = app.midi.set(Midi::new(mapping, enabled, auto, handler));
         // Restore the last active setlist.
@@ -228,6 +232,9 @@ impl App {
         self.spotify.set_web_client_id(&crate::commands::spotify_web_client_id(&new));
         if serde_json::to_string(&old.announce)? != serde_json::to_string(&new.announce)? {
             self.emit_tts_status();
+            if new.announce.enabled {
+                self.tts.warm_up(new.announce.tts_config());
+            }
         }
         if old.keylock != new.keylock {
             for d in &self.decks {
@@ -583,6 +590,7 @@ impl App {
                     }
                     if tick % 100 == 0 {
                         app.log_underruns();
+                        app.tts.unload_if_idle();
                     }
                     let snaps = app.deck_snapshots();
                     let key = serde_json::to_string(&snaps).unwrap_or_default();

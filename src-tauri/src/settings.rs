@@ -87,6 +87,9 @@ impl Default for MidiSettings {
     }
 }
 
+/// Default Kokoro voice.
+const DEFAULT_VOICE: &str = "af_heart";
+
 /// Spoken announcements of the next dance in auto mode (`tts.rs`). Off by default.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -99,15 +102,14 @@ pub struct AnnounceSettings {
     pub pause_before_secs: f64,
     /// Pause after the announcement, before the next song starts.
     pub pause_after_secs: f64,
-    /// Piper voice (key in Piper's voice catalogue).
+    /// Kokoro voice, e.g. `af_heart`.
     pub voice: String,
-    /// Speech rate (Piper's length scale: >1 slower).
-    pub length_scale: f64,
+    /// Kokoro model variant: `fp16` (default) or `fp32`.
+    pub model: String,
+    /// Speech rate: 1 = normal, >1 faster.
+    pub speed: f64,
     /// Linear gain of announcements.
     pub volume: f64,
-    /// Optional: an existing Piper executable / voice model instead of the downloaded ones.
-    pub piper_path: String,
-    pub voice_path: String,
 }
 
 impl Default for AnnounceSettings {
@@ -117,22 +119,21 @@ impl Default for AnnounceSettings {
             patterns: vec!["The next dance is a {dance}.".into(), "Please find a partner for a {dance}.".into()],
             pause_before_secs: 3.0,
             pause_after_secs: 4.0,
-            voice: "en_US-lessac-medium".into(),
-            length_scale: 1.0,
+            voice: DEFAULT_VOICE.into(),
+            model: "fp16".into(),
+            speed: 1.0,
             volume: 0.8,
-            piper_path: String::new(),
-            voice_path: String::new(),
         }
     }
 }
 
 impl AnnounceSettings {
     pub fn tts_config(&self) -> crate::tts::TtsConfig {
+        // Settings from the Piper days name other voices.
         crate::tts::TtsConfig {
-            voice: self.voice.clone(),
-            piper_path: self.piper_path.clone(),
-            voice_path: self.voice_path.clone(),
-            length_scale: self.length_scale,
+            voice: if crate::tts::is_voice(&self.voice) { self.voice.clone() } else { DEFAULT_VOICE.into() },
+            model: self.model.clone(),
+            speed: self.speed,
         }
     }
 }

@@ -1,6 +1,6 @@
 <script lang="ts">
   // Settings → Auto Mode: starting songs automatically, and spoken
-  // announcements of the next dance (Piper text-to-speech). All off by default.
+  // announcements of the next dance (Kokoro text-to-speech). All off by default.
   import { onMount } from "svelte";
   import { api } from "../lib/api";
   import { app, confirmAction } from "../lib/state.svelte";
@@ -10,6 +10,8 @@
   const s = $derived(app.settings!);
   const a = $derived(s.announce);
   const tts = $derived(app.tts);
+  /** The voice in use (an old Piper voice name falls back to Kokoro's default). */
+  const voice = $derived(tts?.voice || a.voice);
   let voices = $state<VoiceInfo[] | null>(null);
   let voicesError = $state<string | null>(null);
   let language = $state("");
@@ -19,7 +21,7 @@
     api.ttsVoices()
       .then((v) => {
         voices = v;
-        language = v.find((x) => x.key === a.voice)?.language ?? "";
+        language = v.find((x) => x.key === voice)?.language ?? "";
       })
       .catch((e) => (voicesError = String(e)));
   });
@@ -95,15 +97,15 @@
           <option value="">All languages</option>
           {#each languages as l}<option value={l}>{l}</option>{/each}
         </select>
-        <select value={a.voice} onchange={(e) => setAnnounce({ voice: e.currentTarget.value })}>
-          {#if !shownVoices.some((v) => v.key === a.voice)}<option value={a.voice}>{a.voice}</option>{/if}
+        <select value={voice} onchange={(e) => setAnnounce({ voice: e.currentTarget.value })}>
+          {#if !shownVoices.some((v) => v.key === voice)}<option value={voice}>{voice}</option>{/if}
           {#each shownVoices as v}
-            <option value={v.key}>{v.name} ({v.quality}){tts?.installedVoices.includes(v.key) ? " ✓" : ` · ${mb(v.sizeBytes)}`}</option>
+            <option value={v.key}>{v.name} ({v.gender}){tts?.installedVoices.includes(v.key) ? " ✓" : ""}</option>
           {/each}
         </select>
       </span>
     {:else if voicesError}
-      <span class="warn small">Couldn't load Piper's voice list ({voicesError}). Voice: {a.voice}</span>
+      <span class="warn small">Couldn't load Kokoro's voice list ({voicesError}). Voice: {voice}</span>
     {:else}
       <span class="faint small">Loading voices…</span>
     {/if}
@@ -112,19 +114,25 @@
         <span class="num small">Downloading {installing.what}… {installing.total ? `${Math.round((installing.done / installing.total) * 100)}%` : mb(installing.done)}</span>
       {:else if tts?.state === "ready"}
         <span class="ok small"><Icon name="check" size={12} /> Ready</span>
-        <button class="small" onclick={() => confirmAction("Delete Piper and the downloaded voices from this computer?").then((ok) => { if (ok) app.run(api.ttsRemove()); })}>Remove…</button>
+        <button class="small" onclick={() => confirmAction("Delete the announcer's model and voices from this computer?").then((ok) => { if (ok) app.run(api.ttsRemove()); })}>Remove…</button>
       {:else}
-        <button class="primary small" onclick={() => app.run(api.ttsInstall())}>Download Piper and This Voice</button>
+        <button class="primary small" onclick={() => app.run(api.ttsInstall())}>Download {tts?.installedVoices.length ? "This Voice" : `the Voice (${a.model === "fp32" ? "325" : "160"} MB)`}</button>
         {#if tts?.state === "error"}<span class="err small">{tts.message}</span>{/if}
       {/if}
     </span>
-    <span class="faint small">Announcements are spoken by <a href="https://github.com/rhasspy/piper" target="_blank" rel="noreferrer">Piper</a>, an open-source text-to-speech engine that runs on this computer. Downloading needs the internet once.</span>
+    <span class="row small">Quality
+      <select value={a.model} onchange={(e) => setAnnounce({ model: e.currentTarget.value as AnnounceSettings["model"] })}>
+        <option value="fp16">Standard (160 MB)</option>
+        <option value="fp32">Full precision (325 MB)</option>
+      </select>
+    </span>
+    <span class="faint small">Announcements are spoken by <a href="https://huggingface.co/hexgrad/Kokoro-82M" target="_blank" rel="noreferrer">Kokoro</a>, an open-source text-to-speech model that runs inside Orpheus on this computer. Downloading needs the internet once.</span>
   </span>
 
   <span class="l">Sound</span>
   <span class="col">
-    <span class="row">Speed <input type="range" min="0.7" max="1.4" step="0.05" value={2 - (a.lengthScale || 1)}
-      onchange={(e) => setAnnounce({ lengthScale: Math.round((2 - +e.currentTarget.value) * 100) / 100 })} />
+    <span class="row">Speed <input type="range" min="0.7" max="1.4" step="0.05" value={a.speed || 1}
+      onchange={(e) => setAnnounce({ speed: +e.currentTarget.value })} />
       Volume <input type="range" min="0" max="1.5" step="0.05" value={a.volume} onchange={(e) => setAnnounce({ volume: +e.currentTarget.value })} />
       <span class="num faint">{Math.round(a.volume * 100)}%</span></span>
     <span class="row">
@@ -134,12 +142,6 @@
     <span class="faint small">Announcements play in the room and in your headphones.</span>
   </span>
 
-  <span class="l">Advanced</span>
-  <span class="col">
-    <span class="faint small">Use a Piper you already have instead of the download (paths on this computer):</span>
-    <input type="text" class="pattern" placeholder="Piper program" value={a.piperPath} onchange={(e) => setAnnounce({ piperPath: e.currentTarget.value.trim() })} />
-    <input type="text" class="pattern" placeholder="Voice model (.onnx, with its .onnx.json next to it)" value={a.voicePath} onchange={(e) => setAnnounce({ voicePath: e.currentTarget.value.trim() })} />
-  </span>
 </div>
 
 <style>

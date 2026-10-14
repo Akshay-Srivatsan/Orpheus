@@ -340,13 +340,13 @@ export interface AnnounceSettings {
   patterns: string[];
   pauseBeforeSecs: number;
   pauseAfterSecs: number;
-  /** Piper voice key, e.g. "en_US-lessac-medium". */
+  /** Kokoro voice, e.g. "af_heart". */
   voice: string;
-  /** Piper length scale: >1 slower. */
-  lengthScale: number;
+  /** Kokoro model: "fp16" (~160 MB, default) or "fp32" (~325 MB). */
+  model: "fp16" | "fp32";
+  /** Speech rate: 1 = normal, >1 faster. */
+  speed: number;
   volume: number;
-  piperPath: string;
-  voicePath: string;
 }
 
 export type TtsState =
@@ -361,8 +361,7 @@ export interface VoiceInfo {
   key: string;
   name: string;
   language: string;
-  quality: string;
-  sizeBytes: number;
+  gender: "female" | "male";
 }
 
 // ---------------------------------------------------------------- live state

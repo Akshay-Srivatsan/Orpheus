@@ -181,12 +181,14 @@ button under Play Next for the current session).
     the pauses.
   - Announcements play in the room and in the headphones. The speaker
     button under Play Next announces the next dance whenever you like.
-  - Speech comes from [Piper](https://github.com/rhasspy/piper), an
-    open-source text-to-speech engine that runs on your computer. Settings
-    downloads Piper and a voice of your choice from Piper's catalogue
-    (about 25 MB plus 20–120 MB per voice) into the app data folder, or you
-    can point it at a Piper you already have. Downloading needs the
-    internet; speaking doesn't.
+  - Speech comes from [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M),
+    an open-weights text-to-speech model that runs inside Orpheus (on the
+    same ONNX Runtime as stem separation; no extra program). Settings
+    downloads the model (160 MB, or 325 MB at full precision) and a voice
+    (0.5 MB each) into the app data folder. Voices: English (US and UK),
+    Spanish, French, Italian, Brazilian Portuguese and Hindi. Downloading
+    needs the internet; speaking doesn't. The model is loaded ahead of time
+    and released after 15 minutes without announcements.
 - **Per entry** (Info tab, "Auto mode", for an entry in a set):
   - the pause before it;
   - what is announced: a random sentence, your own text (`{dance}`
@@ -267,6 +269,7 @@ The developer examples in `src-tauri/examples/` work without the UI:
 - `meter` prints detected BPM and meter evidence for files.
 - `stretch` renders an excerpt at a tempo with every time-stretch engine,
   for listening tests.
+- `say` speaks a sentence with the announcer voice into a WAV file.
 
 ### Layout
 
@@ -282,7 +285,7 @@ src-tauri/src/
   audio/        engine: decks (stretch + SRC + fades) → lock-free rings → device mixer (cpal); stretch engines; thread priorities
   spotify.rs    librespot session, per-deck players, metadata, Web API search
   stems.rs      background stem separation and cache
-  tts.rs        Piper text-to-speech for announcements (install, voices, synthesis)
+  tts.rs        Kokoro text-to-speech for announcements (download, phonemes, synthesis)
   midi.rs       midir hot-plug, mappings (DJ2GO2 built in), learn, LEDs
   commands.rs   Tauri commands
   profiles/     the built-in "No club" profile

@@ -54,10 +54,11 @@ hound = "3"
 thread-priority = "3"
 stem-splitter-core = { version = "1.2", default-features = false }
 base64 = "0.22"
-# Unpacking the Piper (text-to-speech) release.
-tar = "0.4"
-flate2 = "1"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+# Announcements: Kokoro text-to-speech on ONNX Runtime (same version and
+# features as stem-splitter-core's), misaki and espeak-ng (pure Rust) phonemes.
+ort = { version = "=2.0.0-rc.11", features = ["download-binaries"] }
+misaki-rs = { version = "0.6", default-features = false }
+espeak-ng = { version = "0.2", default-features = false, features = ["bundled-data-en", "bundled-data-es", "bundled-data-fr", "bundled-data-it", "bundled-data-pt", "bundled-data-hi"] }
 open = "5"
 
 # On Linux, ask RealtimeKit (over D-Bus) for real-time scheduling; works without root.

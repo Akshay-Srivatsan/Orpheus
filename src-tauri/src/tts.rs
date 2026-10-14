@@ -1,25 +1,34 @@
-//! Spoken announcements with Piper (https://github.com/rhasspy/piper), an
-//! open-source neural text-to-speech engine.
+//! Spoken announcements with Kokoro (https://huggingface.co/hexgrad/Kokoro-82M),
+//! an open-weights neural text-to-speech model, run in-process on ONNX Runtime
+//! (the same runtime as stem separation).
 //!
-//! Piper runs as a separate program: Orpheus downloads the release for this
-//! platform and a voice (from Piper's voice catalogue) into the machine-local
-//! data folder on first use, then runs `piper --output_raw` with the text on
-//! stdin and reads 16-bit mono PCM from stdout. A Piper executable and voice
-//! you already have can be used instead (settings `piperPath`, `voicePath`).
-//! Installing needs an internet connection; speaking does not.
+//! Text → phonemes: English with misaki (Kokoro's own phonemizer, `misaki-rs`),
+//! unknown English words and the other languages with espeak-ng (the pure-Rust
+//! port, with its data bundled). Phonemes → token ids (Kokoro's vocabulary) →
+//! the model, with the voice's style vector for that length → 24 kHz audio.
+//!
+//! The model (~160 MB, or ~325 MB at full precision), its vocabulary and the
+//! chosen voice (~0.5 MB) are downloaded on first use into the machine-local
+//! data folder. Installing needs an internet connection; speaking does not.
 
 use anyhow::{anyhow, Context, Result};
 use parking_lot::Mutex;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-/// Piper release (standalone builds with their libraries and espeak-ng data).
-const PIPER_RELEASE: &str = "https://github.com/rhasspy/piper/releases/download/2023.11.14-2";
-/// Piper's voice catalogue: voices.json, and the files it lists.
-const VOICES: &str = "https://huggingface.co/rhasspy/piper-voices/resolve/main";
+/// Kokoro v1.0 in ONNX form (model variants, tokenizer, voices).
+const REPO: &str = "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX";
+const SAMPLE_RATE: u32 = 24_000;
+/// Kokoro's longest input (tokens, excluding the two padding tokens).
+const MAX_TOKENS: usize = 510;
+/// The loaded model is released after this long without speaking.
+const IDLE_UNLOAD: Duration = Duration::from_secs(15 * 60);
+/// ONNX Runtime threads for synthesis (at low priority).
+const THREADS: usize = 4;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase", tag = "state")]
@@ -35,32 +44,79 @@ pub enum TtsState {
 pub struct TtsStatus {
     #[serde(flatten)]
     pub state: TtsState,
-    /// The voice that is installed and in use.
+    /// The voice in use.
     pub voice: String,
     /// Voices downloaded on this computer.
     pub installed_voices: Vec<String>,
     pub dir: String,
 }
 
-/// A voice from Piper's catalogue.
+/// A Kokoro voice.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VoiceInfo {
     pub key: String,
     pub name: String,
     pub language: String,
-    pub quality: String,
-    pub size_bytes: u64,
+    pub gender: String,
 }
 
-/// Where Piper and the voice come from (settings).
+/// Model variant and voice (settings).
 #[derive(Debug, Clone, Default)]
 pub struct TtsConfig {
     pub voice: String,
-    pub piper_path: String,
-    pub voice_path: String,
-    /// Speech rate: >1 slower, <1 faster (Piper's length scale).
-    pub length_scale: f64,
+    /// `fp16` (default, ~160 MB) or `fp32` (~325 MB).
+    pub model: String,
+    /// Speech rate: 1 = normal, >1 faster.
+    pub speed: f64,
+}
+
+impl TtsConfig {
+    fn model_file(&self) -> &'static str {
+        if self.model == "fp32" { "model.onnx" } else { "model_fp16.onnx" }
+    }
+}
+
+/// How a voice's text becomes phonemes: Kokoro's voice prefixes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Lang {
+    EnUs,
+    EnGb,
+    /// Other languages via espeak-ng (its language code).
+    Espeak(&'static str),
+}
+
+/// Kokoro's voice prefix → (language, espeak code, display name). Japanese and
+/// Mandarin voices need phonemizers Orpheus doesn't have, so they're left out.
+const LANGUAGES: &[(char, Lang, &str)] = &[
+    ('a', Lang::EnUs, "English (US)"),
+    ('b', Lang::EnGb, "English (UK)"),
+    ('e', Lang::Espeak("es"), "Spanish"),
+    ('f', Lang::Espeak("fr"), "French"),
+    ('i', Lang::Espeak("it"), "Italian"),
+    ('p', Lang::Espeak("pt-br"), "Portuguese (Brazil)"),
+    ('h', Lang::Espeak("hi"), "Hindi"),
+];
+
+/// Whether `key` names a Kokoro voice Orpheus can use (`af_heart`, `bm_george`, …).
+pub fn is_voice(key: &str) -> bool {
+    let b = key.as_bytes();
+    b.len() > 3 && matches!(b[1], b'f' | b'm') && b[2] == b'_' && b[3..].iter().all(|c| c.is_ascii_lowercase()) && voice_lang(key).is_some()
+}
+
+fn voice_lang(voice: &str) -> Option<(Lang, &'static str)> {
+    let c = voice.chars().next()?;
+    LANGUAGES.iter().find(|(p, ..)| *p == c).map(|(_, l, n)| (*l, *n))
+}
+
+struct Loaded {
+    model_file: &'static str,
+    session: ort::session::Session,
+    vocab: HashMap<char, i64>,
+    /// Style vectors per voice: rows of 256 floats, one per input length.
+    voices: HashMap<String, Vec<f32>>,
+    phonemizers: HashMap<Lang, Phonemizer>,
+    last_used: Instant,
 }
 
 type ChangeFn = Box<dyn Fn() + Send>;
@@ -71,19 +127,29 @@ pub struct Tts {
     http: reqwest::Client,
     state: Mutex<TtsState>,
     on_change: Mutex<Option<ChangeFn>>,
-    /// Recent clips (text → samples, rate), so a repeated announcement is instant.
-    cache: Mutex<HashMap<String, (Arc<Vec<f32>>, u32)>>,
+    loaded: Mutex<Option<Loaded>>,
+    /// Recent clips (text → samples), so a repeated announcement is instant.
+    cache: Mutex<HashMap<String, Arc<Vec<f32>>>>,
 }
 
 impl Tts {
     pub fn new(data_dir: &Path, rt: tokio::runtime::Handle) -> Arc<Self> {
-        let dir = data_dir.join("tts");
+        // Earlier versions downloaded the Piper program and voices here.
+        for old in ["piper", "voices", "voices.json"] {
+            let p = data_dir.join("tts").join(old);
+            if p.is_dir() {
+                let _ = std::fs::remove_dir_all(&p);
+            } else if p.exists() {
+                let _ = std::fs::remove_file(&p);
+            }
+        }
         Arc::new(Self {
-            dir,
+            dir: data_dir.join("tts").join("kokoro"),
             rt,
             http: reqwest::Client::new(),
             state: Mutex::new(TtsState::Missing),
             on_change: Mutex::new(None),
+            loaded: Mutex::new(None),
             cache: Mutex::new(HashMap::new()),
         })
     }
@@ -92,108 +158,89 @@ impl Tts {
         *self.on_change.lock() = Some(f);
     }
 
-    fn changed(&self) {
+    fn set_state(&self, s: TtsState) {
+        *self.state.lock() = s;
         if let Some(f) = self.on_change.lock().as_ref() {
             f();
         }
-    }
-
-    fn set_state(&self, s: TtsState) {
-        *self.state.lock() = s;
-        self.changed();
-    }
-
-    pub fn status(&self, cfg: &TtsConfig) -> TtsStatus {
-        let mut state = self.state.lock().clone();
-        if matches!(state, TtsState::Missing | TtsState::Ready) {
-            state = if self.executable(cfg).is_some() && self.voice_model(cfg).is_some() { TtsState::Ready } else { TtsState::Missing };
-        }
-        TtsStatus { state, voice: cfg.voice.clone(), installed_voices: self.installed_voices(), dir: self.dir.display().to_string() }
-    }
-
-    fn piper_dir(&self) -> PathBuf {
-        self.dir.join("piper")
     }
 
     fn voices_dir(&self) -> PathBuf {
         self.dir.join("voices")
     }
 
-    fn executable(&self, cfg: &TtsConfig) -> Option<PathBuf> {
-        if !cfg.piper_path.trim().is_empty() {
-            return Some(PathBuf::from(cfg.piper_path.trim())).filter(|p| p.exists());
-        }
-        let exe = self.piper_dir().join(if cfg!(windows) { "piper.exe" } else { "piper" });
-        exe.exists().then_some(exe)
+    fn installed(&self, cfg: &TtsConfig) -> bool {
+        self.dir.join(cfg.model_file()).exists()
+            && self.dir.join("tokenizer.json").exists()
+            && self.voices_dir().join(format!("{}.bin", cfg.voice)).exists()
     }
 
-    fn voice_model(&self, cfg: &TtsConfig) -> Option<PathBuf> {
-        if !cfg.voice_path.trim().is_empty() {
-            return Some(PathBuf::from(cfg.voice_path.trim())).filter(|p| p.exists());
+    pub fn status(&self, cfg: &TtsConfig) -> TtsStatus {
+        let mut state = self.state.lock().clone();
+        if matches!(state, TtsState::Missing | TtsState::Ready) {
+            state = if self.installed(cfg) { TtsState::Ready } else { TtsState::Missing };
         }
-        let p = self.voices_dir().join(format!("{}.onnx", cfg.voice));
-        (p.exists() && p.with_extension("onnx.json").exists()).then_some(p)
-    }
-
-    fn installed_voices(&self) -> Vec<String> {
-        let mut v: Vec<String> = std::fs::read_dir(self.voices_dir())
-            .map(|rd| {
-                rd.flatten()
-                    .filter_map(|e| e.file_name().to_str().and_then(|n| n.strip_suffix(".onnx")).map(String::from))
-                    .collect()
-            })
+        let mut installed_voices: Vec<String> = std::fs::read_dir(self.voices_dir())
+            .map(|rd| rd.flatten().filter_map(|e| e.file_name().to_str()?.strip_suffix(".bin").map(String::from)).collect())
             .unwrap_or_default();
-        v.sort();
-        v
+        installed_voices.sort();
+        TtsStatus { state, voice: cfg.voice.clone(), installed_voices, dir: self.dir.display().to_string() }
     }
 
-    /// Piper's voice catalogue.
+    /// Kokoro's voices (those Orpheus can phonemize).
     pub fn voices(&self) -> Result<Vec<VoiceInfo>> {
-        let catalogue = self.catalogue()?;
-        let mut out: Vec<VoiceInfo> = catalogue
-            .as_object()
-            .map(|o| {
-                o.iter()
-                    .map(|(key, v)| VoiceInfo {
-                        key: key.clone(),
-                        name: v["name"].as_str().unwrap_or(key).to_string(),
-                        language: format!(
-                            "{} ({})",
-                            v["language"]["name_english"].as_str().unwrap_or(""),
-                            v["language"]["country_english"].as_str().unwrap_or("")
-                        ),
-                        quality: v["quality"].as_str().unwrap_or("").to_string(),
-                        size_bytes: v["files"]
-                            .as_object()
-                            .map(|f| f.iter().filter(|(p, _)| p.ends_with(".onnx")).filter_map(|(_, x)| x["size_bytes"].as_u64()).sum())
-                            .unwrap_or(0),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        out.sort_by(|a, b| (&a.language, &a.name, &a.quality).cmp(&(&b.language, &b.name, &b.quality)));
-        Ok(out)
-    }
-
-    fn catalogue(&self) -> Result<serde_json::Value> {
-        let path = self.dir.join("voices.json");
-        if let Ok(text) = std::fs::read_to_string(&path) {
-            if let Ok(v) = serde_json::from_str(&text) {
-                return Ok(v);
+        let path = self.dir.join("voice-list.json");
+        let names: Vec<String> = match std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str(&t).ok()) {
+            Some(n) => n,
+            None => {
+                let listing: serde_json::Value = self.rt.block_on(async {
+                    let url = REPO.replace("huggingface.co/", "huggingface.co/api/models/") + "/tree/main/voices";
+                    self.http.get(url).send().await?.error_for_status()?.json().await
+                })?;
+                let names: Vec<String> = listing
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|f| f["path"].as_str()?.strip_prefix("voices/")?.strip_suffix(".bin").map(String::from)).collect())
+                    .unwrap_or_default();
+                std::fs::create_dir_all(&self.dir)?;
+                std::fs::write(&path, serde_json::to_string(&names)?)?;
+                names
             }
-        }
-        let text = self.rt.block_on(async {
-            let r = self.http.get(format!("{VOICES}/voices.json")).send().await?.error_for_status()?;
-            r.text().await
-        })?;
-        std::fs::create_dir_all(&self.dir)?;
-        std::fs::write(&path, &text)?;
-        Ok(serde_json::from_str(&text)?)
+        };
+        Ok(names
+            .into_iter()
+            .filter_map(|key| {
+                let (_, language) = voice_lang(&key)?;
+                let (prefix, name) = key.split_once('_')?;
+                let gender = match prefix.chars().nth(1) {
+                    Some('f') => "female",
+                    Some('m') => "male",
+                    _ => return None,
+                };
+                let mut n = name.to_string();
+                n[..1].make_ascii_uppercase();
+                Some(VoiceInfo { name: n, language: language.into(), gender: gender.into(), key })
+            })
+            .collect())
     }
 
-    /// Downloads Piper (if needed) and the configured voice.
+    /// Downloads the model, its vocabulary and the configured voice.
     pub fn install(&self, cfg: &TtsConfig) -> Result<()> {
-        let r = self.install_inner(cfg);
+        let r = (|| -> Result<()> {
+            std::fs::create_dir_all(self.voices_dir())?;
+            voice_lang(&cfg.voice).ok_or_else(|| anyhow!("Unsupported Kokoro voice “{}”", cfg.voice))?;
+            for (file, what) in [("tokenizer.json", "vocabulary"), (cfg.model_file(), "Kokoro model")] {
+                let dest = self.dir.join(file);
+                if !dest.exists() {
+                    let sub = if file.ends_with(".onnx") { "onnx/" } else { "" };
+                    self.download(&format!("{REPO}/resolve/main/{sub}{file}"), &dest, what)?;
+                }
+            }
+            let voice = self.voices_dir().join(format!("{}.bin", cfg.voice));
+            if !voice.exists() {
+                self.download(&format!("{REPO}/resolve/main/voices/{}.bin", cfg.voice), &voice, &format!("voice {}", cfg.voice))?;
+            }
+            Ok(())
+        })();
         match &r {
             Ok(()) => self.set_state(TtsState::Ready),
             Err(e) => self.set_state(TtsState::Error { message: format!("{e:#}") }),
@@ -201,152 +248,259 @@ impl Tts {
         r
     }
 
-    fn install_inner(&self, cfg: &TtsConfig) -> Result<()> {
-        std::fs::create_dir_all(&self.dir)?;
-        if self.executable(cfg).is_none() {
-            let asset = piper_asset().ok_or_else(|| anyhow!("Piper has no build for this platform; set a Piper executable in Settings"))?;
-            let archive = self.dir.join(asset);
-            self.download(&format!("{PIPER_RELEASE}/{asset}"), &archive, "Piper")?;
-            let _ = std::fs::remove_dir_all(self.piper_dir());
-            extract(&archive, &self.dir).context("unpacking Piper")?;
-            let _ = std::fs::remove_file(&archive);
-            if self.executable(cfg).is_none() {
-                return Err(anyhow!("Piper's archive didn't contain the program"));
-            }
-        }
-        if self.voice_model(cfg).is_none() {
-            let catalogue = self.catalogue()?;
-            let files = catalogue[cfg.voice.as_str()]["files"]
-                .as_object()
-                .ok_or_else(|| anyhow!("Unknown Piper voice “{}”", cfg.voice))?
-                .keys()
-                .filter(|p| p.ends_with(".onnx") || p.ends_with(".onnx.json"))
-                .cloned()
-                .collect::<Vec<_>>();
-            std::fs::create_dir_all(self.voices_dir())?;
-            for f in files {
-                let ext = if f.ends_with(".onnx.json") { "onnx.json" } else { "onnx" };
-                let dest = self.voices_dir().join(format!("{}.{ext}", cfg.voice));
-                self.download(&format!("{VOICES}/{f}"), &dest, &format!("voice {}", cfg.voice))?;
-            }
-        }
-        Ok(())
-    }
-
     fn download(&self, url: &str, dest: &Path, what: &str) -> Result<()> {
         let tmp = dest.with_extension("part");
-        self.rt.block_on(async {
-            let mut r = self.http.get(url).send().await?.error_for_status()?;
-            let total = r.content_length().unwrap_or(0);
-            let mut f = std::fs::File::create(&tmp)?;
-            let mut done = 0u64;
-            while let Some(chunk) = r.chunk().await? {
-                f.write_all(&chunk)?;
-                done += chunk.len() as u64;
-                self.set_state(TtsState::Installing { done, total, what: what.to_string() });
-            }
-            anyhow::Ok(())
-        })
-        .with_context(|| format!("downloading {what}"))?;
+        self.rt
+            .block_on(async {
+                let mut r = self.http.get(url).send().await?.error_for_status()?;
+                let total = r.content_length().unwrap_or(0);
+                let mut f = std::fs::File::create(&tmp)?;
+                let mut done = 0u64;
+                while let Some(chunk) = r.chunk().await? {
+                    f.write_all(&chunk)?;
+                    done += chunk.len() as u64;
+                    self.set_state(TtsState::Installing { done, total, what: what.to_string() });
+                }
+                anyhow::Ok(())
+            })
+            .with_context(|| format!("downloading the {what}"))?;
         std::fs::rename(&tmp, dest)?;
         Ok(())
     }
 
-    /// Deletes Piper and the downloaded voices.
+    /// Deletes the downloaded model and voices.
     pub fn remove(&self) -> Result<()> {
-        if self.dir.exists() {
-            std::fs::remove_dir_all(&self.dir)?;
-        }
+        *self.loaded.lock() = None;
         self.cache.lock().clear();
+        if let Some(tts) = self.dir.parent().filter(|p| p.exists()) {
+            std::fs::remove_dir_all(tts)?;
+        }
         self.set_state(TtsState::Missing);
         Ok(())
     }
 
-    /// Speaks `text`: mono samples and their sample rate.
+    /// Loads the model ahead of time (in the background), so the first
+    /// announcement isn't late.
+    pub fn warm_up(self: &Arc<Self>, cfg: TtsConfig) {
+        if !self.installed(&cfg) {
+            return;
+        }
+        let tts = self.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = tts.synthesize(&cfg, "Ready.") {
+                log::warn!("tts warm-up: {e:#}");
+            }
+        });
+    }
+
+    /// Releases the model after a while without speaking (called periodically).
+    pub fn unload_if_idle(&self) {
+        let mut l = self.loaded.lock();
+        if l.as_ref().is_some_and(|l| l.last_used.elapsed() > IDLE_UNLOAD) {
+            *l = None;
+            log::info!("tts: model unloaded (idle)");
+        }
+    }
+
+    /// Speaks `text`: mono samples and their sample rate. Runs at low priority
+    /// (call from a background thread).
     pub fn synthesize(&self, cfg: &TtsConfig, text: &str) -> Result<(Arc<Vec<f32>>, u32)> {
-        let key = format!("{}|{}|{}|{text}", cfg.voice, cfg.voice_path, cfg.length_scale);
+        let speed = if cfg.speed > 0.0 { cfg.speed } else { 1.0 };
+        let key = format!("{}|{}|{speed}|{text}", cfg.voice, cfg.model);
         if let Some(hit) = self.cache.lock().get(&key) {
-            return Ok(hit.clone());
+            return Ok((hit.clone(), SAMPLE_RATE));
         }
-        let exe = self.executable(cfg).ok_or_else(|| anyhow!("Piper isn't installed (Settings → Auto Mode)"))?;
-        let model = self.voice_model(cfg).ok_or_else(|| anyhow!("The voice isn't installed (Settings → Auto Mode)"))?;
-        let rate = std::fs::read_to_string(model.with_extension("onnx.json"))
-            .ok()
-            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-            .and_then(|v| v["audio"]["sample_rate"].as_u64())
-            .unwrap_or(22050) as u32;
-        let mut cmd = std::process::Command::new(&exe);
-        cmd.arg("--model").arg(&model).arg("--output_raw").arg("--quiet");
-        if cfg.length_scale > 0.0 && (cfg.length_scale - 1.0).abs() > 1e-3 {
-            cmd.arg("--length_scale").arg(format!("{:.2}", cfg.length_scale));
+        if !self.installed(cfg) {
+            return Err(anyhow!("The announcer voice isn't installed (Settings → Auto Mode)"));
         }
-        if let Some(dir) = exe.parent() {
-            // The standalone build keeps its libraries and espeak-ng data next to it.
-            cmd.current_dir(dir);
+        let (lang, _) = voice_lang(&cfg.voice).ok_or_else(|| anyhow!("Unsupported Kokoro voice “{}”", cfg.voice))?;
+        // Synthesis is CPU-heavy: below the audio threads. ONNX Runtime's
+        // worker threads are created from this thread and inherit it.
+        crate::audio::priority::lower_current_thread();
+        let mut guard = self.loaded.lock();
+        if guard.as_ref().is_none_or(|l| l.model_file != cfg.model_file()) {
+            *guard = None;
+            *guard = Some(self.load(cfg)?);
         }
-        cmd.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
-        background_priority(&mut cmd);
-        let mut child = cmd.spawn().with_context(|| format!("starting {}", exe.display()))?;
-        child.stdin.take().ok_or_else(|| anyhow!("no stdin"))?.write_all(format!("{}\n", text.replace('\n', " ")).as_bytes())?;
-        let mut raw = vec![];
-        child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?.read_to_end(&mut raw)?;
-        let out = child.wait_with_output()?;
-        if !out.status.success() || raw.len() < 2 {
-            let err = String::from_utf8_lossy(&out.stderr);
-            return Err(anyhow!("Piper failed: {}", err.lines().last().unwrap_or("no output")));
+        let l = guard.as_mut().expect("loaded");
+        l.last_used = Instant::now();
+        if !l.voices.contains_key(&cfg.voice) {
+            let raw = std::fs::read(self.voices_dir().join(format!("{}.bin", cfg.voice)))?;
+            let styles = raw.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+            l.voices.insert(cfg.voice.clone(), styles);
         }
-        let samples: Vec<f32> = raw.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0).collect();
-        let clip = (Arc::new(samples), rate);
+        if !l.phonemizers.contains_key(&lang) {
+            let p = Phonemizer::new(lang, &self.dir.join("espeak-ng-data"))?;
+            l.phonemizers.insert(lang, p);
+        }
+        let phonemes = l.phonemizers[&lang].phonemize(text)?;
+        let mut audio = vec![];
+        for chunk in split_tokens(&phonemes, &l.vocab) {
+            let n = chunk.len();
+            let styles = &l.voices[&cfg.voice];
+            let row = n.min(styles.len() / 256 - 1);
+            let style = styles[row * 256..row * 256 + 256].to_vec();
+            let mut ids = Vec::with_capacity(n + 2);
+            ids.push(0);
+            ids.extend(chunk);
+            ids.push(0);
+            let len = ids.len();
+            let out = l.session.run(ort::inputs![
+                "input_ids" => ort::value::Tensor::from_array(([1usize, len], ids))?,
+                "style" => ort::value::Tensor::from_array(([1usize, 256], style))?,
+                "speed" => ort::value::Tensor::from_array(([1usize], vec![speed as f32]))?,
+            ])?;
+            let (_, wav) = out[0].try_extract_tensor::<f32>()?;
+            audio.extend_from_slice(wav);
+        }
+        drop(guard);
+        let clip = Arc::new(audio);
         let mut cache = self.cache.lock();
         if cache.len() > 64 {
             cache.clear();
         }
         cache.insert(key, clip.clone());
-        Ok(clip)
+        Ok((clip, SAMPLE_RATE))
+    }
+
+    fn load(&self, cfg: &TtsConfig) -> Result<Loaded> {
+        let started = Instant::now();
+        let tok: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(self.dir.join("tokenizer.json"))?)?;
+        let vocab = tok["model"]["vocab"]
+            .as_object()
+            .ok_or_else(|| anyhow!("Kokoro's vocabulary is unreadable; remove and download it again"))?
+            .iter()
+            .filter_map(|(k, v)| Some((k.chars().next()?, v.as_i64()?)))
+            .collect();
+        let session = ort::session::Session::builder()?
+            .with_intra_threads(THREADS)?
+            .commit_from_file(self.dir.join(cfg.model_file()))
+            .context("loading the Kokoro model")?;
+        log::info!("tts: Kokoro loaded in {:.1} s", started.elapsed().as_secs_f64());
+        Ok(Loaded {
+            model_file: cfg.model_file(),
+            session,
+            vocab,
+            voices: HashMap::new(),
+            phonemizers: HashMap::new(),
+            last_used: Instant::now(),
+        })
     }
 }
 
-/// Piper's standalone build for this platform.
-fn piper_asset() -> Option<&'static str> {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("linux", "x86_64") => Some("piper_linux_x86_64.tar.gz"),
-        ("linux", "aarch64") => Some("piper_linux_aarch64.tar.gz"),
-        ("macos", "x86_64") => Some("piper_macos_x64.tar.gz"),
-        ("macos", "aarch64") => Some("piper_macos_aarch64.tar.gz"),
-        ("windows", "x86_64") => Some("piper_windows_amd64.zip"),
-        _ => None,
+/// Phoneme token ids in chunks Kokoro accepts, split at pauses where possible.
+fn split_tokens(phonemes: &str, vocab: &HashMap<char, i64>) -> Vec<Vec<i64>> {
+    let ids: Vec<(char, i64)> = phonemes.chars().filter_map(|c| vocab.get(&c).map(|&id| (c, id))).collect();
+    let mut chunks = vec![];
+    let mut start = 0;
+    while start < ids.len() {
+        let mut end = (start + MAX_TOKENS).min(ids.len());
+        if end < ids.len() {
+            // Break after the last sentence or clause mark in range.
+            if let Some(p) = ids[start..end].iter().rposition(|(c, _)| ".!?;:,".contains(*c)) {
+                end = start + p + 1;
+            }
+        }
+        chunks.push(ids[start..end].iter().map(|(_, id)| *id).collect());
+        start = end;
     }
+    chunks
 }
 
-fn extract(archive: &Path, into: &Path) -> Result<()> {
-    let f = std::fs::File::open(archive)?;
-    if archive.extension().is_some_and(|e| e == "zip") {
-        zip::ZipArchive::new(f)?.extract(into)?;
-    } else {
-        tar::Archive::new(flate2::read::GzDecoder::new(f)).unpack(into)?;
-    }
-    Ok(())
+/// Text → Kokoro phonemes for one language.
+enum Phonemizer {
+    English(misaki_rs::G2P, bool),
+    Espeak(Mutex<espeak_ng::Translator>),
 }
 
-/// Synthesis is short but CPU-heavy: keep it below the audio threads, and
-/// without a console window on Windows.
-fn background_priority(cmd: &mut std::process::Command) {
-    #[cfg(target_os = "linux")]
-    {
-        use std::os::unix::process::CommandExt;
-        // SAFETY: nice() is async-signal-safe.
-        unsafe {
-            cmd.pre_exec(|| {
-                libc::nice(10);
-                Ok(())
-            });
+impl Phonemizer {
+    fn new(lang: Lang, espeak_data: &Path) -> Result<Self> {
+        let espeak = |code: &str| -> Result<espeak_ng::Translator> {
+            let base = code.split('-').next().unwrap_or(code);
+            espeak_ng::install_bundled_language(espeak_data, base).with_context(|| format!("espeak-ng data for {base}"))?;
+            Ok(espeak_ng::Translator::new(code, Some(espeak_data))?)
+        };
+        Ok(match lang {
+            Lang::EnUs | Lang::EnGb => {
+                let gb = lang == Lang::EnGb;
+                let fallback = EspeakFallback(Mutex::new(espeak(if gb { "en" } else { "en-us" })?), gb);
+                let language = if gb { misaki_rs::Language::EnglishGB } else { misaki_rs::Language::EnglishUS };
+                Phonemizer::English(misaki_rs::G2P::with_fallback(language, Some(Box::new(fallback))), gb)
+            }
+            Lang::Espeak(code) => Phonemizer::Espeak(Mutex::new(espeak(code)?)),
+        })
+    }
+
+    fn phonemize(&self, text: &str) -> Result<String> {
+        match self {
+            Phonemizer::English(g2p, gb) => {
+                let (p, _) = g2p.g2p(text).map_err(|e| anyhow!("phonemizing: {e}"))?;
+                Ok(normalize_english(&p, *gb))
+            }
+            Phonemizer::Espeak(tr) => Ok(tr.lock().text_to_ipa(text)?.replace('\u{200d}', "")),
         }
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
+}
+
+/// misaki-rs writes diphthongs as letter pairs joined by U+200D; Kokoro's
+/// vocabulary has misaki's single-letter forms. American English doesn't mark
+/// vowel length.
+fn normalize_english(p: &str, gb: bool) -> String {
+    let mut s = p.to_string();
+    for (pair, one) in [("a\u{200d}ɪ", "I"), ("e\u{200d}ɪ", "A"), ("o\u{200d}ʊ", "O"), ("a\u{200d}ʊ", "W"), ("ɔ\u{200d}ɪ", "Y"), ("ə\u{200d}ʊ", "Q")] {
+        s = s.replace(pair, one);
     }
-    let _ = cmd;
+    s = s.replace('\u{200d}', "");
+    if !gb {
+        s = s.replace('ː', "");
+    }
+    s
+}
+
+/// Unknown English words: espeak-ng's IPA in misaki's conventions (as
+/// misaki-rs' own espeak fallback does).
+struct EspeakFallback(Mutex<espeak_ng::Translator>, bool);
+
+impl misaki_rs::Fallback for EspeakFallback {
+    fn phonemize(&self, word: &str) -> std::result::Result<String, misaki_rs::fallback::FallbackError> {
+        let ipa = self.0.lock().text_to_ipa(word).map_err(|e| misaki_rs::fallback::FallbackError::Espeak { word: word.into(), error: e.to_string() })?;
+        let mut r = ipa;
+        if !self.1 {
+            for (long, short) in [("iː", "i"), ("uː", "u"), ("ɜː", "ɜ"), ("ɔː", "ɔ"), ("ɑː", "ɑ")] {
+                r = r.replace(long, short);
+            }
+        }
+        Ok(r.replace('_', "").replace("ˈˈ", "ˈ").replace("ˌˌ", "ˌ"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn english_phonemes_fit_kokoro() {
+        let s = normalize_english("fˈa\u{200d}ɪnd ɐ pˈɑː\u{200d}ɹtnɚ", false);
+        assert_eq!(s, "fˈInd ɐ pˈɑɹtnɚ");
+        assert_eq!(normalize_english("ɡˈə\u{200d}ʊ", true), "ɡˈQ");
+    }
+
+    #[test]
+    fn long_input_is_split_at_pauses() {
+        let vocab: HashMap<char, i64> = [('a', 1), ('.', 4)].into_iter().collect();
+        let text = format!("{}.{}", "a".repeat(400), "a".repeat(300));
+        let chunks = split_tokens(&text, &vocab);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].len(), 401);
+        assert!(chunks.iter().all(|c| c.len() <= MAX_TOKENS));
+    }
+
+    #[test]
+    fn voices_map_to_languages() {
+        assert_eq!(voice_lang("af_heart").map(|v| v.0), Some(Lang::EnUs));
+        assert_eq!(voice_lang("bm_george").map(|v| v.0), Some(Lang::EnGb));
+        assert!(voice_lang("jf_alpha").is_none());
+        assert!(is_voice("af_heart") && is_voice("bm_george"));
+        assert!(!is_voice("en_US-lessac-medium") && !is_voice("jf_alpha"));
+    }
 }
