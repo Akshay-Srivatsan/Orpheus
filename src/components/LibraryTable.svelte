@@ -112,7 +112,9 @@
     return { pb, st, fit: tempoFit(pb.target, st), dur };
   }
 
-  const sorted = $derived.by(() => {
+  const viewCrate = $derived(app.view.kind === "crate" ? app.crates.find((c) => c.id === (app.view as { id: Id }).id) : undefined);
+  const plainCrate = $derived(viewCrate && !viewCrate.smart ? viewCrate : undefined);
+  const ordered = $derived.by(() => {
     const rows = filtered.map((r) => ({ r, i: info(r) }));
     const dir = sortAsc ? 1 : -1;
     const naturalOrder = !!plainCrate || app.view.kind === "setlist" || app.view.kind === "history";
@@ -139,6 +141,35 @@
     });
   });
 
+  /** Views listing songs (not particular versions, as setlists, history and crates do) fold them. */
+  const foldable = $derived(app.view.kind === "all" || app.view.kind === "missing" || (app.view.kind === "crate" && !plainCrate));
+  const isOpen = (trackId: Id) => app.foldVersions === !!app.foldToggled[trackId];
+
+  /** The rows shown: a song's versions folded under the first of them (in this order), unless unfolded. */
+  const sorted = $derived.by(() => {
+    type Item = (typeof ordered)[number] & { fold?: { count: number; open: boolean }; child?: boolean };
+    if (!foldable) return ordered as Item[];
+    const groups = new Map<Id, (typeof ordered)[number][]>();
+    for (const x of ordered) {
+      const g = groups.get(x.r.track.id);
+      if (g) g.push(x);
+      else groups.set(x.r.track.id, [x]);
+    }
+    const out: Item[] = [];
+    for (const g of groups.values()) {
+      if (g.length === 1) { out.push(g[0]); continue; }
+      const open = isOpen(g[0].r.track.id);
+      out.push({ ...g[0], fold: { count: g.length, open } });
+      if (open) for (const x of g.slice(1)) out.push({ ...x, child: true });
+    }
+    return out;
+  });
+
+  function toggleFold(e: Event, trackId: Id) {
+    e.stopPropagation();
+    app.foldToggled = { ...app.foldToggled, [trackId]: !app.foldToggled[trackId] };
+  }
+
   $effect(() => {
     // Crates and setlists default to their own order.
     const k = app.view.kind;
@@ -150,8 +181,6 @@
   const end = $derived(Math.min(sorted.length, Math.ceil((scrollTop + viewH) / ROW_H) + 10));
   const visible = $derived(sorted.slice(start, end));
   const selSet = $derived(new Set(app.selected));
-  const viewCrate = $derived(app.view.kind === "crate" ? app.crates.find((c) => c.id === (app.view as { id: Id }).id) : undefined);
-  const plainCrate = $derived(viewCrate && !viewCrate.smart ? viewCrate : undefined);
 
   function sortBy(k: SortKey) {
     if (sortKey === k) sortAsc = !sortAsc;
@@ -356,7 +385,13 @@
     {#if showPos}<button class="c pos" onclick={() => sortBy("position")}>#</button>{/if}
     <button class="c title" onclick={() => sortBy("title")}>Title {sortKey === "title" ? (sortAsc ? "▲" : "▼") : ""}</button>
     <button class="c artist" onclick={() => sortBy("artist")}>Artist {sortKey === "artist" ? (sortAsc ? "▲" : "▼") : ""}</button>
-    <button class="c version" onclick={() => sortBy("version")}>Version</button>
+    <span class="c version">
+      <button class="plain hbtn" onclick={() => sortBy("version")}>Version</button>
+      {#if foldable}
+        <button class="plain hbtn foldall" title={app.foldVersions ? "Unfold all: show every version of every song" : "Fold all: show each song once, its other versions under it"}
+          onclick={() => { app.foldVersions = !app.foldVersions; app.foldToggled = {}; }}>{app.foldVersions ? "▸" : "▾"}</button>
+      {/if}
+    </span>
     <button class="c style" onclick={() => sortBy("style")}>Style</button>
     <button class="c bpm" onclick={() => sortBy("bpm")}>BPM {sortKey === "bpm" ? (sortAsc ? "▲" : "▼") : ""}</button>
     <button class="c time" onclick={() => sortBy("time")}>Time {sortKey === "time" ? (sortAsc ? "▲" : "▼") : ""}</button>
@@ -366,7 +401,7 @@
   </div>
   <div class="tbody" bind:this={scroller} bind:clientHeight={viewH} onscroll={(e) => (scrollTop = e.currentTarget.scrollTop)}>
     <div style:height="{sorted.length * ROW_H}px" style:position="relative">
-      {#each visible as { r, i: inf }, k (r.key)}
+      {#each visible as { r, i: inf, fold, child }, k (r.key)}
         {@const idx = start + k}
         {@const fit = inf.fit}
         <div
@@ -374,6 +409,7 @@
           class:sel={selSet.has(r.version.id)}
           class:missing={r.track.missing}
           class:suggested={r.suggested}
+          class:child
           class:inset={app.view.kind !== "history" && app.playedInSet.has(r.track.id)}
           title={r.suggested ? `Not labelled ${app.styleName(app.filterStyle)} yet — its tempo fits` : undefined}
           class:playing={app.decks.some((d) => d.versionId === r.version.id && d.onAir && d.status === "playing")}
@@ -390,6 +426,9 @@
         >
           {#if showPos}<span class="c pos num faint">{r.position}</span>{/if}
           <span class="c title" title={r.track.title}>
+            {#if fold}
+              <button class="plain fold" title={fold.open ? "Fold its versions" : `Show all ${fold.count} versions`} onclick={(e) => toggleFold(e, r.track.id)}>{fold.open ? "▾" : "▸"}<span class="n">{fold.count}</span></button>
+            {:else if child}<span class="fold-pad"></span>{/if}
             {#if r.rec.missing}<span title="File missing on this computer"><Icon name="warning" size={12} /></span>{/if}
             {#if r.rec.sources.some((s) => s.kind === "spotify") && !r.rec.files.length}<span class="sp" title="Spotify">●</span>{/if}
             {r.track.title}
@@ -458,6 +497,13 @@
   .tr.sel { background: var(--bg-selected); }
   .tr.missing { color: var(--text-faint); }
   .tr.suggested { color: var(--text-dim); font-style: italic; }
+  .fold { padding: 0 3px 0 0; height: 16px; min-width: 22px; color: var(--text-dim); flex: none; font-size: 10px; gap: 1px; }
+  .fold .n { font-size: var(--fs-xs); color: var(--text-faint); font-variant-numeric: tabular-nums; }
+  .fold-pad { display: inline-block; width: 22px; flex: none; }
+  .tr.child .title { color: var(--text-dim); }
+  .thead .version { display: flex; gap: 6px; align-items: center; }
+  .hbtn { padding: 0; height: auto; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; }
+  .foldall { color: var(--text-faint); font-weight: 500; text-transform: none; letter-spacing: 0; white-space: nowrap; }
   .tr.suggested:first-of-type, .tr:not(.suggested) + .tr.suggested { border-top: 1px dashed var(--border-strong); }
   .sugg { font-size: var(--fs-xs); color: var(--text-faint); font-style: normal; }
   /* Already played in the open set. */

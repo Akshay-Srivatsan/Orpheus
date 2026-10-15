@@ -55,7 +55,7 @@ Runs on macOS, Linux and Windows (Tauri 2, Rust and Svelte).
 
 | | |
 |---|---|
-| **Song** | What you think of as one song: title, artist, notes and its versions. The library lists songs (one row per version). |
+| **Song** | What you think of as one song: title, artist, notes and its versions. The library lists songs; one with several versions is folded into one row (▸ shows how many; click to unfold, or use the Version column's ▸ to unfold them all). Setlists, history and crates list each version. |
 | **Version** | Something to play: a recording, and how to play it (dance styles, tempo, start, end and fade points, gain, stem defaults, comments and your tags). One song can be a Rotary Waltz at 150 BPM and a Fast Waltz at 168 BPM, or have several people's edits of a line dance (or edits of different songs for one choreography), each its own recording. A version can have a **display name** shown to dancers instead of the style names, e.g. the name of a particular line dance. In a set, an entry's **Version** menu (Info) switches between them. |
 | **Recording** | A piece of audio: its sources, BPM, meter, loudness, waveform, hot cues and stems. Several songs can play one recording (a song that works for two line dances); one no song plays is hidden, and listed in **Library → Recordings** with **Make a Song**. |
 | **Source** | Where a recording's audio comes from: a local file or a Spotify track (the same audio). A recording can have both. |

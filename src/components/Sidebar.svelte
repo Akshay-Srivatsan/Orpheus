@@ -119,7 +119,7 @@
   <div class="group">
     <div class="section-title">Library</div>
     <button class="item" class:sel={is({ kind: "all" })} onclick={() => go({ kind: "all" })}>
-      <Icon name="music" size={14} /> All Songs <span class="count">{app.rows.length}</span>
+      <Icon name="music" size={14} /> All Songs <span class="count">{app.libraryTracks.length}</span>
     </button>
     <button class="item" class:sel={is({ kind: "history" })} onclick={() => go({ kind: "history" })}>
       <Icon name="history" size={14} /> History

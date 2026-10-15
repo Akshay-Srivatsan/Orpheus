@@ -98,6 +98,10 @@ class AppState {
   rightTab = $state<"set" | "info">("set");
   settingsOpen = $state<false | string>(false);
   newSetlistOpen = $state(false);
+  /** Library views show a song with several versions as one row (unless unfolded). */
+  foldVersions = $state(true);
+  /** Songs unfolded (while `foldVersions`) or folded (while not), by id. */
+  foldToggled = $state<Record<Id, boolean>>({});
   /** Combining songs (Same Song), or recordings and their songs (Same Recording): ids, the first kept. */
   mergeDialog = $state<{ songs: Id[]; recordings: Id[] } | null>(null);
   /** A style slot in the open set the DJ is choosing a song for. */
