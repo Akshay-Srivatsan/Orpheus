@@ -101,7 +101,7 @@
 
   /** Club styles not among yours (by name), offered for import. */
   const importable = $derived(
-    clubStyles.map(([id, c]) => styleDef(id, c)).filter((c) => !lib?.styles.some((s) => s.key === c.key || s.name.toLowerCase() === c.name.toLowerCase())),
+    clubStyles.map(([id, c]) => styleDef(id, c)).filter((c) => !lib?.styles.some((s) => s.key === c.key || sameName(s.name, c.name))),
   );
 </script>
 

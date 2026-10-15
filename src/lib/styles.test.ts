@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { emptyClub, type Club, type ClubStyle } from "./clubs";
-import { clubContext, projStyle, shownStyles, songFacts } from "./styles";
+import { clubContext, projStyle, sameName, shownStyles, songFacts } from "./styles";
 import type { ProjEntry, StyleLibrary, Track, Version } from "./types";
 
 const style = (name: string, meter: number[], tempo: [number, number] | null): ClubStyle => ({
@@ -49,6 +49,12 @@ describe("what songs show", () => {
     expect(ctx?.mapping["my-polka"]).toEqual(["polka"]);
     expect(ctx?.mapping.waltz).toEqual(["rotary", "cross-step"]);
     expect(ctx?.mapping.kizomba).toBeUndefined();
+  });
+
+  it("names match whatever their spacing and hyphens", () => {
+    for (const n of ["crossstep waltz", "Cross-Step Waltz", "cross step  waltz", "Cross–step waltz"]) expect(sameName(n, "Cross-step Waltz")).toBe(true);
+    expect(sameName("Night Club Two-Step", "Nightclub Two Step")).toBe(true);
+    expect(sameName("Rotary Waltz", "Waltz")).toBe(false);
   });
 
   it("a slot shows its chosen style", () => {

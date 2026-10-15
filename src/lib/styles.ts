@@ -84,8 +84,11 @@ export function clubStyleShown(club: Club, id: string, fit: Assessment | undefin
   return { key: id, name: def.name, short: def.short, color: def.color, club: def, unmapped: false, fit: fit?.fit ?? null, problems: fit?.problems ?? [], rate: fit?.rate ?? 1, auto: false };
 }
 
-/** Names are the same when they differ only in case and spacing. */
-export const sameName = (a: string, b: string) => a.trim().replace(/\s+/g, " ").toLowerCase() === b.trim().replace(/\s+/g, " ").toLowerCase();
+/** A name with case, accents, spaces, hyphens and punctuation left out ("Cross-step Waltz" → "crossstepwaltz"). */
+const nameKey = (n: string) => n.normalize("NFKD").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+
+/** Names are the same when they differ only in case, accents, spacing, hyphens or punctuation. */
+export const sameName = (a: string, b: string) => nameKey(a) === nameKey(b);
 
 /** The club styles each of your styles may be called at a club: your rules, and those with the same name. */
 export function clubNames(club: Club, clubId: string | null | undefined, lib: StyleLibrary | null): Record<string, string[]> {
