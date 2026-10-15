@@ -388,7 +388,7 @@
               <button class="plain small" title="To suggest this version in a club's file: the song's title with this recording's fingerprint, length and sources"
                 onclick={async () => copy(await app.run(api.clubSongText(v.id)), "Song entry")}><Icon name="copy" size={11} /> Club-file entry</button>
               {#if track.versions.length > 1}
-                <button class="plain small" title="Make this version a song of its own (undoes Combine into One Song)"
+                <button class="plain small" title="Make this version a song of its own, still playing its recording (undoes Combine)"
                   onclick={() => app.run(api.separateVersions([v.id]))}>Separate into Its Own Song</button>
               {/if}
             </div>

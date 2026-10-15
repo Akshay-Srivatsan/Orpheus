@@ -1,13 +1,15 @@
 <script lang="ts">
-  // Combining songs into one, or marking recordings as the same audio. Where
-  // they differ (title, BPM, …), the DJ picks which value to keep; the rest is
-  // undone by separating again (Inspector).
+  // Combine (Same Song): songs become one song, each version keeping its
+  // recording. Combine (Same Recording): recordings become one (the same
+  // audio), and their songs one song. Where they differ (title, BPM, …), the
+  // DJ picks which value to keep. Undone by separating again (Inspector).
   import { api } from "../lib/api";
   import { app } from "../lib/state.svelte";
   import { fmtBpm } from "../lib/tempo";
   import type { Id, Recording, RecordingPatch, Track, TrackPatch } from "../lib/types";
 
-  let { kind, ids }: { kind: "songs" | "recordings"; ids: Id[] } = $props();
+  /** The songs to combine (the first kept), and for Same Recording the recordings (the first kept). */
+  let { songs: songIds, recordings: recIds }: { songs: Id[]; recordings: Id[] } = $props();
 
   interface Field {
     key: string;
@@ -16,20 +18,22 @@
     values: { id: Id; text: string; of: string }[];
   }
 
-  const songs = $derived(kind === "songs" ? (ids.map((id) => app.trackMap.get(id)).filter(Boolean) as Track[]) : []);
-  const recordings = $derived.by((): Recording[] => {
-    if (kind !== "recordings") return [];
-    return ids.map((id) => app.recordingMap.get(id)).filter(Boolean) as Recording[];
-  });
+  const songs = $derived(songIds.map((id) => app.trackMap.get(id)).filter(Boolean) as Track[]);
+  const recordings = $derived(recIds.map((id) => app.recordingMap.get(id)).filter(Boolean) as Recording[]);
+  const sameRecording = $derived(recordings.length > 1);
   const meter = (r: Recording) => (r.beatsPerBar ? `${r.beatsPerBar} beats a bar${r.meterSource === "user" ? " (set by you)" : ""}` : "unknown");
-  const sourceText = (r: Recording) => r.sources.map((s) => (s.kind === "spotify" ? "Spotify" : "file")).join(" + ");
+  /** "FLAC file + Spotify": tells recordings with the same title apart. */
+  const sourceText = (r: Recording) => {
+    const ext = r.files[0]?.match(/\.([a-z0-9]+)$/i)?.[1]?.toUpperCase();
+    return r.sources.map((s) => (s.kind === "spotify" ? "Spotify" : ext ? `${ext} file` : "file")).join(" + ");
+  };
 
   const fields = $derived.by((): Field[] => {
     const out: Field[] = [];
     const add = (key: string, label: string, values: Field["values"]) => {
       if (new Set(values.map((v) => v.text)).size > 1) out.push({ key, label, values });
     };
-    if (kind === "songs") {
+    if (songs.length > 1) {
       const of = (t: Track) => t.title;
       add("title", "Title", songs.map((t) => ({ id: t.id, text: t.title, of: of(t) })));
       add("artist", "Artist", songs.map((t) => ({ id: t.id, text: t.artist, of: of(t) })));
@@ -37,7 +41,8 @@
       add("genre", "Genre", songs.map((t) => ({ id: t.id, text: t.genre ?? "", of: of(t) })));
       add("rating", "Rating", songs.map((t) => ({ id: t.id, text: t.rating ? "★".repeat(t.rating) : "", of: of(t) })));
       add("notes", "Notes", songs.map((t) => ({ id: t.id, text: t.notes ?? "", of: of(t) })));
-    } else {
+    }
+    if (sameRecording) {
       const of = (r: Recording) => `${r.title} (${sourceText(r)})`;
       add("bpm", "BPM", recordings.map((r) => ({ id: r.id, text: `${fmtBpm(r.bpm)}${r.bpmSource ? ` (${r.bpmSource})` : ""}`, of: of(r) })));
       add("meter", "Meter", recordings.map((r) => ({ id: r.id, text: meter(r), of: of(r) })));
@@ -50,42 +55,37 @@
   /** Field → the id whose value is kept (default: the first item's). */
   let picks = $state<Record<string, Id>>({});
   const pick = (f: Field) => picks[f.key] ?? f.values[0].id;
+  const has = (key: string) => fields.some((f) => f.key === key);
 
   let busy = $state(false);
   async function merge() {
     busy = true;
     try {
-      if (kind === "songs") {
+      if (sameRecording) {
+        // Hot cues come from the kept recording: keep the chosen one's by keeping it.
+        const kept = recordings.find((r) => r.id === picks["cues"]) ?? recordings[0];
+        const from = (f: string) => recordings.find((r) => r.id === (picks[f] ?? recordings[0].id))!;
+        const patch: RecordingPatch = {};
+        if (has("bpm")) { patch.bpm = from("bpm").bpm; patch.bpmSource = from("bpm").bpmSource ?? "user"; }
+        if (has("meter")) patch.beatsPerBar = from("meter").beatsPerBar ?? null;
+        if (has("gainDb")) patch.gainDb = from("gainDb").gainDb ?? 0;
+        const ok = await app.run(api.mergeRecordings(kept.id, recordings.filter((r) => r.id !== kept.id).map((r) => r.id)));
+        if (!ok) return;
+        if (Object.keys(patch).length) await app.run(api.updateRecording(kept.id, patch));
+      }
+      if (songs.length > 1) {
         const [keep, ...others] = songs;
         const from = (f: string) => songs.find((t) => t.id === (picks[f] ?? keep.id))!;
         const patch: TrackPatch = {};
-        for (const f of fields) {
-          const t = from(f.key);
-          if (f.key === "title") patch.title = t.title;
-          if (f.key === "artist") patch.artist = t.artist;
-          if (f.key === "album") patch.album = t.album;
-          if (f.key === "genre") patch.genre = t.genre ?? "";
-          if (f.key === "rating") patch.rating = t.rating;
-          if (f.key === "notes") patch.notes = t.notes ?? "";
-        }
-        await app.run(api.combineSongs(keep.id, others.map((t) => t.id)));
+        if (has("title")) patch.title = from("title").title;
+        if (has("artist")) patch.artist = from("artist").artist;
+        if (has("album")) patch.album = from("album").album;
+        if (has("genre")) patch.genre = from("genre").genre ?? "";
+        if (has("rating")) patch.rating = from("rating").rating;
+        if (has("notes")) patch.notes = from("notes").notes ?? "";
+        const ok = await app.run(api.combineSongs(keep.id, others.map((t) => t.id)));
+        if (!ok) return;
         if (Object.keys(patch).length) await app.run(api.updateTrack(keep.id, patch));
-      } else {
-        const [keep, ...others] = recordings;
-        const from = (f: string) => recordings.find((r) => r.id === (picks[f] ?? keep.id))!;
-        const patch: RecordingPatch = {};
-        for (const f of fields) {
-          const r = from(f.key);
-          if (f.key === "bpm") { patch.bpm = r.bpm; patch.bpmSource = r.bpmSource ?? "user"; }
-          if (f.key === "meter") patch.beatsPerBar = r.beatsPerBar ?? null;
-          if (f.key === "gainDb") patch.gainDb = r.gainDb ?? 0;
-        }
-        // Hot cues come from the kept recording: keep the chosen one's by keeping it.
-        const cuesFrom = picks["cues"];
-        const kept = cuesFrom && cuesFrom !== keep.id ? recordings.find((r) => r.id === cuesFrom)! : keep;
-        const rest = recordings.filter((r) => r.id !== kept.id);
-        await app.run(api.mergeRecordings(kept.id, rest.map((r) => r.id)));
-        if (Object.keys(patch).length) await app.run(api.updateRecording(kept.id, patch));
       }
       app.mergeDialog = null;
     } finally {
@@ -96,17 +96,19 @@
 
 <div class="overlay" role="presentation" onmousedown={(e) => e.target === e.currentTarget && (app.mergeDialog = null)}>
   <form class="sheet" onsubmit={(e) => { e.preventDefault(); merge(); }}>
-    {#if kind === "songs"}
-      <h2>Combine {songs.length} Songs into One</h2>
+    {#if sameRecording}
+      <h2>Combine as the Same Recording</h2>
+      <p class="dim">
+        Their sources ({recordings.map(sourceText).join("; ")}) become one recording: the same audio, analysed once, with one
+        BPM and one set of hot cues.{#if songs.length > 1}{" "}Their {songs.length} songs become one song.{/if} Setlists and crates
+        keep working. To undo, split a source off in Info → Recording; “Separate into Its Own Song” makes a version a song of
+        its own again (it keeps playing this recording).
+      </p>
+    {:else}
+      <h2>Combine {songs.length} Songs as the Same Song</h2>
       <p class="dim">
         Their versions become versions of one song (each keeps its own recording), and count as the same song in a set.
         Setlists and crates keep working. To undo, select a version and choose “Separate into Its Own Song”.
-      </p>
-    {:else}
-      <h2>Mark {recordings.length} Recordings as the Same Audio</h2>
-      <p class="dim">
-        Their sources ({recordings.map(sourceText).join("; ")}) become one recording, and every version playing them plays it.
-        The songs stay as they are. To undo, split a source off in Info → Recording.
       </p>
     {/if}
     {#if fields.length}
@@ -130,7 +132,7 @@
     {/if}
     <div class="buttons">
       <button type="button" onclick={() => (app.mergeDialog = null)}>Cancel</button>
-      <button type="submit" class="primary" disabled={busy}>{kind === "songs" ? "Combine" : "Mark as Same"}</button>
+      <button type="submit" class="primary" disabled={busy}>Combine</button>
     </div>
   </form>
 </div>

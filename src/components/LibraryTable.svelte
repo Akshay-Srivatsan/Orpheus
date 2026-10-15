@@ -323,8 +323,9 @@
     const songs = [...new Set(rows.map((r) => r.track.id))];
     const recs = [...new Set(rows.map((r) => r.rec.id))];
     const items: MenuItem[] = [];
-    if (songs.length > 1) items.push({ label: "Combine into One Song…", action: () => (app.mergeDialog = { kind: "songs", ids: songs }) });
-    if (recs.length > 1) items.push({ label: "Same Recording (the same audio)…", action: () => (app.mergeDialog = { kind: "recordings", ids: recs }) });
+    if (songs.length > 1) items.push({ label: "Combine (Same Song)…", action: () => (app.mergeDialog = { songs, recordings: [] }) });
+    // The same audio is the same song too (a version can be separated again, keeping the recording).
+    if (recs.length > 1) items.push({ label: "Combine (Same Recording)…", action: () => (app.mergeDialog = { songs, recordings: recs }) });
     // Versions of one song that has others: they can become a song of their own.
     if (songs.length === 1 && rows[0].track.versions.length > rows.length) {
       items.push({ label: rows.length > 1 ? "Separate into Their Own Song" : "Separate into Its Own Song", action: () => app.run(api.separateVersions(rows.map((r) => r.version.id))) });

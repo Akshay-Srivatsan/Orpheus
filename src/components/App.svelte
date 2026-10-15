@@ -142,7 +142,7 @@
   </div>
   {#if app.settingsOpen}<SettingsDialog />{/if}
   {#if app.newSetlistOpen}<NewSetlistDialog />{/if}
-  {#if app.mergeDialog}<MergeDialog kind={app.mergeDialog.kind} ids={app.mergeDialog.ids} />{/if}
+  {#if app.mergeDialog}<MergeDialog songs={app.mergeDialog.songs} recordings={app.mergeDialog.recordings} />{/if}
   {#if app.smartEditor}<SmartCrateDialog />{/if}
   {#if dragging}<div class="dropzone">Drop music files or folders to add them to your library</div>{/if}
 {:else}

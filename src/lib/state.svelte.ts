@@ -98,8 +98,8 @@ class AppState {
   rightTab = $state<"set" | "info">("set");
   settingsOpen = $state<false | string>(false);
   newSetlistOpen = $state(false);
-  /** Combining songs, or marking recordings as the same audio (ids of songs / recordings, the first kept). */
-  mergeDialog = $state<{ kind: "songs" | "recordings"; ids: Id[] } | null>(null);
+  /** Combining songs (Same Song), or recordings and their songs (Same Recording): ids, the first kept. */
+  mergeDialog = $state<{ songs: Id[]; recordings: Id[] } | null>(null);
   /** A style slot in the open set the DJ is choosing a song for. */
   fillingSlot = $state<Id | null>(null);
   /** Smart crate being edited: its id, or "new". */
