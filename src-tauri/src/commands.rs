@@ -933,7 +933,6 @@ pub async fn levels_set(app: S<'_>, master: Option<f32>, cue: Option<f32>, cross
     }
     if let Some(x) = crossfader {
         app.set_crossfader(x);
-        app.untake(&["cue.crossfader"]);
         app.emit_perform();
     }
     Ok(())

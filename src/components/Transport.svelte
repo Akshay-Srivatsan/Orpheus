@@ -19,7 +19,7 @@
   const playing = $derived(app.decks.some((d) => d.onAir && (d.status === "playing" || d.status === "loading")));
   const nextDeck = $derived(app.decks.find((d) => d.entryId && d.entryId === p?.nextEntryId));
   const xf = $derived(p?.crossfader ?? 0.5);
-  const xfOffCenter = $derived(Math.abs(xf - 0.5) > (app.settings?.crossfaderCenterTolerance ?? 0));
+  const xfOffCenter = $derived(xf !== 0.5);
   /** Flashes the crossfader when an action was refused because of it. */
   let xfBlocked = $state(false);
   $effect(() => {
@@ -46,6 +46,10 @@
     if (playing) return p?.armed ? "Press again to fade & play" : "Fade & Play Next";
     return "Play Next";
   });
+
+  function setXf(x: number) {
+    app.run(api.setLevels({ crossfader: x }));
+  }
 
   async function playNext() {
     const r = await app.run(api.playNext());
@@ -109,15 +113,19 @@
     {/if}
   </div>
 
-  <div class="xfader" class:blocked={xfBlocked} onanimationend={() => (xfBlocked = false)}
-    title="Crossfader: which deck the room hears. Only you move it: Play Next, Go Live and auto mode need it centered (or on the side of the deck they start).">
-    <span class="xl" class:on={xf < 0.5}>A</span>
-    <input type="range" min="0" max="1" step="0.01" value={xf} aria-label="Crossfader"
-      oninput={(e) => api.setLevels({ crossfader: +e.currentTarget.value })} />
-    <span class="xl" class:on={xf > 0.5}>B</span>
+  <div class="xfader" class:blocked={xfBlocked} onanimationend={() => (xfBlocked = false)}>
+    <button class="plain xl" class:on={xf < 0.5} title="Crossfader all the way to deck A" onclick={() => setXf(0)}>A</button>
+    <span class="track">
+      <input type="range" min="0" max="1" step="0.01" value={xf} aria-label="Crossfader"
+        title="Crossfader: which deck the room hears. Snaps to the center. Play Next, Go Live and auto mode need it centered or on the side of the deck they start."
+        oninput={(e) => setXf(+e.currentTarget.value)} />
+      <button class="plain notch" class:on={xf === 0.5} title="Center the crossfader (the room hears both decks)" aria-label="Center the crossfader"
+        onclick={() => setXf(0.5)}></button>
+    </span>
+    <button class="plain xl" class:on={xf > 0.5} title="Crossfader all the way to deck B" onclick={() => setXf(1)}>B</button>
   </div>
   {#if xfOffCenter && p?.autoAdvance}
-    <div class="xf-hint small" title="Auto mode only starts songs when the crossfader is centered">Auto mode: center the fader</div>
+    <button class="plain xf-hint small" title="Auto mode only starts songs when the crossfader is centered" onclick={() => setXf(0.5)}>Auto mode: center the fader</button>
   {/if}
 
   <div class="row">
@@ -165,9 +173,16 @@
   button.on { color: var(--teal); border-color: color-mix(in srgb, var(--teal) 50%, transparent); }
   .ondeck { color: var(--text-faint); }
   .xfader { flex: none; display: flex; align-items: center; gap: 6px; }
-  .xfader input { flex: 1; min-width: 0; }
-  .xl { font-weight: 800; font-size: var(--fs-sm); color: var(--text-faint); width: 10px; text-align: center; }
+  .track { flex: 1; min-width: 0; position: relative; display: flex; padding-bottom: 7px; }
+  .track input { flex: 1; min-width: 0; }
+  .notch { position: absolute; left: 50%; bottom: -3px; transform: translateX(-50%); width: 18px; height: 10px; padding: 0; min-height: 0;
+    border: none; background: none; }
+  .notch::after { content: ""; position: absolute; left: 50%; top: 2px; transform: translateX(-50%);
+    border: 4px solid transparent; border-bottom: 5px solid var(--text-faint); border-top: none; }
+  .notch:hover::after, .notch.on::after { border-bottom-color: var(--text); }
+  .xl { font-weight: 800; font-size: var(--fs-sm); color: var(--text-faint); width: 18px; min-width: 18px; padding: 2px 0; text-align: center; }
   .xl.on { color: var(--text); }
+  .xf-hint { align-self: flex-start; padding: 0; }
   .xfader.blocked { border-radius: 6px; animation: xf-error 0.2s 6 alternate; }
   @keyframes xf-error { to { background: color-mix(in srgb, var(--red) 45%, transparent); } }
   .xf-hint { color: var(--yellow); margin-top: -4px; }

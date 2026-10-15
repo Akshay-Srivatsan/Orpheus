@@ -381,8 +381,8 @@ impl App {
     }
 
     /// Soft takeover: a hardware fader only takes control once it reaches (or
-    /// crosses) the current software value, so a preset tempo or an automatic
-    /// crossfader move isn't undone by wherever the fader happens to be.
+    /// crosses) the current software value, so e.g. a preset tempo isn't
+    /// undone by wherever the fader happens to be.
     fn takeover(&self, action: &str, hw: f64, current: f64) -> bool {
         let mut t = self.takeover.lock();
         let prev = t.last_hw.insert(action.to_string(), hw);
@@ -501,13 +501,14 @@ impl App {
                 }
                 ("master.volume", Value::Abs(v)) => self.levels.master.set((v * v) as f32),
                 ("cue.volume", Value::Abs(v)) => self.levels.cue.set((v * v) as f32),
+                // No soft takeover: Orpheus never moves the crossfader itself.
                 ("cue.crossfader", Value::Abs(v)) => {
-                    let cur = self.perform.lock().crossfader;
-                    if self.takeover(action, v, cur) {
-                        self.set_crossfader(v);
-                        self.emit_perform();
-                    }
+                    self.set_crossfader(v);
+                    self.emit_perform();
                 }
+                ("cue.crossfaderA", Value::Press) => self.set_crossfader_and_emit(0.0),
+                ("cue.crossfaderCenter", Value::Press) => self.set_crossfader_and_emit(crate::perform::CENTER),
+                ("cue.crossfaderB", Value::Press) => self.set_crossfader_and_emit(1.0),
                 (a, v) if a.starts_with("browse.") => {
                     let payload = match v {
                         Value::Rel(n) => serde_json::json!({ "action": a, "delta": n }),

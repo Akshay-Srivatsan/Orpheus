@@ -33,6 +33,9 @@ pub enum PendingNext {
 /// A synthesized announcement: samples and rate, or the error.
 pub type Clip = std::result::Result<(Arc<Vec<f32>>, u32), String>;
 
+/// Crossfader position where the room hears both decks fully.
+pub const CENTER: f64 = 0.5;
+
 /// How long the controller's lights flash when an action is refused.
 pub const ERROR_FLASH: Duration = Duration::from_millis(1200);
 
@@ -156,6 +159,17 @@ pub struct ProjectorPayload {
     pub style_library: StyleLibrary,
 }
 
+/// The deck the crossfader favors (none = centered; it snaps to the center).
+fn crossfader_side(x: f64) -> Option<usize> {
+    if x < CENTER {
+        Some(0)
+    } else if x > CENTER {
+        Some(1)
+    } else {
+        None
+    }
+}
+
 /// Room gain of `deck` for crossfader position `x` (0 = A, 1 = B). Both decks
 /// are at full level in the middle ("dipless" curve).
 pub fn crossfader_gain(deck: usize, x: f64) -> f64 {
@@ -178,42 +192,38 @@ impl App {
         }
     }
 
-    /// Moved by the DJ (screen or controller). Moving it off center toward a
-    /// deck puts that deck on air like Go Live does for headphones.
+    /// Moved by the DJ (screen or controller). Within the snap distance of
+    /// the middle it snaps to the exact center. Moving it off center toward
+    /// a deck puts that deck on air like Go Live does for headphones.
     pub fn set_crossfader(&self, x: f64) {
-        let x = x.clamp(0.0, 1.0);
+        let snap = self.settings.read().crossfader_snap;
+        let x = if (x - CENTER).abs() <= snap { CENTER } else { x.clamp(0.0, 1.0) };
         let before = std::mem::replace(&mut self.perform.lock().crossfader, x);
         self.update_routing();
-        let (was, now) = (self.crossfader_side(before), self.crossfader_side(x));
+        let (was, now) = (crossfader_side(before), crossfader_side(x));
         if let Some(deck) = now.filter(|_| now != was) {
             self.went_live(deck);
         }
     }
 
-    /// The deck the crossfader favors, beyond the center tolerance (none = centered).
-    fn crossfader_side(&self, x: f64) -> Option<usize> {
-        let tolerance = self.settings.read().crossfader_center_tolerance;
-        if x < 0.5 - tolerance {
-            Some(0)
-        } else if x > 0.5 + tolerance {
-            Some(1)
-        } else {
-            None
-        }
+    pub fn set_crossfader_and_emit(&self, x: f64) {
+        self.set_crossfader(x);
+        self.emit_perform();
     }
 
-    /// Starting `deck` for the room is allowed unless the crossfader is
-    /// purposely off center toward the other deck: Orpheus never moves it, so
-    /// the refusal is loud (an error, and the controller's lights flash).
+    /// Automation (Play Next, Go Live, auto mode) is about to start `deck`.
+    /// Orpheus never moves the crossfader: centered or toward `deck`, fine.
+    /// Toward the other deck is the DJ's choice, so the start is refused,
+    /// loudly: an error, and the controller's lights flash.
     pub fn check_crossfader(&self, deck: usize) -> Result<()> {
         let x = self.perform.lock().crossfader;
-        if self.crossfader_side(x) != Some(1 - deck) {
+        if crossfader_side(x) != Some(1 - deck) {
             return Ok(());
         }
         self.perform.lock().error_flash_until = Some(Instant::now() + ERROR_FLASH);
         emit(&self.handle, "crossfader-blocked", deck);
         Err(anyhow!(
-            "The crossfader is over to deck {}, so the room wouldn't hear deck {}. Center it for Play Next, Go Live and auto mode, or move it to deck {} yourself.",
+            "The crossfader is over to deck {}, so the room wouldn't hear deck {} fully. Center it for Play Next, Go Live and auto mode, or move it to deck {} yourself.",
             deck_name(1 - deck),
             deck_name(deck),
             deck_name(deck)

@@ -20,13 +20,15 @@ Runs on macOS, Linux and Windows (Tauri 2, Rust and Svelte).
   is optional.
 - **Two identical decks (A and B) and a crossfader.** The crossfader decides
   which deck the room hears; the other deck is the *free deck*, for cueing in
-  headphones. Only you move the crossfader. It starts in the middle, where
-  the room hears both decks: that's the position for **Play Next**, **Go
-  Live** and auto mode, which fade out the previous song first so songs
-  don't overlap. Off center (more than 10% by default, see Settings →
-  General) is your choice of deck: starting the other deck is refused with
-  an error, and the controller's lights flash. Moving the crossfader toward
-  a deck switches the headphones to the other deck (optional).
+  headphones. The crossfader starts in the middle, where the room hears
+  both decks: that's the position for **Play Next**, **Go Live** and auto
+  mode, which fade out the previous song first so songs don't overlap.
+  It snaps to the center within ±5% of it (see Settings → General). Orpheus
+  never moves it: off center is your choice of deck, and starting the other
+  deck is refused with an error while the controller's lights flash. The A, ▴ and B buttons around the
+  on-screen crossfader (also mappable to controller buttons) put it at
+  either end or the middle. Moving it toward a deck switches the headphones
+  to the other deck (optional).
 - **The next song in the set is loaded onto the free deck automatically**,
   paused at its start, so you can check it in headphones. Play Next always
   starts it from its cue point.
@@ -135,7 +137,7 @@ Machine-specific state stays in the app data folder:
     | Pads, Sampler mode | Stems on/off: vocals / drums / bass / other |
     | SYNC on the on-air deck | Fade out (press again to cancel) |
 
-    Faders and the crossfader use soft takeover.
+    Tempo faders use soft takeover; the crossfader always follows the hardware.
   - Any other controller works through MIDI Learn (Settings → Controllers).
 - **Audio:** choose any output device and channel pair separately for the
   room and for headphones. For example, with a DJ2GO2 use channels 1–2 for

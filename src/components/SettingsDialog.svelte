@@ -220,9 +220,9 @@
           </span>
           <span class="l">Crossfader</span>
           <span class="col">
-            <span>Counts as centered up to <input type="number" min="0" max="50" step="1" value={Math.round(s.crossfaderCenterTolerance * 100)}
-              onchange={(e) => set("crossfaderCenterTolerance", +e.currentTarget.value / 100)} /> % from the middle</span>
-            <span class="faint small">Orpheus never moves the crossfader. Play Next, Go Live and auto mode need it centered, or already on the side of the deck they start; otherwise they show an error and the controller's lights flash.</span>
+            <span>Snaps to the center within ± <input type="number" min="0" max="25" step="1" value={Math.round(s.crossfaderSnap * 100)}
+              onchange={(e) => set("crossfaderSnap", +e.currentTarget.value / 100)} /> %</span>
+            <span class="faint small">Orpheus never moves the crossfader. Play Next, Go Live and auto mode need it centered, or on the side of the deck they start; otherwise they show an error and the controller's lights flash.</span>
           </span>
           <span class="l">Fade-out length</span>
           <span><input type="number" min="0.5" step="0.5" placeholder={String(app.profile?.fadeOutSeconds ?? 5)} value={s.fadeOutMs != null ? s.fadeOutMs / 1000 : ""}
@@ -353,7 +353,7 @@
           </span>
         </div>
         {#if mapping}
-          <p class="dim small">Left = deck A, right = deck B. SYNC = Go Live (on the deck the room hears: fade out). Pads: Cues mode = hot cues (hold PAD MODE to clear), Sampler mode = stems (vocals / drums / bass / other). Faders and the crossfader use soft takeover. {mapping.builtin ? "Editing a built-in mapping creates a custom copy." : ""}</p>
+          <p class="dim small">Left = deck A, right = deck B. SYNC = Go Live (on the deck the room hears: fade out). Pads: Cues mode = hot cues (hold PAD MODE to clear), Sampler mode = stems (vocals / drums / bass / other). Tempo faders use soft takeover; the crossfader always follows the hardware. {mapping.builtin ? "Editing a built-in mapping creates a custom copy." : ""}</p>
           <table class="mtable">
             <thead><tr><th>Message</th><th>Kind</th><th>Action</th><th></th></tr></thead>
             <tbody>

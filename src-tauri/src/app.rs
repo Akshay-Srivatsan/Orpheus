@@ -136,7 +136,7 @@ impl App {
             announcer,
             midi: OnceLock::new(),
             // Crossfader centered: the room hears both decks until the DJ moves it.
-            perform: Mutex::new(Perform { crossfader: 0.5, ..Default::default() }),
+            perform: Mutex::new(Perform { crossfader: crate::perform::CENTER, ..Default::default() }),
             scan_progress: Mutex::new(Default::default()),
             analysis_tx,
             spotify_analysed: Mutex::new(Default::default()),
