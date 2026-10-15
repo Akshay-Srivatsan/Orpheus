@@ -91,11 +91,23 @@ pub struct Tap {
     /// Peak of the deck's signal after its volume, before routing (for the
     /// deck's meter); the poller decays it.
     pub peak: AtomicF32,
+    /// Frames the deck couldn't write because this (follower) ring was full
+    /// (diagnostics: heard as dropouts on that output).
+    pub dropped: AtomicU64,
 }
 
 impl Tap {
     pub fn new(playing: Arc<AtomicBool>, gain: f32) -> Arc<Self> {
-        Arc::new(Self { ring: Mutex::new(None), playing, gain: AtomicF32::new(gain), rate: AtomicU32::new(48000), underruns: AtomicU64::new(0), volume: AtomicF32::new(1.0), peak: AtomicF32::new(0.0) })
+        Arc::new(Self {
+            ring: Mutex::new(None),
+            playing,
+            gain: AtomicF32::new(gain),
+            rate: AtomicU32::new(48000),
+            underruns: AtomicU64::new(0),
+            volume: AtomicF32::new(1.0),
+            peak: AtomicF32::new(0.0),
+            dropped: AtomicU64::new(0),
+        })
     }
 }
 
@@ -106,7 +118,47 @@ pub struct Levels {
     /// Peak meters (written by callbacks, decayed by the UI poller).
     pub master_peak: AtomicF32,
     pub cue_peak: AtomicF32,
+    /// Output callback timing: [room, headphones].
+    pub timing: [CallbackTiming; 2],
 }
+
+/// How punctual an output's callbacks are (diagnostics; the poller reads and
+/// resets it). A late or slow callback is heard as a crackle even though no
+/// deck ran out of audio.
+#[derive(Default)]
+pub struct CallbackTiming {
+    /// Callbacks that came much later than the device buffer's period.
+    pub late: AtomicU64,
+    /// Callbacks that took longer than the audio they produced.
+    pub slow: AtomicU64,
+    /// Longest gap between two callbacks, and longest callback (µs).
+    pub max_gap_us: AtomicU64,
+    pub max_busy_us: AtomicU64,
+    /// Device period (µs) of the last callback, for the log message.
+    pub period_us: AtomicU64,
+}
+
+impl CallbackTiming {
+    /// Records one callback that started `gap` after the previous one, took
+    /// `busy`, and produced `period` of audio.
+    pub fn record(&self, gap: Option<std::time::Duration>, busy: std::time::Duration, period: std::time::Duration) {
+        let us = |d: std::time::Duration| d.as_micros() as u64;
+        self.period_us.store(us(period), Ordering::Relaxed);
+        if let Some(gap) = gap {
+            self.max_gap_us.fetch_max(us(gap), Ordering::Relaxed);
+            if gap > period * LATE_FACTOR {
+                self.late.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        self.max_busy_us.fetch_max(us(busy), Ordering::Relaxed);
+        if busy > period {
+            self.slow.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+/// A callback this many periods after the previous one counts as late.
+const LATE_FACTOR: u32 = 2;
 
 impl Default for Levels {
     fn default() -> Self {
@@ -115,6 +167,7 @@ impl Default for Levels {
             cue: AtomicF32::new(0.8),
             master_peak: AtomicF32::new(0.0),
             cue_peak: AtomicF32::new(0.0),
+            timing: Default::default(),
         }
     }
 }

@@ -31,13 +31,15 @@ pub struct RtThread {
     handle: Option<Granted>,
     rate: u32,
     since_block: Instant,
+    /// The outcome has been logged (once; `normal` re-raises for every song).
+    announced: bool,
 }
 
 impl RtThread {
     /// Promotes the current thread; falls back to normal priority with a log message.
     pub fn promote(rate: u32) -> Self {
         ignore_sigxcpu();
-        let mut t = Self { handle: None, rate: rate.max(8000), since_block: Instant::now() };
+        let mut t = Self { handle: None, rate: rate.max(8000), since_block: Instant::now(), announced: false };
         t.raise();
         t
     }
@@ -46,9 +48,20 @@ impl RtThread {
         if self.handle.is_some() {
             return;
         }
+        let first = !self.announced;
+        self.announced = true;
         self.handle = match promote_current_thread_to_real_time(self.rate / PERIOD_FRAMES_PER_SEC, self.rate) {
-            Ok(h) => Some(Granted::Platform(h)),
-            Err(e) => fifo().or_else(|| {
+            Ok(h) => {
+                if first {
+                    log::info!("{}: real-time priority", thread_name());
+                }
+                Some(Granted::Platform(h))
+            }
+            Err(e) => fifo().inspect(|_| {
+                if first {
+                    log::info!("{}: real-time priority (SCHED_FIFO)", thread_name());
+                }
+            }).or_else(|| {
                 log::warn!("{}: no real-time priority ({e}); audio may stutter under heavy load", thread_name());
                 None
             }),

@@ -337,9 +337,11 @@ where
     // One-pole smoothing with a ~5 ms time constant.
     let gain_step = (1.0 - (-1.0 / (0.005 * device_rate)).exp()) as f32;
     let err_status = status.clone();
+    let mut last_start: Option<std::time::Instant> = None;
     let stream = dev.build_output_stream::<T, _, _>(
         sc.clone(),
         move |data: &mut [T], _info| {
+            let start = std::time::Instant::now();
             if mix.len() < data.len() {
                 mix.resize(data.len(), 0.0);
             }
@@ -431,6 +433,9 @@ where
             if cue_peak > levels.cue_peak.get() {
                 levels.cue_peak.set(cue_peak);
             }
+            let period = std::time::Duration::from_secs_f64(frames as f64 / device_rate);
+            levels.timing[if is_master { 0 } else { 1 }].record(last_start.map(|l| start - l), start.elapsed(), period);
+            last_start = Some(start);
         },
         move |err| {
             log::error!("audio stream error ({}): {err}", if is_master { "master" } else { "cue" });

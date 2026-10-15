@@ -769,8 +769,12 @@ impl Worker {
             fr[0] = soft_clip(fr[0] * g * fg);
             fr[1] = soft_clip(fr[1] * g * fg);
         }
-        for (p, clock) in self.prods.iter_mut() {
+        for (i, (p, clock)) in self.prods.iter_mut().enumerate() {
             let n = if *clock { out.len() } else { (p.slots() / 2 * 2).min(out.len()) };
+            if n < out.len() {
+                let tap = if i == 0 { &self.sh.master_tap } else { &self.sh.cue_tap };
+                tap.dropped.fetch_add(((out.len() - n) / 2) as u64, Ordering::Relaxed);
+            }
             for &s in &out[..n] {
                 if p.push(s).is_err() {
                     break;

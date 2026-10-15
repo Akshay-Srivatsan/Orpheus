@@ -543,14 +543,33 @@ impl App {
         emit(&self.handle, "tts-status", self.tts_status());
     }
 
-    /// Logs output underruns (frames played as silence) since the last call.
-    fn log_underruns(&self) {
+    /// Logs audio problems since the last call: underruns (frames played as
+    /// silence), frames dropped by a headphone copy, and late or slow output
+    /// callbacks (heard as crackles although no deck ran out of audio).
+    fn log_audio_problems(&self) {
         for (i, d) in self.decks.iter().enumerate() {
             for (name, tap) in [("room", &d.shared.master_tap), ("headphones", &d.shared.cue_tap)] {
+                let deck = if i == 0 { "A" } else { "B" };
                 let n = tap.underruns.swap(0, Ordering::Relaxed);
                 if n > 0 {
-                    log::warn!("deck {}: {n} frames of underrun on the {name} output", if i == 0 { "A" } else { "B" });
+                    log::warn!("deck {deck}: {n} frames of underrun on the {name} output");
                 }
+                let n = tap.dropped.swap(0, Ordering::Relaxed);
+                if n > 0 {
+                    log::warn!("deck {deck}: {n} frames dropped on the {name} output (its buffer was full)");
+                }
+            }
+        }
+        for (name, t) in ["room", "headphones"].iter().zip(&self.levels.timing) {
+            let (late, slow) = (t.late.swap(0, Ordering::Relaxed), t.slow.swap(0, Ordering::Relaxed));
+            let (gap, busy) = (t.max_gap_us.swap(0, Ordering::Relaxed), t.max_busy_us.swap(0, Ordering::Relaxed));
+            if late > 0 || slow > 0 {
+                log::warn!(
+                    "{name} output: {late} late and {slow} slow callbacks (period {:.1} ms, longest gap {:.1} ms, longest callback {:.1} ms)",
+                    t.period_us.load(Ordering::Relaxed) as f64 / 1000.0,
+                    gap as f64 / 1000.0,
+                    busy as f64 / 1000.0
+                );
             }
         }
     }
@@ -590,7 +609,7 @@ impl App {
                         app.auto_load();
                     }
                     if tick % 100 == 0 {
-                        app.log_underruns();
+                        app.log_audio_problems();
                         app.tts.unload_if_idle();
                     }
                     let snaps = app.deck_snapshots();
