@@ -140,9 +140,9 @@ pub fn builtin_mappings() -> Vec<Mapping> {
         controls.push(c(note, 0x02, &p("goLive"), "button"));
         controls.push(c(note, 0x1B, &p("pfl"), "button"));
         controls.push(c(0x9F, 0x02 + d, &p("load"), "button"));
-        let mut tempo = c(cc, 0x09, &p("tempo"), "absolute");
-        tempo.invert = true;
-        controls.push(tempo);
+        // Pitch fader: not inverted (checked on a DJ2GO2 Touch: the fader's
+        // direction then matches the tempo shown).
+        controls.push(c(cc, 0x09, &p("tempo"), "absolute"));
         controls.push(c(cc, 0x16, &p("trim"), "absolute"));
         controls.push(c(cc, 0x06, &p("jog"), "relative"));
         controls.push(c(note, 0x06, &p("jogTouch"), "hold"));
@@ -673,7 +673,7 @@ mod tests {
         on_message(&state, &handler, &[0x90, 0x00, 0x7f], "a"); // deck A play press
         on_message(&state, &handler, &[0x90, 0x00, 0x7f], "bridge"); // same event via a 2nd port: dropped
         on_message(&state, &handler, &[0x80, 0x00, 0x00], "a"); // release: ignored for buttons
-        on_message(&state, &handler, &[0xB1, 0x09, 127], "a"); // deck B tempo fader (inverted)
+        on_message(&state, &handler, &[0xB1, 0x09, 127], "a"); // deck B tempo fader at one end
         on_message(&state, &handler, &[0xBF, 0x00, 127], "a"); // browse knob -1
         on_message(&state, &handler, &[0x91, 0x01, 0x7f], "a"); // deck B cue press
         on_message(&state, &handler, &[0x91, 0x01, 0x00], "a"); // ... and release
@@ -682,7 +682,7 @@ mod tests {
         let got = got.lock();
         let want: Vec<(String, Value)> = vec![
             ("deck0.playPause".into(), Value::Press),
-            ("deck1.tempo".into(), Value::Abs(0.0)),
+            ("deck1.tempo".into(), Value::Abs(1.0)),
             ("browse.scroll".into(), Value::Rel(-1)),
             ("deck1.cue".into(), Value::Press),
             ("deck1.cue".into(), Value::Release),
