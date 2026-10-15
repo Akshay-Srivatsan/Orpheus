@@ -1,5 +1,6 @@
 <script lang="ts">
   // Public projector display: what dancers see on the big screen.
+  import { fit } from "../../lib/fit";
   import { onMount } from "svelte";
   import { fly } from "svelte/transition";
   import type { DeckState, ProjectorPayload } from "../../lib/types";
@@ -114,7 +115,7 @@
   role="presentation"
 >
   <header>
-    <div class="title">{payload?.title ?? "Orpheus"}</div>
+    <div class="title" use:fit>{payload?.title ?? "Orpheus"}</div>
     {#if settings?.showClock ?? true}
       <Clock />
     {/if}

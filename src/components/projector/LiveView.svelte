@@ -1,6 +1,7 @@
 <script lang="ts">
   // Live mode: the current dance dominates; recent songs alongside, and
   // optionally what's coming up (queued songs and style slots).
+  import { fit } from "../../lib/fit";
   import { flip } from "svelte/animate";
   import { fade } from "svelte/transition";
   import { projStyle } from "../../lib/styles";
@@ -38,7 +39,7 @@
         {@const st = projStyle(payload, upNext)}
         <section class="next" style:--c={st.color} transition:fade={{ duration: 250 }}>
           <div class="h">Up next</div>
-          <div class="next-style">{st.name}</div>
+          <div class="next-style" use:fit={{ lines: 2 }}>{st.name}</div>
           {#if upNext.tags.length}
             <div class="next-tags">{upNext.tags.map((t) => t.name).join(" · ")}</div>
           {/if}
@@ -52,7 +53,7 @@
               {@const st = projStyle(payload, e)}
               <li style:--c={st.color} animate:flip={{ duration: 350 }} in:fade={{ duration: 300 }}>
                 <span class="stripe"></span>
-                <span class="txt">
+                <span class="txt" use:fit={{ min: 0.45 }}>
                   <span class="r-style">{st.name || "—"}</span>
                   {#if e.title}<span class="r-title">{e.title}</span>{/if}
                 </span>
@@ -70,8 +71,8 @@
               <li style:--c={st.color} animate:flip={{ duration: 350 }} in:fade={{ duration: 300 }}>
                 <span class="stripe"></span>
                 <span class="txt">
-                  <span class="r-style">{st.name}</span>
-                  <span class="r-title">{e.title}</span>
+                  <span class="r-style" use:fit={{ min: 0.45 }}>{st.name}</span>
+                  <span class="r-title" use:fit={{ min: 0.45 }}>{e.title}</span>
                 </span>
               </li>
             {/each}
@@ -116,16 +117,19 @@
     position: relative;
     overflow: hidden;
   }
+  /* An inset stripe in the style's colour (an edge stripe would be clipped by the corners). */
   .next::before {
     content: "";
     position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: calc(0.6 * var(--u));
+    left: calc(0.9 * var(--u));
+    top: calc(1.6 * var(--u));
+    bottom: calc(1.6 * var(--u));
+    width: calc(0.45 * var(--u));
+    border-radius: 999px;
     background: var(--c);
   }
   .next-style {
+    overflow: hidden;
     margin-top: calc(0.6 * var(--u));
     font-size: calc(4.2 * var(--u));
     font-weight: 800;
@@ -150,11 +154,13 @@
   }
   .coming .r-style {
     flex: 0 0 auto;
-    max-width: 100%;
   }
+  .coming .txt {
+    overflow: hidden;
+  }
+  /* Natural width: the whole line shrinks to fit (use:fit) instead of cutting the title. */
   .coming .r-title {
-    flex: 1 1 0;
-    min-width: 0;
+    flex: 0 0 auto;
     font-size: calc(1.7 * var(--u));
     color: var(--p-text-2);
   }

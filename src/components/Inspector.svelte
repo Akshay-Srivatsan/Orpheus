@@ -4,9 +4,12 @@
   import { api } from "../lib/api";
   import { app, audition, confirmAction } from "../lib/state.svelte";
   import { fmtBpm, fmtTime, foldBpm, playback, rateToFit, resolveSettings, styleCenter } from "../lib/tempo";
-  import type { Id, Overrides, Track, Version } from "../lib/types";
+  import type { Id, Overrides, SetlistEntry, Track, Version } from "../lib/types";
   import Icon from "./Icon.svelte";
   import StyleChips from "./StyleChips.svelte";
+  import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
+  import { assess, matches } from "../lib/clubs";
+  import { NEUTRAL } from "../lib/styles";
   import TimeField from "./TimeField.svelte";
 
   const entry = $derived(app.current?.entries.find((e) => e.id === app.inspectEntry));
@@ -18,6 +21,38 @@
 
   let taps = $state<number[]>([]);
   let linkInput = $state("");
+
+  // ---------------------------------------------------------------- club styles for a set entry
+
+  let clubMenu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
+
+  /** The club styles an entry can show: those it fits, and those shown now (in the club's order). */
+  function clubChoices(t: Track | undefined, v: Version | undefined, e: SetlistEntry) {
+    const club = app.club;
+    const ctx = app.clubCtx;
+    if (!club || !ctx) return { shown: [] as string[], fit: [] as string[], other: [] as string[] };
+    const shown = app.shownFor(t, v, e).map((s) => s.key);
+    const facts = app.factsFor(t, v, e);
+    const fit = facts ? matches(club, facts, ctx.tempoChange).map((a) => a.id) : [];
+    const ids = Object.keys(club.style);
+    const cand = ids.filter((id) => fit.includes(id) || shown.includes(id));
+    return { shown, fit: cand, other: ids.filter((id) => !cand.includes(id)) };
+  }
+
+  function setClubStyles(entryId: Id, ids: string[]) {
+    api.updateEntry(entryId, { clubStyles: ids.length ? ids : null });
+  }
+
+  function otherClubStyles(ev: MouseEvent, entryId: Id, shown: string[], other: string[], t: Track | undefined, v: Version | undefined, e: SetlistEntry) {
+    const club = app.club!;
+    const facts = app.factsFor(t, v, e);
+    const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+    const items: MenuItem[] = other.map((id) => {
+      const ok = !facts || assess(id, club.style[id], facts, app.clubCtx!.tempoChange).ok;
+      return { label: ok ? club.style[id].name : `${club.style[id].name} (doesn't fit)`, action: () => setClubStyles(entryId, [...shown, id]) };
+    });
+    clubMenu = { x: r.left, y: r.bottom + 2, items };
+  }
 
   /** Copies text for a club file (a song's fingerprint, hash or whole entry). */
   async function copy(text: string | null | undefined, what: string) {
@@ -116,7 +151,24 @@
               onchange={(e) => api.updateEntry(entry.id, { label: e.currentTarget.value.trim() || null })} />
           {:else}
           <span class="lbl">{entryVersion ? "Show as" : "Slot"}</span>
-          {#if entryVersion && (entryVersion.styles?.length ?? 0) > 0}
+          {#if app.club}
+            {@const cc = clubChoices(track, entryVersion, entry)}
+            <span class="clubchips">
+              {#each cc.fit as id (id)}
+                {@const on = cc.shown.includes(id)}
+                <button class="badge chip" class:off={!on} style:--c={app.club.style[id].color || NEUTRAL}
+                  title={on ? "Shown; click to hide" : "Fits; click to show it too"}
+                  onclick={() => setClubStyles(entry.id, on ? cc.shown.filter((x) => x !== id) : [...cc.shown, id])}>{app.club.style[id].name}</button>
+              {/each}
+              {#if cc.other.length}
+                <button class="small add" title="Any of {app.club.name}'s styles, even one this song doesn't fit"
+                  onclick={(ev) => otherClubStyles(ev, entry.id, cc.shown, cc.other, track, entryVersion, entry)}>+</button>
+              {/if}
+              {#if entry.clubStyles}
+                <button class="plain small link" title="Show what it fits (and your mapping picks)" onclick={() => setClubStyles(entry.id, [])}>Automatic</button>
+              {/if}
+            </span>
+          {:else if entryVersion && (entryVersion.styles?.length ?? 0) > 0}
             <StyleChips value={shownKeys} choices={entryVersion.styles} bpm={r?.target ?? null}
               onchange={(keys) => api.updateEntry(entry.id, { styles: keys.length === entryVersion.styles?.length || !keys.length ? null : keys })} />
           {:else}
@@ -395,6 +447,8 @@
   {/if}
 </div>
 
+{#if clubMenu}<ContextMenu x={clubMenu.x} y={clubMenu.y} items={clubMenu.items} onclose={() => (clubMenu = null)} />{/if}
+
 <style>
   .insp { overflow-y: auto; height: 100%; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
   .box { display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: var(--radius); }
@@ -411,6 +465,10 @@
   .mult button { padding: 0 5px; height: 22px; }
   .small { font-size: var(--fs-sm); }
   .ok { color: var(--green); }
+  .clubchips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  .clubchips .chip { height: 20px; cursor: pointer; }
+  .clubchips .chip.off { opacity: 0.4; filter: grayscale(0.7); }
+  .clubchips .add { height: 20px; min-width: 24px; padding: 0 6px; }
   .version { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 6px; background: var(--bg-elev); border-left: 3px solid var(--c); }
   .version.hl { outline: 1px solid var(--blue); }
   .vhead { display: flex; gap: 4px; align-items: center; }

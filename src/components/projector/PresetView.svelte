@@ -3,6 +3,7 @@
   // on screen; longer sets scroll sideways to keep the current song in view).
   // A slim banner above shows what is dancing now, or the next dance during
   // the pause.
+  import { fit, fitAll } from "../../lib/fit";
   import { fade } from "svelte/transition";
   import { artwork } from "../../lib/artwork";
   import { projStyle } from "../../lib/styles";
@@ -15,6 +16,8 @@
   const MAX_ROWS = 18;
   /** Fewer rows than this per column look sparse; rows grow instead. */
   const MIN_ROWS = 8;
+  /** Up to this many rows per column, a row has room for the song on a line of its own. */
+  const TWO_LINE_ROWS = 12;
 
   const s = $derived(payload.settings);
   const gap = $derived(payload.inGap && !payload.playing);
@@ -25,6 +28,9 @@
   const bannerStyle = $derived(banner ? projStyle(payload, banner) : null);
 
   const rows = $derived(Math.min(MAX_ROWS, Math.max(MIN_ROWS, Math.ceil(payload.entries.length / COLUMNS))));
+  const twoLine = $derived(rows <= TWO_LINE_ROWS);
+  // Long names shrink the whole list evenly, not row by row.
+  const fitGroups = $derived(twoLine ? [{ selector: ".style" }, { selector: ".song" }] : [{ selector: ".txt", min: 0.45 }]);
   const columns = $derived.by(() => {
     const out: { e: ProjEntry; n: number | null }[][] = [];
     let n = 0;
@@ -59,24 +65,24 @@
   });
 </script>
 
-<div class="preset" style:--rows={rows}>
+<div class="preset" style:--rows={rows} style:--cols={Math.min(COLUMNS, Math.max(1, columns.length))}>
   {#if banner && bannerStyle}
     {#key banner.id + (revealNext ? ":next" : "")}
       <section class="banner" style:--c={bannerStyle.color} in:fade={{ duration: 300 }}>
         {#if art}<img class="art" src={art} alt="" />{/if}
         <div class="label">{#if !revealNext}<span class="live-dot"></span>{/if}{revealNext ? "Next dance" : "Now dancing"}</div>
-        <div class="b-style">{bannerStyle.name}</div>
+        <div class="b-style" use:fit>{bannerStyle.name}</div>
         {#if revealNext}
           <div class="b-song dim">Find a partner!</div>
         {:else if banner.title}
-          <div class="b-song">{banner.title}{#if s.showArtist && banner.artist}<span class="dim">{" · "}{banner.artist}</span>{/if}</div>
+          <div class="b-song" use:fit>{banner.title}{#if s.showArtist && banner.artist}<span class="dim">{" · "}{banner.artist}</span>{/if}</div>
         {/if}
         {#each banner.tags as t (t.id)}<span class="tag" style:--t={t.color}>{t.name}</span>{/each}
         {#if !gap && progress != null}<div class="progress"><div class="bar" style:width="{progress * 100}%"></div></div>{/if}
       </section>
     {/key}
   {/if}
-  <div class="columns" bind:this={scroller}>
+  <div class="columns" class:two-line={twoLine} bind:this={scroller} use:fitAll={fitGroups}>
     {#each columns as col, ci (ci)}
       <ol class="col">
         {#each col as { e, n } (e.id)}
@@ -94,7 +100,7 @@
               <span class="style">{st.name || "—"}</span>
               {#if e.title}<span class="song">{e.title}{#if s.showArtist && e.artist}{" · "}{e.artist}{/if}</span>{/if}
             </span>
-            {#each e.tags as t (t.id)}<span class="tag" style:--t={t.color}>{t.name}</span>{/each}
+            {#if e.tags.length}<span class="tags">{#each e.tags as t (t.id)}<span class="tag" style:--t={t.color}>{t.name}</span>{/each}</span>{/if}
           </li>
         {/each}
       </ol>
@@ -109,6 +115,8 @@
     flex-direction: column;
     gap: calc(1.6 * var(--u));
     min-height: 0;
+    /* Never wider than the screen, however long the banner's text. */
+    min-width: 0;
   }
   .banner {
     flex: none;
@@ -122,6 +130,10 @@
     border: 1px solid color-mix(in srgb, var(--c) 45%, var(--p-line));
     overflow: hidden;
     white-space: nowrap;
+    min-width: 0;
+  }
+  .banner .tag {
+    font-size: calc(1.8 * var(--u));
   }
   .art {
     width: calc(6.5 * var(--u));
@@ -153,9 +165,12 @@
     font-weight: 800;
     letter-spacing: -0.02em;
     color: var(--ink-c);
-    flex: none;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
   }
   .b-song {
+    flex: 1 1 auto;
     font-size: calc(2.4 * var(--u));
     font-weight: 600;
     min-width: 0;
@@ -184,7 +199,8 @@
     min-height: 0;
     display: grid;
     grid-auto-flow: column;
-    grid-auto-columns: calc((100% - 2 * 1.6 * var(--u)) / 3);
+    /* As many columns as the set needs, up to three on screen. */
+    grid-auto-columns: calc((100% - (var(--cols) - 1) * 1.6 * var(--u)) / var(--cols));
     column-gap: calc(1.6 * var(--u));
     overflow-x: auto;
     scrollbar-width: none;
@@ -243,8 +259,59 @@
     color: var(--p-text-2);
     font-size: 0.82em;
   }
+  /* Style on the first line, across the row; song and tags below it. */
+  .two-line li {
+    font-size: min(calc(2.4 * var(--u)), calc(var(--row) * 0.4));
+    line-height: 1.15;
+    grid-template-columns: calc(2.4 * var(--u)) calc(0.35 * var(--u)) minmax(0, 1fr) auto;
+    grid-template-areas:
+      "n stripe style style"
+      "n stripe song tags";
+    align-content: center;
+    row-gap: 0.1em;
+  }
+  .two-line .txt {
+    display: contents;
+  }
+  .two-line .n {
+    grid-area: n;
+  }
+  .two-line .stripe {
+    grid-area: stripe;
+    margin: 12% 0;
+  }
+  .two-line .style {
+    grid-area: style;
+  }
+  .two-line .song {
+    grid-area: song;
+  }
+  .two-line .tags {
+    grid-area: tags;
+  }
+  .two-line .style,
+  .two-line .song {
+    min-width: 0;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .two-line .song {
+    font-size: 0.75em;
+  }
+  .tags {
+    display: flex;
+    gap: 0.4em;
+    justify-content: flex-end;
+    /* A long tag gives way before the style name does. */
+    max-width: calc(10 * var(--u));
+    min-width: 0;
+  }
   .tag {
-    flex: none;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     padding: 0.1em 0.6em;
     border-radius: 999px;
     font-size: 0.7em;
@@ -259,7 +326,8 @@
   li.skipped {
     opacity: 0.25;
   }
-  li.skipped .txt {
+  li.skipped .style,
+  li.skipped .song {
     text-decoration: line-through;
   }
   li.current {
