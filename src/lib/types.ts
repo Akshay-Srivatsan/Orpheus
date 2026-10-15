@@ -109,7 +109,8 @@ export interface SetlistSummary {
   id: Id;
   name: string;
   eventDate: string | null;
-  profileId: string;
+  /** The club guidelines (one version) the set is planned for. */
+  club?: ClubRef | null;
   notes: string;
   mode: SetlistMode;
   createdAt: number;
@@ -129,6 +130,8 @@ export interface SetlistEntry {
   versionId?: Id | null;
   /** Your styles to show, in order: a subset of the version's, or a slot's styles. Absent = all of the version's. */
   styles?: string[] | null;
+  /** In a club's set: club style ids to show (or a slot's style). Absent = what the song matches (see clubs.ts). */
+  clubStyles?: string[] | null;
   /** Custom text shown instead of style names. */
   label?: string | null;
   overrides?: Overrides;
@@ -148,9 +151,9 @@ export interface SetlistEntry {
   playedAt?: number | null;
 }
 
-export type NewEntry = Partial<Pick<SetlistEntry, "versionId" | "styles" | "label" | "overrides" | "note" | "tags" | "kind" | "pauseBefore" | "announcement">>;
+export type NewEntry = Partial<Pick<SetlistEntry, "versionId" | "styles" | "clubStyles" | "label" | "overrides" | "note" | "tags" | "kind" | "pauseBefore" | "announcement">>;
 export type EntryPatch = Partial<
-  Pick<SetlistEntry, "versionId" | "styles" | "label" | "overrides" | "note" | "tags" | "status" | "hold" | "pauseBefore" | "pauseAfter" | "announcement">
+  Pick<SetlistEntry, "versionId" | "styles" | "clubStyles" | "label" | "overrides" | "note" | "tags" | "status" | "hold" | "pauseBefore" | "pauseAfter" | "announcement">
 >;
 
 /** A song played in a setlist (history is derived from setlists). */
@@ -174,18 +177,6 @@ export interface LibraryStyle {
   note?: string;
 }
 
-/**
- * At a club, songs tagged `style` with a planned tempo in [minBpm, maxBpm]
- * count as club style `to` ("" = not danced there). First match wins.
- */
-export interface StyleMappingRule {
-  style: string;
-  minBpm?: number | null;
-  maxBpm?: number | null;
-  to: string;
-}
-
-/** One of your tags: a label on songs that isn't a dance style. */
 export interface LibraryTag {
   key: string;
   name: string;
@@ -195,7 +186,8 @@ export interface LibraryTag {
 /** styles.json: your styles and tags and, per club profile id, the mapping rules. */
 export interface StyleLibrary {
   styles: LibraryStyle[];
-  mappings: Record<string, StyleMappingRule[]>;
+  /** Per club id: which club styles each of your styles may show as (your key → club style ids). */
+  clubMappings?: Record<string, Record<string, string[]>>;
   tags?: LibraryTag[];
   /** How announcements say words: a respelling, or phonemes between slashes. */
   pronunciations?: Pronunciation[];
@@ -219,8 +211,50 @@ export interface LibraryInfo {
   loadErrors: string[];
 }
 
-// ---------------------------------------------------------------- profiles
+// ---------------------------------------------------------------- clubs
 
+export type { Club } from "./clubs";
+
+export interface ClubRef {
+  id: string;
+  version: string;
+}
+
+export interface ClubVersionInfo {
+  id: string;
+  /** Name you gave it ("" = by its import date). */
+  name: string;
+  imported: number;
+  /** A URL, a file path, "edited", "example" or "new". */
+  from: string;
+  error: string | null;
+}
+
+export interface ClubInfo {
+  id: string;
+  name: string;
+  description: string;
+  url: string | null;
+  /** Newest first. */
+  versions: ClubVersionInfo[];
+}
+
+export interface ClubVersion {
+  clubId: string;
+  versionId: string;
+  text: string;
+  club: import("./clubs").Club | null;
+  error: string | null;
+}
+
+export interface ClubImported {
+  clubId: string;
+  versionId: string;
+  /** Identical to the latest version: nothing new stored. */
+  unchanged: boolean;
+}
+
+/** A club style with its tempo ranges as [min, max] (for tempo fit displays). */
 export interface StyleDef {
   key: string;
   name: string;
@@ -231,30 +265,6 @@ export interface StyleDef {
   /** Acceptable tempo range. */
   extended: [number, number] | null;
   note?: string;
-}
-
-export interface TagDef {
-  id: string;
-  name: string;
-  color: string;
-  /** Show on the projector. */
-  announce: boolean;
-}
-
-export interface Profile {
-  id: string;
-  name: string;
-  builtin?: boolean;
-  modified?: boolean;
-  description: string;
-  setMinutes: number;
-  gap: { targetSeconds: number; minSeconds: number; maxSeconds: number };
-  autoAdvance: boolean;
-  fadeOutSeconds: number;
-  tempo: { maxSpeedupPct: number; maxSlowdownPct: number };
-  styles: StyleDef[];
-  tags: TagDef[];
-  announcements: string[];
 }
 
 // ---------------------------------------------------------------- settings
@@ -312,7 +322,8 @@ export interface MidiMapping {
 export interface Settings {
   /** Shareable library folder (git/Dropbox friendly). null = inside the app data folder. */
   libraryDir: string | null;
-  activeProfileId: string;
+  /** Club whose latest guidelines new sets use ("" = none). */
+  defaultClub: string;
   libraryFolders: string[];
   audio: AudioSettings;
   gapSeconds: number | null;
@@ -449,8 +460,12 @@ export interface ProjEntry {
   trackId: Id | null;
   title: string;
   artist: string;
-  /** Your style keys; the page resolves club names via `profile` and `styleLibrary`. */
+  /** Your style keys; the page shows club styles via `club` and `styleLibrary`. */
   styles: string[];
+  clubStyles: string[] | null;
+  /** For matching club styles. */
+  meter: number | null;
+  lengthSecs: number | null;
   label: string | null;
   tags: ProjTag[];
   status: EntryStatus;
@@ -471,8 +486,11 @@ export interface ProjectorPayload {
   message: string | null;
   /** Deck whose position drives the progress bar. */
   liveDeck: 0 | 1;
-  /** The setlist's club profile (null if unknown). */
-  profile: Profile | null;
+  /** The set's club guidelines (null: none). */
+  club: import("./clubs").Club | null;
+  clubId: string | null;
+  /** Tempo change allowed when the club doesn't say (percent). */
+  tempoRangePct: number;
   styleLibrary: StyleLibrary;
 }
 

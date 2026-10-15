@@ -1,24 +1,16 @@
-# Friday Night Waltz (Palo Alto): its published format, from the FAQ
-# (http://fridaynightwaltz.com/faq.shtml) and the "Would you like to DJ"
-# handout (http://fridaynightwaltz.com/handout.pdf), October 2026.
-#
-# FNW's actual playlist guideline isn't published: the handout says DJs get it
-# on request (Scott Gamble, scott.g@pway.com). Tempos here are Lucas Garron's,
-# which he based partly on DJing FNW; FNW doesn't publish tempos. Counts follow
-# the FAQ's "about"s and are not rules ("not hard rules, just typical").
+# Friday Night Waltz, with Lucas Garron's "Social Dance Tempos": his tempo
+# guidelines for variety social partner dancing, based on Richard Powers' and
+# on DJing events like Friday Night Waltz. From
+# https://garron.net/dance/tempos/ (October 2026).
+# Tempos are beats per minute: "preferred" is his sweet range, "tempo" his
+# extended range. Outside it is "rarely a good idea": change the song's tempo,
+# except for an occasional special song (say so when you announce it). Meters
+# are each dance's standard meter.
 
 name = "Friday Night Waltz"
-description = """Friday Night Waltz, First United Methodist Church, Palo Alto: \
-the DJ dance from 9:00 to about 11:45 in four sets with short breaks between \
-them. Easier and slower dances in the first two sets, faster and harder ones in \
-the third and fourth. Usually a mixer in sets 1 and 3 and a choreographed waltz \
-in sets 2 and 4; the birthday jam is at the second break (about 10:30)."""
-website = "http://fridaynightwaltz.com/faq.shtml"
-
-[set]
-minutes = [165, 180]
-# FAQ: "45 to 50 dances in an evening"; the handout says 40 to 45.
-songs = [40, 50]
+description = """Friday Night Waltz, with Lucas Garron's social dance tempos. Low in the extended range \
+should feel more mellow, high in it should have more energy."""
+website = "https://garron.net/dance/tempos/"
 
 [style.cross-step]
 name = "Cross-Step Waltz"
@@ -28,14 +20,6 @@ meter = 3
 tempo = [105, 130]
 preferred = [114, 122]
 
-[style.ballroom-waltz]
-name = "Ballroom Waltz"
-short = "BW"
-color = "#c4b5fd"
-meter = 3
-tempo = [80, 105]
-note = "Slow waltz. Tempo: Powers' slow American ballroom waltz."
-
 [style.rotary]
 name = "Rotary Waltz"
 short = "RW"
@@ -44,27 +28,13 @@ meter = 3
 tempo = [135, 170]
 preferred = [140, 160]
 
-[style.viennese]
-name = "Viennese Waltz"
-short = "VW"
+[style.fast-waltz]
+name = "Fast Waltz"
+short = "FW"
 color = "#fb7185"
 meter = 3
 tempo = [160, 210]
 preferred = [170, 200]
-when = ["50%", "100%"]
-note = "Faster, harder dances in the third and fourth sets."
-
-[style.redowa]
-name = "Redowa"
-short = "RED"
-color = "#f9a8d4"
-meter = 3
-
-[style.hesitation]
-name = "Hesitation Waltz"
-short = "HW"
-color = "#e9d5ff"
-meter = 3
 
 [style.polka]
 name = "Polka"
@@ -73,34 +43,54 @@ color = "#facc15"
 meter = 2
 tempo = [105, 140]
 preferred = [110, 125]
-count = [4, 8]
-note = "About 6; many of them fast, often to silly music."
 
-[style.tango]
-name = "Tango"
-short = "TAN"
-color = "#ef4444"
+[style.schottische]
+name = "Schottische"
+short = "SCH"
+color = "#fde68a"
 meter = 4
-tempo = [115, 140]
-preferred = [120, 130]
-count = [3, 5]
-note = "About 4."
+tempo = [145, 170]
+preferred = [150, 165]
 
 [style.one-step]
 name = "One-Step"
 short = "OS"
-color = "#fde68a"
+color = "#fef08a"
 meter = 2
 tempo = [110, 135]
 preferred = [115, 130]
 
-[style.swing]
-name = "Swing"
-short = "SW"
+[style.lindy]
+name = "Lindy Hop"
+short = "LH"
 color = "#fbbf24"
 meter = 4
-tempo = [115, 180]
-note = "Lindy Hop or 4-count swing."
+tempo = [135, 180]
+preferred = [140, 170]
+
+[style.sweet-lindy]
+name = "Sweet Lindy"
+short = "SL"
+color = "#fcd34d"
+meter = 4
+tempo = [110, 140]
+preferred = [115, 135]
+
+[style.six-count-swing]
+name = "6-Count Swing"
+short = "6CS"
+color = "#fde047"
+meter = 4
+tempo = [80, 115]
+preferred = [85, 105]
+
+[style.four-count-swing]
+name = "4-Count Swing"
+short = "4CS"
+color = "#facc15"
+meter = 4
+tempo = [115, 145]
+preferred = [120, 140]
 
 [style.wcs]
 name = "West Coast Swing"
@@ -110,13 +100,29 @@ meter = 4
 tempo = [90, 130]
 preferred = [100, 120]
 
-[style.cha-cha]
-name = "Cha-Cha"
-short = "CHA"
-color = "#fdba74"
+[style.slow-jam]
+name = "Slow Jam"
+short = "SJ"
+color = "#6366f1"
+meter = 4
+tempo = [60, 100]
+preferred = [65, 90]
+
+[style.hustle]
+name = "Hustle"
+short = "HUS"
+color = "#e879f9"
 meter = 4
 tempo = [110, 130]
 preferred = [115, 125]
+
+[style.club-two-step]
+name = "Club Two-Step"
+short = "C2S"
+color = "#c084fc"
+meter = 4
+tempo = [75, 90]
+preferred = [80, 85]
 
 [style.salsa]
 name = "Salsa"
@@ -126,48 +132,43 @@ meter = 4
 tempo = [85, 110]
 preferred = [90, 100]
 
-[style.zweifacher]
-name = "Zweifacher"
-short = "ZW"
-color = "#a3e635"
-meter = [2, 3]
-note = "Alternates between 2/4 and 3/4."
-
-[style.blues]
-name = "Blues"
-short = "BLU"
-color = "#6366f1"
+[style.cha-cha]
+name = "Cha-Cha"
+short = "CHA"
+color = "#fdba74"
 meter = 4
+tempo = [110, 130]
+preferred = [115, 125]
 
-[style.mixer]
-name = "Mixer"
-short = "MIX"
-color = "#4ade80"
-count = [1, 2]
-note = "Usually in the first and third sets, e.g. the Cross-Step Waltz Mixer."
+[style.tango]
+name = "Tango"
+short = "TAN"
+color = "#ef4444"
+meter = 4
+tempo = [115, 140]
+preferred = [120, 130]
 
-[style.choreography]
-name = "Choreographed Waltz"
-short = "CHOR"
-color = "#38bdf8"
-meter = 3
-count = [1, 2]
-note = "Usually in the second and fourth sets, e.g. Congress of Vienna (about 4:30). Use the standard music."
+[style.foxtrot]
+name = "Foxtrot"
+short = "FOX"
+color = "#94a3b8"
+meter = 4
+tempo = [130, 180]
+preferred = [135, 170]
 
-[style.line-dance]
-name = "Line Dance"
-short = "LINE"
-color = "#2dd4bf"
-note = "e.g. Tokyo Polka, the Madison."
+[style.quickstep]
+name = "Quickstep"
+short = "QS"
+color = "#7dd3fc"
+meter = 4
+tempo = [85, 110]
+preferred = [90, 105]
+note = "Counted in half time (full time about 180–210)."
 
-[group.waltzes]
-name = "Waltzes"
-styles = ["cross-step", "ballroom-waltz", "rotary", "viennese", "redowa", "hesitation", "choreography"]
-share = ["40%", "60%"]
-note = "About half the dances are waltzes, from the very slow to the very fast."
-
-[tag.birthday-jam]
-name = "Birthday Jam"
-color = "#fde047"
-announce = true
-note = "A waltz at the second break: friends cut in every 4 to 8 measures, then the pivots."
+[style.merengue]
+name = "Merengue"
+short = "MER"
+color = "#ea580c"
+meter = 2
+tempo = [110, 135]
+preferred = [115, 130]

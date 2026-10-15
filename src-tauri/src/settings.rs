@@ -154,7 +154,8 @@ pub struct Settings {
     /// Folder holding the shareable library (tracks, setlists, crates, profiles).
     /// `None` = `<app data>/library`. Point this at a git repository or synced folder.
     pub library_dir: Option<String>,
-    pub active_profile_id: String,
+    /// Club whose latest guidelines new sets use ("" = none).
+    pub default_club: String,
     pub library_folders: Vec<String>,
     pub audio: AudioSettings,
     /// Overrides the profile's pause length when set.
@@ -198,7 +199,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             library_dir: None,
-            active_profile_id: "none".into(),
+            default_club: String::new(),
             library_folders: vec![],
             audio: AudioSettings::default(),
             gap_seconds: None,
@@ -224,72 +225,12 @@ impl Default for Settings {
     }
 }
 
-/// The parts of a club profile the backend needs. The full profile (including
-/// rules, which are evaluated in the UI) is stored as raw JSON.
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(default, rename_all = "camelCase")]
-pub struct ProfileCore {
-    pub id: String,
-    pub name: String,
-    pub gap: GapConfig,
-    pub auto_advance: bool,
-    pub fade_out_seconds: f64,
-    pub styles: Vec<StyleCore>,
-    pub tags: Vec<TagCore>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
-pub struct GapConfig {
-    pub target_seconds: f64,
-}
-
-impl Default for GapConfig {
-    fn default() -> Self {
-        Self { target_seconds: 8.0 }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(default, rename_all = "camelCase")]
-pub struct StyleCore {
-    pub key: String,
-    pub name: String,
-    pub short: String,
-    pub color: String,
-    pub sweet: Option<[f64; 2]>,
-    pub extended: Option<[f64; 2]>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(default, rename_all = "camelCase")]
-pub struct TagCore {
-    pub id: String,
-    pub name: String,
-    pub color: String,
-    pub announce: bool,
-}
-
-/// Only "No club" is built in; clubs are your own (or imported, see
-/// `examples/clubs/`).
-pub const BUILTIN_PROFILES: &[&str] = &[include_str!("../profiles/none.json")];
-
 impl Settings {
     pub fn library_path(&self, data_dir: &std::path::Path) -> std::path::PathBuf {
         match &self.library_dir {
             Some(d) if !d.trim().is_empty() => std::path::PathBuf::from(d),
             _ => data_dir.join("library"),
         }
-    }
-}
-
-impl ProfileCore {
-    pub fn style(&self, key: &str) -> Option<&StyleCore> {
-        self.styles.iter().find(|s| s.key == key)
-    }
-
-    pub fn style_name(&self, key: &str) -> String {
-        self.style(key).map(|s| s.name.clone()).unwrap_or_else(|| prettify_key(key))
     }
 }
 

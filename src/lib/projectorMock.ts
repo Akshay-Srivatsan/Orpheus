@@ -1,7 +1,8 @@
 // Mock projector data for designing the projector page in a plain browser.
 // URL params: ?mode=live|preset&gap=1&message=...&theme=light&scale=1.2&idle=1
 
-import type { DeckState, Profile, ProjEntry, ProjectorPayload, ProjectorSettings } from "./types";
+import { emptyClub, type Club } from "./clubs";
+import type { DeckState, ProjEntry, ProjectorPayload, ProjectorSettings } from "./types";
 
 const STYLES: Record<string, [string, string, string]> = {
   csw: ["Cross-Step Waltz", "CSW", "#a78bfa"],
@@ -59,13 +60,13 @@ const TAGS: Record<string, [string, string]> = {
   last: ["Last of style", "#fca5a5"],
 };
 
-/** A club whose style keys are the mock's (no mapping rules needed). */
-function mockClub(): Profile {
-  return {
-    id: "mock", name: "Mock club", description: "", setMinutes: 120, gap: { targetSeconds: 8, minSeconds: 5, maxSeconds: 10 },
-    autoAdvance: false, fadeOutSeconds: 5, tempo: { maxSpeedupPct: 10, maxSlowdownPct: 8 }, tags: [], announcements: [],
-    styles: Object.entries(STYLES).map(([key, [name, short, color]]) => ({ key, name, short, color, sweet: null, extended: null })),
-  };
+/** A club whose style ids are the mock's (entries choose them directly). */
+function mockClub(): Club {
+  const style: Club["style"] = {};
+  for (const [id, [name, short, color]] of Object.entries(STYLES)) {
+    style[id] = { name, short, color, meter: [], tempo: null, preferred: null, length: null, count: null, share: null, when: [], first: false, last: false };
+  }
+  return { ...emptyClub("Mock club"), style };
 }
 
 export function mockSettings(p: URLSearchParams): ProjectorSettings {
@@ -99,7 +100,10 @@ export function mockPayload(p: URLSearchParams): ProjectorPayload {
       trackId: null,
       title,
       artist,
-      styles: [st],
+      styles: [],
+      clubStyles: [st],
+      meter: null,
+      lengthSecs: null,
       label: null,
       tags: (tags ?? []).map((t) => ({ id: t, name: TAGS[t][0], color: TAGS[t][1] })),
       status: i < cur ? (i === 3 ? "skipped" : "played") : i === cur && !gap ? "playing" : "pending",
@@ -120,8 +124,10 @@ export function mockPayload(p: URLSearchParams): ProjectorPayload {
       playing: false,
       message: p.get("message"),
       liveDeck: 0,
-      profile: mockClub(),
-      styleLibrary: { styles: [], mappings: {} },
+      club: mockClub(),
+      clubId: "mock",
+      tempoRangePct: 10,
+      styleLibrary: { styles: [] },
     };
   }
   const currentIndex = gap ? cur - 1 : cur;
@@ -145,8 +151,10 @@ export function mockPayload(p: URLSearchParams): ProjectorPayload {
     playing: !gap,
     message: p.get("message"),
     liveDeck: 0,
-    profile: mockClub(),
-    styleLibrary: { styles: [], mappings: {} },
+    club: mockClub(),
+    clubId: "mock",
+    tempoRangePct: 10,
+    styleLibrary: { styles: [] },
   };
 }
 

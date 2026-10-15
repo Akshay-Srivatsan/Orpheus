@@ -107,7 +107,7 @@
     const f = app.filterStyle;
     const entry: Partial<SetlistEntry> | null = f && (r.suggested || r.version.styles?.includes(f)) ? { styles: [f] } : null;
     const pb = playback(r.track, r.version, entry, app.clubStyleOf);
-    const st = app.clubStyleOf(r.version, entry, pb.target ?? r.track.bpm) ?? undefined;
+    const st = app.clubStyleOf(r.track, r.version, entry) ?? undefined;
     const dur = playedDurationMs(r.track, r.version, null, pb.rate, { fadeSeconds: app.fadeSeconds, trimSilence: app.settings?.trimSilence });
     return { pb, st, fit: tempoFit(pb.target, st), dur };
   }

@@ -2,6 +2,8 @@
 //! and the main thread never block.
 
 use crate::app::{App, PerformState, ProjectorPayload};
+use crate::club::{self, Club, ClubInfo, ClubVersion, Imported};
+use std::collections::HashMap;
 use crate::audio::output::OutputStatus;
 use crate::audio::DeckSnapshot;
 use crate::store::NewTrack;
@@ -381,10 +383,12 @@ pub async fn setlist_create(
     app: S<'_>,
     name: String,
     mode: String,
-    profile_id: String,
+    // Plan the set with this club's latest guidelines ("" / none = no club).
+    club_id: Option<String>,
     event_date: Option<String>,
 ) -> Res<Setlist> {
-    let id = app.store.setlist_create(&name, &mode, &profile_id, event_date).map_err(ae)?;
+    let club = club_id.filter(|c| !c.is_empty()).and_then(|id| Some(ClubRef { version: app.clubs().latest(&id)?, id }));
+    let id = app.store.setlist_create(&name, &mode, club, event_date).map_err(ae)?;
     crate::app::emit(&app.handle, "setlists-changed", ());
     app.store.setlist(&id).map_err(ae)
 }
@@ -518,10 +522,17 @@ pub async fn styles_rekey(app: S<'_>, from: String, to: Option<String>) -> Res<(
         Some(t) => lib.styles.iter_mut().filter(|s| s.key == from).for_each(|s| s.key = t.to_string()),
         None => lib.styles.retain(|s| s.key != from),
     }
-    for rules in lib.mappings.values_mut() {
-        match to.as_deref() {
-            Some(t) => rules.iter_mut().filter(|r| r.style == from).for_each(|r| r.style = t.to_string()),
-            None => rules.retain(|r| r.style != from),
+    for rows in lib.club_mappings.values_mut() {
+        if let Some(row) = rows.remove(&from) {
+            if let Some(t) = to.as_deref() {
+                // Merging onto an existing style: the union of both rows.
+                let merged = rows.entry(t.to_string()).or_default();
+                for c in row {
+                    if !merged.contains(&c) {
+                        merged.push(c);
+                    }
+                }
+            }
         }
     }
     app.store.save_style_library(lib).map_err(ae)?;
@@ -627,33 +638,149 @@ pub async fn set_dance_name(app: S<'_>, entry_id: Id, name: String) -> Res<()> {
     Ok(())
 }
 
-// ---------------------------------------------------------------- profiles & settings
+// ---------------------------------------------------------------- clubs
 
-#[tauri::command]
-pub async fn profiles_list(app: S<'_>) -> Res<Vec<serde_json::Value>> {
-    app.profiles_json().map_err(ae)
+fn clubs_changed(app: &App) {
+    app.forget_clubs();
+    crate::app::emit(&app.handle, "clubs-changed", ());
+    app.emit_perform();
 }
 
+/// Every club with the versions of its guidelines, newest first.
 #[tauri::command]
-pub async fn profile_save(app: S<'_>, profile: serde_json::Value) -> Res<()> {
-    let mut p = profile;
-    if let Some(o) = p.as_object_mut() {
-        o.remove("modified");
-        o.remove("builtin");
+pub async fn clubs_list(app: S<'_>) -> Res<Vec<ClubInfo>> {
+    Ok(app.clubs().list())
+}
+
+/// One version: its file text and what it defines.
+#[tauri::command]
+pub async fn club_get(app: S<'_>, club_id: String, version_id: String) -> Res<ClubVersion> {
+    app.clubs().get(&club_id, &version_id).map_err(ae)
+}
+
+/// Checks a club file's text (the editor's text view): the club, or the error.
+#[tauri::command]
+pub async fn club_parse(text: String) -> Res<Club> {
+    club::parse(&text).map_err(ae)
+}
+
+/// The editor's form as file text.
+#[tauri::command]
+pub async fn club_format(club: Club) -> Res<String> {
+    Ok(club::to_toml(&club))
+}
+
+/// How many sets use each version of a club.
+#[tauri::command]
+pub async fn club_usage(app: S<'_>, club_id: String) -> Res<HashMap<String, usize>> {
+    let mut out = HashMap::new();
+    for s in app.store.setlists() {
+        if let Some(c) = s.club.filter(|c| c.id == club_id) {
+            *out.entry(c.version).or_insert(0) += 1;
+        }
     }
-    app.store.profile_save(p).map_err(ae)?;
-    crate::app::emit(&app.handle, "profiles-changed", ());
-    app.emit_perform();
+    Ok(out)
+}
+
+#[tauri::command]
+pub async fn club_import_file(app: S<'_>, path: String) -> Res<Imported> {
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
+    let r = app.clubs().add(&text, &path, None, now_ms()).map_err(ae)?;
+    clubs_changed(&app);
+    Ok(r)
+}
+
+/// Imports a club file published on the web.
+#[tauri::command]
+pub async fn club_import_url(app: S<'_>, url: String) -> Res<Imported> {
+    let url = url.trim().to_string();
+    let text = club::fetch(&url).await.map_err(ae)?;
+    let r = app.clubs().add(&text, &url, None, now_ms()).map_err(ae)?;
+    clubs_changed(&app);
+    Ok(r)
+}
+
+/// Fetches the club's file again: a new version if it changed (sets keep
+/// theirs until moved to it).
+#[tauri::command]
+pub async fn club_update(app: S<'_>, club_id: String) -> Res<Imported> {
+    let url = app
+        .clubs()
+        .update_url(&club_id)
+        .ok_or_else(|| "This club has no web address to update from (url = \"https://…\" in its file).".to_string())?;
+    let text = club::fetch(&url).await.map_err(ae)?;
+    let r = app.clubs().add(&text, &url, Some(&club_id), now_ms()).map_err(ae)?;
+    clubs_changed(&app);
+    Ok(r)
+}
+
+/// Saves edits to a version: in place while it's the newest and no set uses
+/// it, else as a new version (sets keep the guidelines they were planned with).
+#[tauri::command]
+pub async fn club_save(app: S<'_>, club_id: String, version_id: String, text: String) -> Res<Imported> {
+    let clubs = app.clubs();
+    let used = app.store.setlists().iter().any(|s| s.club.as_ref().is_some_and(|c| c.id == club_id && c.version == version_id));
+    let in_place = !used && clubs.latest(&club_id).as_deref() == Some(version_id.as_str());
+    let r = clubs.save(&club_id, &version_id, &text, in_place, now_ms()).map_err(ae)?;
+    clubs_changed(&app);
+    Ok(r)
+}
+
+/// The example clubs that come with Orpheus: (id, name, description).
+#[tauri::command]
+pub async fn club_examples() -> Res<Vec<(String, String, String)>> {
+    Ok(club::EXAMPLES
+        .iter()
+        .filter_map(|(id, text)| club::parse(text).ok().map(|c| (id.to_string(), c.name, c.description)))
+        .collect())
+}
+
+#[tauri::command]
+pub async fn club_import_example(app: S<'_>, id: String) -> Res<Imported> {
+    let (_, text) = club::EXAMPLES.iter().find(|(e, _)| *e == id).ok_or_else(|| format!("no example club \"{id}\""))?;
+    let r = app.clubs().add(text, "example", None, now_ms()).map_err(ae)?;
+    clubs_changed(&app);
+    Ok(r)
+}
+
+/// A new club with nothing but a name.
+#[tauri::command]
+pub async fn club_new(app: S<'_>, name: String) -> Res<Imported> {
+    let text = club::to_toml(&Club { name: name.trim().to_string(), ..Default::default() });
+    let r = app.clubs().add(&text, "new", None, now_ms()).map_err(ae)?;
+    clubs_changed(&app);
+    Ok(r)
+}
+
+#[tauri::command]
+pub async fn club_rename_version(app: S<'_>, club_id: String, version_id: String, name: String) -> Res<()> {
+    app.clubs().rename_version(&club_id, &version_id, &name).map_err(ae)?;
+    clubs_changed(&app);
     Ok(())
 }
 
 #[tauri::command]
-pub async fn profile_delete(app: S<'_>, id: String) -> Res<()> {
-    app.store.profile_delete(&id).map_err(ae)?;
-    crate::app::emit(&app.handle, "profiles-changed", ());
-    app.emit_perform();
+pub async fn club_delete_version(app: S<'_>, club_id: String, version_id: String) -> Res<()> {
+    app.clubs().delete_version(&club_id, &version_id).map_err(ae)?;
+    clubs_changed(&app);
     Ok(())
 }
+
+#[tauri::command]
+pub async fn club_delete(app: S<'_>, club_id: String) -> Res<()> {
+    app.clubs().delete(&club_id).map_err(ae)?;
+    clubs_changed(&app);
+    Ok(())
+}
+
+/// Writes a version's file (to share it, or publish it on a website).
+#[tauri::command]
+pub async fn club_export(app: S<'_>, club_id: String, version_id: String, path: String) -> Res<()> {
+    let v = app.clubs().get(&club_id, &version_id).map_err(ae)?;
+    std::fs::write(&path, v.text).map_err(|e| format!("{path}: {e}"))
+}
+
+// ---------------------------------------------------------------- settings
 
 #[tauri::command]
 pub async fn settings_get(app: S<'_>) -> Res<Settings> {

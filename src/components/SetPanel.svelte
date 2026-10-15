@@ -3,6 +3,7 @@
   import { api } from "../lib/api";
   import { addToSet, app, audition, spotifyVersions, confirmAction, fillSlot, startFillingSlot } from "../lib/state.svelte";
   import { customLabel, entryStyleKeys, NEUTRAL } from "../lib/styles";
+  import { assess, checkSet, type SetItem } from "../lib/clubs";
   import { fmtBpm, fmtTime, playback, playedDurationMs } from "../lib/tempo";
   import type { Id, SetlistEntry } from "../lib/types";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
@@ -25,13 +26,58 @@
       const dur = isPause
         ? (e.pauseBefore ?? app.perform?.gapSeconds ?? 0) * 1000
         : r ? playedDurationMs(r.track, r.version, e, pb!.rate, { fadeSeconds: app.fadeSeconds, trimSilence: app.settings?.trimSilence }) : 0;
-      const shown = app.shownFor(r?.version, e, pb?.target ?? null);
-      const label = customLabel(r?.version, e) || shown.map((s) => s.short).join(" / ");
+      const shown = app.shownFor(r?.track, r?.version, e);
+      // The DJ's choice of club style that the song doesn't fit.
+      const warnings = [...new Set(shown.flatMap((s) => s.problems))];
+      // In a club's set, a song that is none of its styles.
+      const noStyle = app.hasClub && !!r && !shown.length && !customLabel(r.version, e);
+      // Many automatic matches: the first two, and how many more (all in the tooltip).
+      const many = shown.length > 2 && shown[0]?.auto;
+      const label = customLabel(r?.version, e) || (many ? `${shown.slice(0, 2).map((s) => s.short).join(" / ")} +${shown.length - 2}` : shown.map((s) => s.short).join(" / "));
       // A song coming up that the room has already heard in this set.
       const repeat = e.status === "pending" && !!r && app.playedInSet.has(r.track.id);
-      return { e, i, r, pb, dur, shown, label, repeat, isPause };
+      return { e, i, r, pb, dur, shown, label, repeat, isPause, warnings, noStyle, many };
     }),
   );
+  const clubValue = $derived(set?.club ? `${set.club.id}/${set.club.version}` : "");
+  const latestOfClub = $derived(set?.club ? app.clubs.find((c) => c.id === set!.club!.id)?.versions[0]?.id : undefined);
+  const isLatest = $derived(!set?.club || set.club.version === latestOfClub);
+
+  /** The set against its club's guidelines (songs and slots, in order; skipped ones left out). */
+  const check = $derived.by(() => {
+    const club = app.club;
+    if (!club || !set) return null;
+    const gap = app.perform?.gapSeconds ?? 0;
+    const items: SetItem[] = rows
+      .filter((x) => !x.isPause && x.e.status !== "skipped")
+      .map((x) => ({
+        entryId: x.e.id,
+        title: x.r?.track.title ?? `${x.shown.map((s) => s.name).join(" / ") || "Empty"} slot`,
+        ids: x.shown.map((s) => s.key),
+        fits: Object.fromEntries(x.shown.map((s) => [s.key, { id: s.key, ok: !s.problems.length, fit: s.fit ?? "unchecked", rate: s.rate, bpm: null, problems: s.problems }])),
+        lengthSecs: x.r ? x.dur / 1000 : null,
+        pauseSecs: (x.e.pauseBefore ?? gap) + rows.filter((p) => p.isPause && p.i === x.i - 1).reduce((a, p) => a + p.dur / 1000, 0),
+      }));
+    // A set whose songs have all been played, or a planned set with no slots left, is treated as finished.
+    const complete = set.mode === "preset" ? items.every((it) => rows.find((r) => r.e.id === it.entryId)?.r) : rows.every((r) => r.e.status !== "pending");
+    const result = checkSet(club, items, { complete });
+    // Songs that match several styles with nothing to choose between them.
+    for (const x of rows) {
+      if (x.many && x.e.status !== "skipped") {
+        result.issues.push({ level: "note", text: `${x.r?.track.title}: matches ${x.shown.length} styles (${x.shown.map((s) => s.short).join(", ")}); choose with right-click → Show as, or map your styles (Settings → Styles & Tags)`, entries: [x.e.id] });
+      }
+    }
+    return result;
+  });
+  const warnCount = $derived(check?.issues.filter((i) => i.level === "warn").length ?? 0);
+  let showCheck = $state(false);
+
+  function setClub(v: string) {
+    if (!set) return;
+    const [id, version] = v.split("/");
+    app.run(api.updateSetlist(set.id, { club: id && version ? { id, version } : null }));
+  }
+
   const totalMs = $derived.by(() => {
     const kept = rows.filter((x) => x.e.status !== "skipped");
     const songs = kept.filter((x) => !x.isPause).length;
@@ -119,8 +165,8 @@
         : { label: "Skip", disabled: isCurrent, action: () => ids.forEach((id) => api.updateEntry(id, { status: "skipped" })) },
       ...(entry.status === "played" ? [{ label: "Mark as Not Played", action: () => api.updateEntry(entry.id, { status: "pending" }) }] : []),
       { separator: true },
-      ...(app.profile?.tags ?? []).map((t) => ({
-        label: t.name, checked: (entry.tags ?? []).includes(t.id), action: () => toggleTag(entry, t.id),
+      ...Object.entries(app.club?.tag ?? {}).map(([id, t]) => ({
+        label: t.name, checked: (entry.tags ?? []).includes(id), action: () => toggleTag(entry, id),
       })),
       ...styleItems(entry),
       { separator: true },
@@ -130,8 +176,31 @@
     menu = { x: ev.clientX, y: ev.clientY, items };
   }
 
-  /** Choose which of a song's styles this set shows (for songs danced as several). */
+  /** Choose which of a song's styles this set shows. In a club's set: any of
+   * the club's styles (those the song matches first; others with a warning). */
   function styleItems(entry: SetlistEntry): MenuItem[] {
+    const club = app.club;
+    if (club) {
+      const r = entry.versionId ? app.versionMap.get(entry.versionId) : undefined;
+      const facts = app.factsFor(r?.track, r?.version, entry);
+      const shown = app.shownFor(r?.track, r?.version, entry).map((s) => s.key);
+      const tc = app.clubCtx!.tempoChange;
+      const ok = (id: string) => !facts || assess(id, club.style[id], facts, tc).ok;
+      const ids = Object.keys(club.style);
+      const set = (next: string[]) => api.updateEntry(entry.id, { clubStyles: next.length ? next : null });
+      const toggle = (id: string) => set(shown.includes(id) ? shown.filter((x) => x !== id) : [...shown, id]);
+      const item = (id: string): MenuItem => ({
+        label: ok(id) ? `Show as ${club.style[id].name}` : `Show as ${club.style[id].name} (doesn't fit)`,
+        checked: shown.includes(id),
+        action: () => toggle(id),
+      });
+      return [
+        { separator: true },
+        ...ids.filter(ok).map(item),
+        ...(entry.clubStyles ? [{ label: "Show What It Matches", action: () => api.updateEntry(entry.id, { clubStyles: null }) }] : []),
+        ...(ids.some((id) => !ok(id)) ? [{ separator: true } as MenuItem, ...ids.filter((id) => !ok(id)).map(item)] : []),
+      ];
+    }
     const v = entry.versionId ? app.versionMap.get(entry.versionId)?.version : undefined;
     const all = v?.styles ?? [];
     if (all.length < 2) return [];
@@ -213,9 +282,10 @@
     if (versions.length) await app.run(api.insertEntries(set.id, versions.map((v) => ({ versionId: v })), at));
   }
 
+  /** A slot for one of your styles, or (in a club's set) one of the club's. */
   async function addSlot(style: string) {
     if (!set) return;
-    await app.run(api.insertEntries(set.id, [{ styles: [style] }]));
+    await app.run(api.insertEntries(set.id, [app.club ? { clubStyles: [style] } : { styles: [style] }]));
   }
 
   async function addPause() {
@@ -230,11 +300,15 @@
   }
 
   function slotMenu(ev: MouseEvent) {
-    const items: MenuItem[] = app.myStyles.map((s) => {
-      const club = app.show(s.key);
-      return { label: club.club && club.name !== s.name ? `${s.name} (${club.name})` : s.name, action: () => addSlot(s.key) };
-    });
-    if (!items.length) items.push({ label: "Add dance styles in Settings → Dance Styles", action: () => (app.settingsOpen = "styles") });
+    const club = app.club;
+    const items: MenuItem[] = club
+      ? Object.entries(club.style).map(([id, s]) => ({ label: s.name, action: () => addSlot(id) }))
+      : app.myStyles.map((s) => ({ label: s.name, action: () => addSlot(s.key) }));
+    if (!items.length) {
+      items.push(club
+        ? { label: `${club.name} has no styles (Settings → Clubs)`, action: () => (app.settingsOpen = "clubs") }
+        : { label: "Add dance styles in Settings → Dance Styles", action: () => (app.settingsOpen = "styles") });
+    }
     menu = { x: ev.clientX, y: ev.clientY, items };
   }
 
@@ -263,7 +337,7 @@
       lines.push([
         number.get(x.e.id) ?? "", customLabel(x.r?.version, x.e) || x.shown.map((s) => s.name).join(" / "), x.r?.track.title ?? "(slot)", x.r?.track.artist ?? "", x.r?.version.name ?? "",
         x.pb?.target ? fmtBpm(x.pb.target) : "", x.dur ? fmtTime(x.dur) : "",
-        (x.e.tags ?? []).map((t) => app.profile?.tags.find((d) => d.id === t)?.name ?? t).join("; "), x.e.note ?? "", x.e.status,
+        (x.e.tags ?? []).map((t) => app.club?.tag[t]?.name ?? t).join("; "), x.e.note ?? "", x.e.status,
       ].map(esc).join(","));
     }
     const path = await save({ defaultPath: `${set.name}.csv`, filters: [{ name: "CSV", extensions: ["csv"] }] });
@@ -306,13 +380,18 @@
         <button class:on={set.mode === "live"} onclick={() => api.updateSetlist(set.id, { mode: "live" })}>Live</button>
         <button class:on={set.mode === "preset"} onclick={() => api.updateSetlist(set.id, { mode: "preset" })}>Preset</button>
       </div>
-      <select title="Club: whose style names, tempo ranges and tags this set uses" value={set.profileId}
-        onchange={(e) => api.updateSetlist(set.id, { profileId: e.currentTarget.value })}>
-        {#each app.profiles as p}<option value={p.id}>{p.name}</option>{/each}
-        {#if !app.profiles.some((p) => p.id === set.profileId)}
-          <option value={set.profileId} disabled>Missing club “{set.profileId}” (import it in Settings → Club Profiles)</option>
-        {/if}
+      <select title="Club: whose guidelines (styles, tempos, what a set should contain) this set follows" value={clubValue}
+        onchange={(e) => setClub(e.currentTarget.value)}>
+        <option value="">No club</option>
+        {#each app.clubs as c}
+          <option value="{c.id}/{c.versions[0]?.id}">{c.name}</option>
+        {/each}
+        {#if set.club && !isLatest}<option value={clubValue}>{app.clubLabel(set.club)}</option>{/if}
       </select>
+      {#if set.club && !isLatest && latestOfClub}
+        <button class="plain small newer" title="This set follows an older version of {app.clubLabel({ id: set.club.id, version: latestOfClub })}'s guidelines"
+          onclick={() => setClub(`${set.club!.id}/${latestOfClub}`)}>Use newer guidelines</button>
+      {/if}
     </div>
 
     <div class="entries" bind:this={listEl} role="listbox" aria-multiselectable="true" tabindex="0" onkeydown={keydown}
@@ -354,9 +433,12 @@
           <span class="stripe"></span>
           <div class="body">
             <div class="l1">
-              <span class="sname" class:unmapped={!customLabel(x.r?.version, x.e) && x.shown.some((s) => s.unmapped)}
-                title={x.shown.map((s) => (s.unmapped ? `${s.name}: not a ${app.profile?.name} style` : s.club && s.name !== app.styleName(s.key) ? `${s.name} (your ${app.styleName(s.key)})` : s.name)).join("\n")}
+              <span class="sname" class:unmapped={x.noStyle}
+                title={x.noStyle ? `Not one of ${app.club?.name}'s styles (right-click: Show as…)` : x.shown.map((s) => s.name).join("\n")}
                 >{x.isPause ? "" : x.label || "—"}</span>
+              {#if x.warnings.length}
+                <span class="warn-mark" title={x.warnings.join("\n")}><Icon name="warning" size={11} /></span>
+              {/if}
               {#if x.isPause}
                 <span class="t pausename"><Icon name="pause" size={11} /> {x.e.label || "Pause"}</span>
               {:else if x.r}
@@ -377,7 +459,7 @@
               {/if}
               {#if x.r}<span class="a">{x.r.track.artist}{#if app.versionLabel(x.r.version, x.r.track)}{" · "}{x.r.version.name}{/if}</span>{/if}
               {#each x.e.tags ?? [] as tag}
-                {@const t = app.profile?.tags.find((d) => d.id === tag)}
+                {@const t = app.club?.tag[tag]}
                 <span class="badge tag" style:--c={t?.color ?? "#999"}>{t?.name ?? tag}</span>
               {/each}
               {#if x.e.note}<span class="note" title={x.e.note}>✎ {x.e.note}</span>{/if}
@@ -395,12 +477,36 @@
       {/if}
     </div>
 
+    {#if check && showCheck}
+      <div class="check">
+        {#if check.tallies.length}
+          <div class="tallies">
+            {#each check.tallies as t (t.key)}
+              <span class="tally" class:bad={!t.ok} title="{app.club?.name} expects {t.want}">{t.name} <b class="num">{t.have}</b><span class="faint"> / {t.want}</span></span>
+            {/each}
+          </div>
+        {/if}
     <div class="foot">
       <button class="small" onclick={slotMenu} title="Add a placeholder for a dance style; choose the song live"><Icon name="plus" size={12} /> Style slot</button>
       <button class="small" onclick={addPause} title="Add a pause without a song: for a break, an extra pause, an announcement or a stop for auto mode"><Icon name="pause" size={12} /> Pause</button>
       <span class="spacer"></span>
+      {#if check}
+        <button class="small" class:warned={warnCount > 0} class:on={showCheck} onclick={() => (showCheck = !showCheck)}
+          title="How this set follows {app.club?.name}'s guidelines">
+          <Icon name={warnCount ? "warning" : "check"} size={12} /> {warnCount ? `${warnCount} to check` : "Guidelines"}
+        </button>
+      {/if}
       <span class="dim small num">{number.size} songs · {fmtTime(totalMs)}{#if remainingMs && app.perform?.startedAt}{" · "}{fmtTime(remainingMs)} left{/if}</span>
     </div>
+        {#each check.issues as i, n (n)}
+          <button class="plain issue {i.level}" disabled={!i.entries.length} onclick={() => (app.selectedEntries = i.entries)}>
+            <Icon name={i.level === "warn" ? "warning" : "info"} size={11} /> {i.text}
+          </button>
+        {:else}
+          <div class="ok small"><Icon name="check" size={12} /> Follows {app.club?.name}'s guidelines.</div>
+        {/each}
+      </div>
+    {/if}
   {/if}
 </div>
 
@@ -441,6 +547,17 @@
   .l1, .l2 { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
   .sname { font-size: var(--fs-xs); font-weight: 700; color: color-mix(in srgb, var(--c) 85%, white); flex: none; }
   .sname.unmapped { font-style: italic; opacity: 0.7; }
+  .warn-mark { color: var(--yellow); display: inline-flex; flex: none; }
+  .newer { color: var(--accent); white-space: nowrap; }
+  button.warned { color: var(--yellow); border-color: color-mix(in srgb, var(--yellow) 45%, transparent); }
+  .check { flex: none; max-height: 40%; overflow: auto; padding: 8px 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-sm); }
+  .tallies { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 4px; }
+  .tally { white-space: nowrap; color: var(--text-dim); }
+  .tally.bad b { color: var(--yellow); }
+  .issue { text-align: left; justify-content: flex-start; gap: 6px; padding: 2px 4px; font-size: var(--fs-sm); color: var(--text-dim); white-space: normal; height: auto; }
+  .issue.warn { color: var(--text); }
+  .issue.warn :global(svg) { color: var(--yellow); flex: none; }
+  .ok { color: var(--green); display: flex; gap: 4px; align-items: center; }
   .t { overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
   .t.slot { color: var(--yellow); font-style: italic; font-weight: 400; }
   .l2 { font-size: var(--fs-sm); color: var(--text-dim); margin-top: 1px; }

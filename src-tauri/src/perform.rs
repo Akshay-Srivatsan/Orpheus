@@ -12,7 +12,7 @@
 
 use crate::app::{emit, App};
 use crate::model::*;
-use crate::settings::ProfileCore;
+use crate::club::Club;
 use anyhow::{anyhow, Result};
 use serde::Serialize;
 use parking_lot::Mutex;
@@ -35,6 +35,9 @@ pub type Clip = std::result::Result<(Arc<Vec<f32>>, u32), String>;
 
 /// Crossfader position where the room hears both decks fully.
 pub const CENTER: f64 = 0.5;
+
+/// Pause between songs when neither you nor the club set one (seconds).
+pub const DEFAULT_PAUSE_SECS: f64 = 8.0;
 
 /// How long the controller's lights flash when an action is refused.
 pub const ERROR_FLASH: Duration = Duration::from_millis(1200);
@@ -129,8 +132,13 @@ pub struct ProjEntry {
     pub track_id: Option<Id>,
     pub title: String,
     pub artist: String,
-    /// Your style keys to show (club styles are resolved by the page).
+    /// Your style keys (the page shows the club styles they match).
     pub styles: Vec<String>,
+    /// The club styles chosen for this entry, if any (see `SetlistEntry::club_styles`).
+    pub club_styles: Option<Vec<String>>,
+    /// For matching club styles: beats per bar and playing length.
+    pub meter: Option<u8>,
+    pub length_secs: Option<f64>,
     /// Custom text replacing the style names.
     pub label: Option<String>,
     pub tags: Vec<ProjTag>,
@@ -154,8 +162,11 @@ pub struct ProjectorPayload {
     pub message: Option<String>,
     /// Deck whose position drives the projector's progress bar.
     pub live_deck: usize,
-    /// The club profile (for its style names), and your styles and mappings.
-    pub profile: serde_json::Value,
+    /// The set's club guidelines (for its style names), and your styles and mappings.
+    pub club: Option<Arc<Club>>,
+    pub club_id: Option<String>,
+    /// Tempo change allowed when the club doesn't say (Settings: tempo slider range).
+    pub tempo_range_pct: f64,
     pub style_library: StyleLibrary,
 }
 
@@ -270,12 +281,12 @@ impl App {
             return v;
         }
         let s = self.settings.read().auto_advance;
-        s.unwrap_or_else(|| self.active_profile().auto_advance)
+        s.unwrap_or_else(|| self.active_club().and_then(|c| c.set.auto_advance).unwrap_or(false))
     }
 
     pub fn gap_seconds(&self) -> f64 {
         let s = self.settings.read().gap_seconds;
-        s.unwrap_or_else(|| self.active_profile().gap.target_seconds)
+        s.unwrap_or_else(|| self.active_club().and_then(|c| c.set.pause.target).unwrap_or(DEFAULT_PAUSE_SECS))
     }
 
     pub fn open_setlist(&self, id: Option<Id>) -> Result<()> {
@@ -326,9 +337,8 @@ impl App {
         if let Some(id) = self.perform.lock().setlist_id.clone() {
             return Ok(id);
         }
-        let s = self.settings.read().clone();
         let date = chrono_like_date();
-        let id = self.store.setlist_create(&format!("Live set — {date}"), "live", &s.active_profile_id, None)?;
+        let id = self.store.setlist_create(&format!("Live set — {date}"), "live", self.default_club_ref(), None)?;
         emit(&self.handle, "setlists-changed", ());
         self.open_setlist(Some(id.clone()))?;
         Ok(id)
@@ -949,10 +959,16 @@ impl App {
 
     /// Club style names / colours are filled in by the projector page from
     /// `ProjectorPayload::{profile, style_library}` (see `src/lib/styles.ts`).
-    fn proj_entry(&self, e: &SetlistEntry, profile: &ProfileCore, lookup: &HashMap<Id, (Version, Track)>) -> ProjEntry {
+    fn proj_entry(&self, e: &SetlistEntry, club: Option<&Club>, lookup: &HashMap<Id, (Version, Track)>) -> ProjEntry {
         let vt = e.version_id.as_ref().and_then(|id| lookup.get(id));
         let styles = e.styles.clone().or_else(|| vt.map(|(v, _)| v.styles.clone())).unwrap_or_default();
-        let target = vt.and_then(|(v, _)| Self::resolve_settings(v, Some(e)).target_bpm);
+        let settings = vt.map(|(v, _)| Self::resolve_settings(v, Some(e)));
+        let target = settings.as_ref().and_then(|s| s.target_bpm);
+        // From the cue-in point to the fade-out / cue-out point (or the end).
+        let length_secs = vt.zip(settings.as_ref()).map(|((_, t), s)| {
+            let end = s.fade_out_ms.or(s.cue_out_ms).unwrap_or(t.rec.duration_ms);
+            (end - s.cue_in_ms.unwrap_or(0)).max(0) as f64 / 1000.0
+        });
         ProjEntry {
             id: e.id.clone(),
             kind: e.kind,
@@ -960,6 +976,9 @@ impl App {
             title: vt.map(|(_, t)| t.rec.title.clone()).unwrap_or_default(),
             artist: vt.map(|(_, t)| t.rec.artist.clone()).unwrap_or_default(),
             styles,
+            club_styles: e.club_styles.clone(),
+            meter: vt.and_then(|(_, t)| t.rec.beats_per_bar),
+            length_secs,
             // Entry label, else the version's display name (e.g. a line dance's name).
             label: e
                 .label
@@ -969,8 +988,8 @@ impl App {
             tags: e
                 .tags
                 .iter()
-                .filter_map(|tid| profile.tags.iter().find(|t| &t.id == tid && t.announce))
-                .map(|t| ProjTag { id: t.id.clone(), name: t.name.clone(), color: t.color.clone() })
+                .filter_map(|tid| club.and_then(|c| c.tags.get(tid)).filter(|t| t.announce).map(|t| (tid, t)))
+                .map(|(id, t)| ProjTag { id: id.clone(), name: t.name.clone(), color: t.color.clone().unwrap_or_default() })
                 .collect(),
             status: e.status.clone(),
             bpm: target.or_else(|| vt.and_then(|(_, t)| t.rec.bpm)),
@@ -979,7 +998,7 @@ impl App {
 
     pub fn projector_payload(&self) -> ProjectorPayload {
         let settings = self.settings.read().projector.clone();
-        let profile = self.active_profile();
+        let club = self.active_club();
         let (setlist_id, gap, message, live_deck) = {
             let p = self.perform.lock();
             (p.setlist_id.clone(), p.gap_started, p.message.clone(), p.live_deck)
@@ -995,7 +1014,7 @@ impl App {
                 }
             }
         }
-        let proj: Vec<ProjEntry> = entries.iter().map(|e| self.proj_entry(e, &profile, &lookup)).collect();
+        let proj: Vec<ProjEntry> = entries.iter().map(|e| self.proj_entry(e, club.as_deref(), &lookup)).collect();
         // Only songs the room has heard count as "current".
         let current_id = self.current_entry_id().filter(|id| {
             entries.iter().any(|e| &e.id == id && (e.status == "playing" || e.status == "played"))
@@ -1020,7 +1039,7 @@ impl App {
             _ => setlist.as_ref().map(|s| s.mode.clone()).unwrap_or_else(|| "live".into()),
         };
         let title = if settings.title.trim().is_empty() {
-            setlist.as_ref().map(|s| s.name.clone()).unwrap_or_else(|| profile.name.clone())
+            setlist.as_ref().map(|s| s.name.clone()).unwrap_or_else(|| club.as_ref().map(|c| c.name.clone()).unwrap_or_default())
         } else {
             settings.title.clone()
         };
@@ -1037,7 +1056,9 @@ impl App {
             playing,
             message,
             live_deck,
-            profile: self.active_profile_json(),
+            club,
+            club_id: self.active_club_ref().map(|r| r.id),
+            tempo_range_pct: self.settings.read().tempo_range_pct,
             style_library: self.style_library(),
         }
     }

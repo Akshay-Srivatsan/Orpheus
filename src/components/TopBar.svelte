@@ -25,9 +25,10 @@
   });
 
   const startedAt = $derived(app.perform?.startedAt ?? null);
-  const setMinutes = $derived(app.profile?.setMinutes ?? 120);
+  /** The club's planned set length (minutes), if it gives one. */
+  const setMinutes = $derived(app.club?.set.minutes?.max ?? app.club?.set.minutes?.min ?? null);
   const elapsed = $derived(startedAt ? now - startedAt : 0);
-  const over = $derived(startedAt ? elapsed > setMinutes * 60000 : false);
+  const over = $derived(startedAt && setMinutes ? elapsed > setMinutes * 60000 : false);
   const audioOk = $derived(!!app.outputs?.master && !(app.outputs?.errors.length));
   const midiConnected = $derived(midiPorts.filter((p) => p.connected));
 
@@ -60,14 +61,14 @@
   <div class="brand">
     <span class="logo">◐</span>
     <span class="name">Orpheus</span>
-    <span class="profile dim" title="Club profile (rules, styles, tempos)">{app.profile?.name ?? ""}</span>
+    <span class="profile dim" title="Club guidelines for this set (styles, tempos, what a set should contain)">{app.clubRef ? app.clubLabel(app.clubRef) : ""}</span>
   </div>
 
   <div class="clock num">
     <span class="time">{new Date(now).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span>
     {#if startedAt}
-      <span class="settime" class:over title="Time since the first song of this set (planned {setMinutes} min)">
-        Set {fmtHM(elapsed)} of {fmtHM(setMinutes * 60000)}
+      <span class="settime" class:over title="Time since the first song of this set{setMinutes ? ` (planned ${setMinutes} min)` : ''}">
+        Set {fmtHM(elapsed)}{#if setMinutes}{" of "}{fmtHM(setMinutes * 60000)}{/if}
       </span>
     {/if}
   </div>
@@ -88,7 +89,7 @@
             <button class="danger" onclick={() => announce(null)}>Clear announcement</button>
             <div class="sep"></div>
           {/if}
-          {#each app.profile?.announcements ?? [] as a}
+          {#each app.club?.announcements ?? [] as a}
             <button class="plain item" onclick={() => announce(a)}>{a}</button>
           {/each}
           <div class="row">

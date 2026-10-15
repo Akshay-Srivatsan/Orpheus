@@ -153,21 +153,6 @@ pub struct LibraryStyle {
     pub note: String,
 }
 
-/// One rule of how your styles show up at a club: songs tagged `style` whose
-/// planned tempo is within [`min_bpm`, `max_bpm`] count as club style `to`
-/// (empty = not danced at this club). Rules are tried in order; the first match
-/// wins. Resolution happens in the UI (`src/lib/styles.ts`).
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
-#[serde(default, rename_all = "camelCase")]
-pub struct StyleMappingRule {
-    pub style: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub min_bpm: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_bpm: Option<f64>,
-    pub to: String,
-}
-
 /// One of your tags: a label on versions that isn't a dance style.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
@@ -184,7 +169,11 @@ pub struct LibraryTag {
 #[serde(default, rename_all = "camelCase")]
 pub struct StyleLibrary {
     pub styles: Vec<LibraryStyle>,
-    pub mappings: std::collections::BTreeMap<String, Vec<StyleMappingRule>>,
+    /// Per club id: which of the club's styles each of your styles may show
+    /// as (a matrix: your style key → club style ids). A song shows those of
+    /// them it matches (`src/lib/clubs.ts`).
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub club_mappings: std::collections::BTreeMap<String, std::collections::BTreeMap<String, Vec<String>>>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<LibraryTag>,
     /// How announcements say words (dance names etc.).
@@ -354,6 +343,11 @@ pub struct SetlistEntry {
     /// styles, or the slot's style(s). `None` = all of the version's styles.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub styles: Option<Vec<String>>,
+    /// In a club's set: the club styles to show for this entry (style ids),
+    /// or a slot's style. `None` = what the song matches (see `src/lib/clubs.ts`).
+    /// May name styles the song doesn't match: the DJ's choice, with a warning.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub club_styles: Option<Vec<String>>,
     /// Custom text shown instead of style names (setlist, projector).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
@@ -397,6 +391,7 @@ impl Default for SetlistEntry {
             id: String::new(),
             version_id: None,
             styles: None,
+            club_styles: None,
             label: None,
             legacy_style: None,
             overrides: Overrides::default(),
@@ -424,6 +419,11 @@ pub struct Setlist {
     pub id: Id,
     pub name: String,
     pub event_date: Option<String>,
+    /// The club guidelines (one version) the set is planned for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub club: Option<ClubRef>,
+    /// Older sets: a club profile (the old format, no longer used).
+    #[serde(skip_serializing)]
     pub profile_id: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub notes: String,
@@ -434,6 +434,13 @@ pub struct Setlist {
     pub entries: Vec<SetlistEntry>,
 }
 
+/// A club and one version of its guidelines.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ClubRef {
+    pub id: String,
+    pub version: String,
+}
+
 /// Setlist without entries, for lists.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -441,7 +448,7 @@ pub struct SetlistSummary {
     pub id: Id,
     pub name: String,
     pub event_date: Option<String>,
-    pub profile_id: String,
+    pub club: Option<ClubRef>,
     pub notes: String,
     pub mode: String,
     pub created_at: i64,
@@ -455,7 +462,7 @@ impl From<&Setlist> for SetlistSummary {
             id: s.id.clone(),
             name: s.name.clone(),
             event_date: s.event_date.clone(),
-            profile_id: s.profile_id.clone(),
+            club: s.club.clone(),
             notes: s.notes.clone(),
             mode: s.mode.clone(),
             created_at: s.created_at,
@@ -471,7 +478,9 @@ pub struct SetlistPatch {
     pub name: Option<String>,
     #[serde(default, with = "double_option")]
     pub event_date: Option<Option<String>>,
-    pub profile_id: Option<String>,
+    /// Moves the set to a club's guidelines (a version), or to none.
+    #[serde(default, with = "double_option")]
+    pub club: Option<Option<ClubRef>>,
     pub notes: Option<String>,
     pub mode: Option<String>,
 }
@@ -485,6 +494,7 @@ pub struct NewEntry {
     pub pause_before: Option<f64>,
     pub announcement: Option<String>,
     pub styles: Option<Vec<String>>,
+    pub club_styles: Option<Vec<String>>,
     pub label: Option<String>,
     #[serde(default)]
     pub overrides: Overrides,
@@ -501,6 +511,8 @@ pub struct EntryPatch {
     pub version_id: Option<Option<Id>>,
     #[serde(default, with = "double_option")]
     pub styles: Option<Option<Vec<String>>>,
+    #[serde(default, with = "double_option")]
+    pub club_styles: Option<Option<Vec<String>>>,
     #[serde(default, with = "double_option")]
     pub label: Option<Option<String>>,
     /// Replaces all overrides.

@@ -67,7 +67,7 @@
   }
 
   function fitToStyle(v: Version) {
-    const s = app.clubStyleOf(v, null, track?.bpm ?? null);
+    const s = app.clubStyleOf(track, v, null);
     if (!track?.bpm || !s) return;
     const c = styleCenter(s);
     if (!c) return;
@@ -114,7 +114,7 @@
           {/if}
           <span class="lbl" title="Text shown instead of the style names (setlist and projector)">Label</span>
           <input type="text" value={entry.label ?? ""}
-            placeholder={app.shownFor(entryVersion, entry, r?.target ?? null).map((s) => s.name).join(" / ") || "e.g. Mixer"}
+            placeholder={app.shownFor(track, entryVersion, entry).map((s) => s.name).join(" / ") || "e.g. Mixer"}
             onchange={(e) => api.updateEntry(entry.id, { label: e.currentTarget.value.trim() || null })} />
           <span class="lbl">Tempo</span>
           <span class="row">
@@ -139,10 +139,10 @@
             onchange={(e) => api.updateEntry(entry.id, { note: e.currentTarget.value })} />
           <span class="lbl">Tags</span>
           <span class="tags">
-            {#each app.profile?.tags ?? [] as t}
-              {@const on = (entry.tags ?? []).includes(t.id)}
-              <button class="badge tagbtn" class:off={!on} style:--c={t.color}
-                onclick={() => api.updateEntry(entry.id, { tags: on ? (entry.tags ?? []).filter((x) => x !== t.id) : [...(entry.tags ?? []), t.id] })}>
+            {#each Object.entries(app.club?.tag ?? {}) as [id, t]}
+              {@const on = (entry.tags ?? []).includes(id)}
+              <button class="badge tagbtn" class:off={!on} style:--c={t.color ?? "#999"} title={t.note ?? ""}
+                onclick={() => api.updateEntry(entry.id, { tags: on ? (entry.tags ?? []).filter((x) => x !== id) : [...(entry.tags ?? []), id] })}>
                 {t.name}
               </button>
             {/each}
@@ -256,7 +256,7 @@
               <span class="lbl">Styles</span>
               <StyleChips value={v.styles ?? []} bpm={pb.target} onchange={(keys) => patchVersion(v, { styles: keys })} />
               <span class="lbl" title="Shown to dancers instead of the style names, e.g. the name of a line dance">Shown as</span>
-              <input type="text" value={v.displayName ?? ""} placeholder={app.shownFor(v, null, pb.target).map((s) => s.name).join(" / ") || "style names"}
+              <input type="text" value={v.displayName ?? ""} placeholder={app.shownFor(track, v, null).map((s) => s.name).join(" / ") || "style names"}
                 onchange={(e) => patchVersion(v, { displayName: e.currentTarget.value.trim() || null })} />
               <span class="lbl">Tags</span>
               <StyleChips kind="tag" value={v.tags ?? []} onchange={(keys) => patchVersion(v, { tags: keys })} />
@@ -265,7 +265,7 @@
                 <input type="number" step="0.5" placeholder={pb.base ? fmtBpm(pb.base) : "orig."} value={v.targetBpm ?? ""}
                   onchange={(e) => patchVersion(v, { targetBpm: e.currentTarget.value ? +e.currentTarget.value : null })} />
                 {#if v.targetBpm && pb.base}<span class="faint num small">{((pb.rate - 1) * 100).toFixed(1)}%</span>{/if}
-                {#if app.clubStyleOf(v, null, track.bpm)?.sweet}
+                {#if app.clubStyleOf(track, v, null)?.sweet}
                   <button class="plain small" title="Set the tempo to the nearest edge of the style's sweet range" onclick={() => fitToStyle(v)}>Fit</button>
                 {/if}
               </span>

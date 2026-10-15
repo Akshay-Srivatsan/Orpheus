@@ -50,8 +50,9 @@ export const api = {
   // setlists
   setlists: () => call<T.SetlistSummary[]>("setlists_list"),
   setlist: (id: T.Id) => call<T.Setlist>("setlist_get", { id }),
-  createSetlist: (a: { name: string; mode: T.SetlistMode; profileId: string; eventDate?: string | null }) =>
-    call<T.Setlist>("setlist_create", { name: a.name, mode: a.mode, profileId: a.profileId, eventDate: a.eventDate ?? null }),
+  /** `clubId`: plan it with that club's latest guidelines ("" = none). */
+  createSetlist: (a: { name: string; mode: T.SetlistMode; clubId: string; eventDate?: string | null }) =>
+    call<T.Setlist>("setlist_create", { name: a.name, mode: a.mode, clubId: a.clubId || null, eventDate: a.eventDate ?? null }),
   updateSetlist: (id: T.Id, patch: Partial<Omit<T.SetlistSummary, "id" | "entryCount">>) => call<T.Setlist>("setlist_update", { id, patch }),
   deleteSetlist: (id: T.Id) => call<void>("setlist_delete", { id }),
   duplicateSetlist: (id: T.Id, name: string) => call<T.Setlist>("setlist_duplicate", { id, name }),
@@ -74,10 +75,27 @@ export const api = {
   /** Adds (`on`) or removes one of your tags on versions. */
   setTag: (tag: string, versionIds: T.Id[], on: boolean) => call<void>("tag_set", { tag, versionIds, on }),
 
-  // profiles & settings
-  profiles: () => call<T.Profile[]>("profiles_list"),
-  saveProfile: (profile: T.Profile) => call<void>("profile_save", { profile }),
-  deleteProfile: (id: string) => call<void>("profile_delete", { id }),
+  // clubs (see club.rs)
+  clubs: () => call<T.ClubInfo[]>("clubs_list"),
+  club: (clubId: string, versionId: string) => call<T.ClubVersion>("club_get", { clubId, versionId }),
+  /** Checks a club file's text: the club, or an error naming the line. */
+  clubParse: (text: string) => call<T.Club>("club_parse", { text }),
+  clubFormat: (club: T.Club) => call<string>("club_format", { club }),
+  /** Sets using each version. */
+  clubUsage: (clubId: string) => call<Record<string, number>>("club_usage", { clubId }),
+  clubImportFile: (path: string) => call<T.ClubImported>("club_import_file", { path }),
+  clubImportUrl: (url: string) => call<T.ClubImported>("club_import_url", { url }),
+  clubUpdate: (clubId: string) => call<T.ClubImported>("club_update", { clubId }),
+  /** Saves edits: in place if no set uses the version, else as a new version. */
+  clubSave: (clubId: string, versionId: string, text: string) => call<T.ClubImported>("club_save", { clubId, versionId, text }),
+  clubNew: (name: string) => call<T.ClubImported>("club_new", { name }),
+  clubRenameVersion: (clubId: string, versionId: string, name: string) => call<void>("club_rename_version", { clubId, versionId, name }),
+  clubDeleteVersion: (clubId: string, versionId: string) => call<void>("club_delete_version", { clubId, versionId }),
+  clubDelete: (clubId: string) => call<void>("club_delete", { clubId }),
+  clubExport: (clubId: string, versionId: string, path: string) => call<void>("club_export", { clubId, versionId, path }),
+  /** Bundled examples: [id, name, description]. */
+  clubExamples: () => call<[string, string, string][]>("club_examples"),
+  clubImportExample: (id: string) => call<T.ClubImported>("club_import_example", { id }),
   settings: () => call<T.Settings>("settings_get"),
   saveSettings: (settings: T.Settings) => call<void>("settings_set", { settings }),
 
@@ -184,7 +202,7 @@ export interface Events {
   "setlist-changed": T.Id;
   "setlists-changed": null;
   "crates-changed": null;
-  "profiles-changed": null;
+  "clubs-changed": null;
   "styles-changed": null;
   "settings-changed": T.Settings;
   "scan-progress": T.ScanProgress;

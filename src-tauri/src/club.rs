@@ -959,6 +959,13 @@ impl Clubs {
     }
 }
 
+/// The example clubs shipped with Orpheus (`examples/clubs/`): (file name, text).
+pub const EXAMPLES: &[(&str, &str)] = &[
+    ("dancebreak", include_str!("../../examples/clubs/dancebreak.toml")),
+    ("jammix", include_str!("../../examples/clubs/jammix.toml")),
+    ("friday-night-waltz", include_str!("../../examples/clubs/friday-night-waltz.toml")),
+];
+
 /// Fetches a club file from the web.
 pub async fn fetch(url: &str) -> Result<String> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
@@ -1129,7 +1136,7 @@ announce = true
             assert_eq!(parse(&to_toml(&c)).unwrap(), c, "{}", p.display());
             n += 1;
         }
-        assert!(n >= 4, "{n} example clubs");
+        assert_eq!(n, EXAMPLES.len(), "every example club is bundled");
     }
 
     #[test]

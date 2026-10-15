@@ -9,7 +9,7 @@
 //!   tracks/<id>.json      a recording: metadata, analysis, sources, versions
 //!   setlists/<id>.json    a setlist and its entries
 //!   crates/<id>.json      a hand-picked collection of versions
-//!   profiles/<id>.json    custom / modified club profiles
+//!   clubs/<club>/         club guidelines, one TOML file per version (see club.rs)
 //!   styles.json           your dance styles and how they map onto clubs' styles
 //! ```
 //!
@@ -80,7 +80,6 @@ struct Inner {
     setlists: HashMap<Id, Setlist>,
     entry_owner: HashMap<Id, Id>,
     crates: HashMap<Id, Crate>,
-    profiles: BTreeMap<String, serde_json::Value>,
     index: FileIndex,
     by_hash: HashMap<String, Vec<String>>,
     load_errors: Vec<String>,
@@ -247,7 +246,7 @@ impl Store {
 
     /// (Re)loads everything from disk, e.g. after `git pull` or switching libraries.
     pub fn reload(&self, library_dir: &Path) -> Result<()> {
-        for d in ["tracks", "setlists", "crates", "profiles"] {
+        for d in ["tracks", "setlists", "crates", "clubs"] {
             fs::create_dir_all(library_dir.join(d))
                 .with_context(|| format!("creating {}", library_dir.join(d).display()))?;
         }
@@ -287,17 +286,6 @@ impl Store {
                     inner.crates.insert(c.id.clone(), c);
                 }
                 Ok(_) => errors.push(format!("{}: missing id", p.display())),
-                Err(e) => errors.push(format!("{e:#}")),
-            }
-        }
-        for p in json_files(&library_dir.join("profiles")) {
-            match read_json::<serde_json::Value>(&p) {
-                Ok(v) => match v["id"].as_str() {
-                    Some(id) => {
-                        inner.profiles.insert(id.to_string(), v);
-                    }
-                    None => errors.push(format!("{}: missing id", p.display())),
-                },
                 Err(e) => errors.push(format!("{e:#}")),
             }
         }
@@ -937,13 +925,13 @@ impl Store {
         self.inner.read().setlists.get(id).cloned().ok_or_else(|| anyhow!("setlist {id} not found"))
     }
 
-    pub fn setlist_create(&self, name: &str, mode: &str, profile_id: &str, date: Option<String>) -> Result<Id> {
+    pub fn setlist_create(&self, name: &str, mode: &str, club: Option<ClubRef>, date: Option<String>) -> Result<Id> {
         let now = now_ms();
         let s = Setlist {
             id: new_id(),
             name: name.into(),
             event_date: date,
-            profile_id: profile_id.into(),
+            club,
             mode: mode.into(),
             created_at: now,
             updated_at: now,
@@ -959,7 +947,7 @@ impl Store {
         self.with_setlist(id, |s| {
             if let Some(v) = &p.name { s.name = v.clone(); }
             if let Some(v) = &p.event_date { s.event_date = v.clone(); }
-            if let Some(v) = &p.profile_id { s.profile_id = v.clone(); }
+            if let Some(v) = &p.club { s.club = v.clone(); }
             if let Some(v) = &p.notes { s.notes = v.clone(); }
             if let Some(v) = &p.mode { s.mode = v.clone(); }
             Ok(())
@@ -1018,6 +1006,7 @@ impl Store {
                     id: new_id(),
                     version_id: n.version_id.clone(),
                     styles: n.styles.as_ref().map(|s| dedup(s)),
+                    club_styles: n.club_styles.as_ref().map(|s| dedup(s)),
                     label: n.label.clone().filter(|l| !l.trim().is_empty()),
                     overrides: n.overrides.clone(),
                     note: n.note.clone(),
@@ -1040,6 +1029,7 @@ impl Store {
             let e = s.entries.iter_mut().find(|e| e.id == id).ok_or_else(|| anyhow!("entry not found"))?;
             if let Some(v) = &p.version_id { e.version_id = v.clone(); }
             if let Some(v) = &p.styles { e.styles = v.as_ref().map(|s| dedup(s)); }
+            if let Some(v) = &p.club_styles { e.club_styles = v.as_ref().map(|s| dedup(s)); }
             if let Some(v) = &p.label { e.label = v.clone().filter(|l| !l.trim().is_empty()); }
             if let Some(v) = &p.overrides { e.overrides = v.clone(); }
             if let Some(v) = &p.note { e.note = v.clone(); }
@@ -1271,27 +1261,6 @@ impl Store {
         Ok(())
     }
 
-    // ---------------------------------------------------------------- profiles
-
-    pub fn profiles(&self) -> Vec<serde_json::Value> {
-        self.inner.read().profiles.values().cloned().collect()
-    }
-
-    pub fn profile_save(&self, value: serde_json::Value) -> Result<()> {
-        let id = value["id"].as_str().filter(|s| !s.is_empty()).ok_or_else(|| anyhow!("profile needs an id"))?;
-        if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
-            return Err(anyhow!("profile ids may only contain letters, digits, - and _"));
-        }
-        write_json(&self.lib_path("profiles", id), &value)?;
-        self.inner.write().profiles.insert(id.to_string(), value);
-        Ok(())
-    }
-
-    pub fn profile_delete(&self, id: &str) -> Result<()> {
-        self.inner.write().profiles.remove(id);
-        let _ = fs::remove_file(self.lib_path("profiles", id));
-        Ok(())
-    }
 }
 
 /// Days since 1970-01-01 → (year, month, day). (Howard Hinnant's algorithm.)
@@ -1349,7 +1318,7 @@ mod tests {
         let id = store.insert_track(&NewTrack { title: "S".into(), ..Default::default() }, src).unwrap();
         store.set_in_library(&id, false).unwrap();
         let vid = store.track(&id).unwrap().rec.versions[0].id.clone();
-        let sid = store.setlist_create("Set", "live", "dancebreak", None).unwrap();
+        let sid = store.setlist_create("Set", "live", None, None).unwrap();
         let eids = store.entries_insert(&sid, None, &[NewEntry { version_id: Some(vid), ..Default::default() }]).unwrap();
         assert_eq!(store.prune_unused(&[]).unwrap(), 0, "still used by the set");
         // Reloading keeps the flag (it's only written when false).
@@ -1420,7 +1389,7 @@ mod tests {
         let vid = store.track(&tid).unwrap().rec.versions[0].id.clone();
         let mut sets = vec![];
         for _ in 0..2 {
-            let sid = store.setlist_create("Set", "live", "none", None).unwrap();
+            let sid = store.setlist_create("Set", "live", None, None).unwrap();
             // Played twice in the same set counts once for that set.
             let ids = store.entries_insert(&sid, None, &[NewEntry { version_id: Some(vid.clone()), ..Default::default() }, NewEntry { version_id: Some(vid.clone()), ..Default::default() }]).unwrap();
             for id in &ids {
@@ -1471,7 +1440,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let sid = store.setlist_create("Social", "preset", "dancebreak", None).unwrap();
+        let sid = store.setlist_create("Social", "preset", None, None).unwrap();
         let mk = |n: &str| NewEntry { note: n.into(), ..Default::default() };
         store.entries_insert(&sid, None, &[mk("a"), mk("b"), mk("c")]).unwrap();
         let ids = store.entries_insert(&sid, Some(1), &[NewEntry { version_id: Some(v.id.clone()), ..Default::default() }]).unwrap();

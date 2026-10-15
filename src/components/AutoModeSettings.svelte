@@ -84,8 +84,8 @@
 <div class="form">
   <span class="l">Next song</span>
   <span class="col">
-    <label><input type="radio" name="adv" checked={!(s.autoAdvance ?? app.profile?.autoAdvance)} onchange={() => app.saveSettings({ autoAdvance: false })} /> Manual: start each song with Play Next</label>
-    <label><input type="radio" name="adv" checked={!!(s.autoAdvance ?? app.profile?.autoAdvance)} onchange={() => app.saveSettings({ autoAdvance: true })} /> Automatic (auto mode)</label>
+    <label><input type="radio" name="adv" checked={!(s.autoAdvance ?? app.club?.set.auto_advance)} onchange={() => app.saveSettings({ autoAdvance: false })} /> Manual: start each song with Play Next</label>
+    <label><input type="radio" name="adv" checked={!!(s.autoAdvance ?? app.club?.set.auto_advance)} onchange={() => app.saveSettings({ autoAdvance: true })} /> Automatic (auto mode)</label>
     <span class="faint small">The <b>Auto</b> button under Play Next switches it for the current session.</span>
   </span>
 

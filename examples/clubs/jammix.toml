@@ -1,4 +1,4 @@
-# Richard Powers, "How to Be a Better Dance DJ" (Stanford social dance).
+# Jammix: Richard Powers' DJ guidelines, "How to Be a Better Dance DJ".
 # From https://socialdance.stanford.edu/Syllabi/DJtips.htm (October 2026).
 # "These are mere suggestions… not absolute rules." Tempos are beats per
 # minute for average or mixed-level social dancers; where he gives a second
@@ -6,8 +6,8 @@
 # reports is used. Orpheus also matches songs at half or double these tempos.
 # Meters are each dance's standard meter.
 
-name = "Stanford (Richard Powers)"
-description = """Richard Powers' DJ suggestions for Stanford-style social dances: \
+name = "Jammix"
+description = """Jammix, following Richard Powers' DJ suggestions: \
 about 3-minute songs, no two of the same dance in a row, no more than one or two \
 really fast tunes in a row, and the energy should suit the tempo."""
 website = "https://socialdance.stanford.edu/Syllabi/DJtips.htm"

@@ -4,9 +4,10 @@ DJ software for **social dancing**: waltz, swing, Latin, fusion and more,
 where each song is a separate dance with a pause in between. It follows
 Richard Powers' [DJ tips](https://socialdance.stanford.edu/Syllabi/DJtips.htm).
 Nothing about styles or clubs is built in: you define your dance styles and
-tags, and each club's profile (`examples/clubs/` has importable profiles for
-Stanford's [Dancebreak](https://dancebreak.stanford.edu/info/djing/) and
-Powers' tips).
+tags, and import each club's guidelines (`examples/clubs/` has examples for
+Stanford's [Dancebreak](https://dancebreak.stanford.edu/info/djing/), Jammix
+(Powers' tips) and Friday Night Waltz (Lucas Garron's
+[tempos](https://garron.net/dance/tempos/))).
 
 Runs on macOS, Linux and Windows (Tauri 2, Rust and Svelte).
 
@@ -60,11 +61,11 @@ Runs on macOS, Linux and Windows (Tauri 2, Rust and Svelte).
 | **Meter** | Triple (3/4, or 6/8 counted in eighths) or duple (2/4, 4/4), detected from the audio, or set by hand. It's detected on the beat grid of the song's BPM, so after fixing a BPM (e.g. with 1½) the meter is re-detected. Triple songs whose tempo was detected at 2/3 of the beat get the corrected BPM automatically. Songs where the evidence is unclear stay unknown. |
 | **Your tags** | Labels that aren't dance styles, e.g. "Classic" or "Teaching" (Settings → Styles & Tags). Smart crates can use them. |
 | **Your dance styles** | Labels on versions, not places in the library. You define them in Settings → Styles & Tags; there are no defaults. A version can have several, e.g. a song that works as both Lindy Hop and East Coast Swing. Every view (all songs, a crate, a setlist, history) has a style filter bar: click a style to narrow the view, ⌘/Shift-click to combine styles. With one style chosen, unlabelled songs whose tempo fits it are suggested too. Drop songs on a style to add it; use the right-click menu to remove one. Giving a Spotify song a style adds it to your library. |
-| **Club styles** | Each club profile has its own styles and tempo ranges. For each club, ordered **mapping rules** say how your styles count there, optionally by planned tempo. For example, your "Waltz" from 105 to 125 BPM is a Cross-Step Waltz, from 135 to 160 BPM a Rotary Waltz, and otherwise not danced. The first matching rule wins. Ranges are matched in their own counting, so half- and double-time BPMs count. Without a rule, a club style with the same key or name is used. The **No club** profile has no styles of its own and shows yours unchanged. |
+| **Club styles** | In a club's set, songs show the club's styles they **match**: by meter, tempo (as recorded, at half or double time, or with a tempo change within what the club allows) and length. Styles without a tempo (Mixer, Line Dance…) aren't matched automatically. Your **mapping** (Settings → Styles & Tags: a matrix of your styles against the club's) narrows that down: your "Waltz" may show as Rotary or Cross-Step Waltz, and a 150 BPM waltz then shows as Rotary. A song matching none of its mapped styles still shows them, with a warning. Right-click a song in the set → **Show as** to choose any club style for it, even one it doesn't fit (with a warning). Without a club, your own styles are shown. |
 | **Crate** | Your own collection of songs: "Waltzes", "Dancebreak classics", "Pre-approved rotary waltzes", "Wedding requests". Crates can mix styles freely. Drag songs onto a crate to add them. |
 | **Smart crate** | A crate defined by rules instead of a hand-picked list, e.g. "in *Waltzes* and tempo fits Rotary Waltz", "Lindy Hop, not played in the last 30 days", "longer than 4:30". It updates as the library changes. |
 | **Setlist** | An ordered list of versions, or of **style slots** ("a West Coast Swing goes here") that you fill live: press **Choose Song…** on the slot, then double-click a song (or drag one onto the slot). Each setlist uses one club. Each entry can override its version's settings for that set only. It can also show just some of a song's styles, or a custom label such as "Mixer" instead of style names. Songs already played in the open set are greyed out in the library and the set. |
-| **Club profile** | The club's dance styles and tempo ranges, pause length, fade length, entry tags (e.g. "Dance with a Stranger", "Jam") and announcements. Only "No club" is built in; create clubs or **Import…** / **Export…** them as JSON files (Settings → Club Profiles). |
+| **Club guidelines** | A club's dance styles (meter, tempo and preferred tempo, length) and what its sets should contain: songs and minutes, how many (or what share) of each style or group of styles, where in the set a style belongs, the first and last dance, rules for part of the set (e.g. "the first 10 songs under 3:30"), how many of a style in a row; plus pause and fade lengths, tags (e.g. "Dance with a Stranger", "Jam") and announcements. A human-editable TOML file (see `examples/clubs/`) a club can publish on its website: import it from a file or its web address (Settings → Clubs), edit it there as a form or as the file, and **Check for Updates** later. Every version is kept; a set stays with the version it was planned with until you move it (**Use newer guidelines** in the set). The set panel's **Guidelines** button checks the set against them. |
 | **History** | Derived from setlists: every song that was played (audible in the room). Play counts and "last played" come from it. "Remove from History" marks the entry as not played. |
 
 Settings resolve in this order: setlist entry override, then the version,
@@ -81,8 +82,9 @@ During a set you can skip, reorder or insert songs at any time.
 
 ## Your library is plain files
 
-The library folder holds tracks, versions, setlists, crates and club
-profiles as pretty-printed JSON, one file per object. Your dance styles and
+The library folder holds tracks, versions, setlists and crates as
+pretty-printed JSON, one file per object, and club guidelines as TOML files
+(every version kept, in `clubs/<club>/`). Your dance styles and
 their club mappings (and announcement pronunciations) are in `styles.json`. Play history and play counts are
 derived from the setlists, so there is no separate log to merge. Keep the
 folder in **git** or a synced folder to share it between DJs. IDs are
@@ -292,7 +294,8 @@ src-tauri/src/
   app.rs        app state, settings, audio routing, loading, background jobs
   perform.rs    two-deck model: crossfader, Play Next / Go Live, auto-load, pauses, set history, projector state
   controls.rs   deck controls (CUE, hot cues, scrubbing, edit points) and controller actions
-  store.rs      file-based library (tracks, setlists, crates, profiles, styles; history derived from setlists)
+  store.rs      file-based library (tracks, setlists, crates, styles; history derived from setlists)
+  club.rs       club guidelines: TOML format, validation, versions, import from files and the web
   library.rs    folder scanning, content-addressed import, analysis jobs
   decode.rs     symphonia decoding + audio-content hashing
   analysis.rs   BPM, 3-band waveform, loudness, silence detection
@@ -302,12 +305,12 @@ src-tauri/src/
   tts.rs        Kokoro text-to-speech for announcements (download, phonemes, synthesis)
   midi.rs       midir hot-plug, mappings (DJ2GO2 built in), learn, LEDs
   commands.rs   Tauri commands
-  profiles/     the built-in "No club" profile
-examples/clubs/ importable club profiles (Dancebreak, Powers' DJ tips)
+examples/clubs/ example club guidelines (Dancebreak, Jammix, Friday Night Waltz), bundled with the app
 src/
   components/   main window (decks, transport, library, set panel, inspector, settings)
   components/projector/  public display
-  lib/styles.ts your styles → club styles (the only implementation; used by both windows)
+  lib/clubs.ts  matching songs to club styles and checking sets (the only implementation; used by both windows)
+  lib/styles.ts what a song shows: your styles, or the club's
   lib/smart.ts  smart crate rules
   lib/tempo.ts  tempo/duration helpers shared with the backend's logic
 ```

@@ -56,7 +56,7 @@
     if (!playlist) return;
     // Songs go into the set only; the library stays as it is.
     const vids = await spotifyVersions(results, false);
-    const set = await app.run(api.createSetlist({ name: playlist.name, mode: "preset", profileId: app.settings?.activeProfileId ?? app.profile?.id ?? "" }));
+    const set = await app.run(api.createSetlist({ name: playlist.name, mode: "preset", clubId: app.settings?.defaultClub ?? "" }));
     if (!set) return;
     await app.run(api.insertEntries(set.id, vids.map((versionId) => ({ versionId }))));
     await app.run(api.performOpen(set.id));

@@ -3,11 +3,12 @@
 use crate::audio::output::{OutputConfig, OutputStatus, Outputs};
 use crate::audio::source::{LocalSource, Source, ToneSource};
 use crate::audio::{Deck, DeckEvent, DeckSnapshot, Levels, LoadRequest};
-use crate::settings::ProfileCore;
+use crate::club::{Club, Clubs};
+use std::collections::HashMap;
 use crate::store::Store;
 use crate::midi::{self, Midi};
 use crate::model::*;
-use crate::settings::{Settings, BUILTIN_PROFILES};
+use crate::settings::Settings;
 use crate::spotify::{Spotify, SpotifySource};
 use anyhow::{anyhow, Result};
 use crossbeam_channel::{unbounded, Receiver, Sender};
@@ -32,6 +33,9 @@ pub struct LevelsSnapshot {
     pub decks: [f32; 2],
 }
 
+/// Fade-out length when neither you nor the club set one (seconds).
+const DEFAULT_FADE_SECS: f64 = 5.0;
+
 pub struct App {
     pub handle: AppHandle,
     pub store: Arc<Store>,
@@ -50,6 +54,8 @@ pub struct App {
     pub announcer: Arc<crate::audio::announcer::Announcer>,
     pub midi: OnceLock<Arc<Midi>>,
     pub perform: Mutex<Perform>,
+    /// Parsed club guidelines by club and version (see `club`).
+    club_cache: Mutex<HashMap<ClubRef, Arc<Club>>>,
     pub scan_progress: Mutex<crate::library::ScanProgress>,
     analysis_tx: Sender<(Id, bool)>,
     /// Spotify songs already queued for analysis this session (each is
@@ -137,6 +143,7 @@ impl App {
             midi: OnceLock::new(),
             // Crossfader centered: the room hears both decks until the DJ moves it.
             perform: Mutex::new(Perform { crossfader: crate::perform::CENTER, ..Default::default() }),
+            club_cache: Mutex::new(HashMap::new()),
             scan_progress: Mutex::new(Default::default()),
             analysis_tx,
             spotify_analysed: Mutex::new(Default::default()),
@@ -256,34 +263,52 @@ impl App {
         Ok(())
     }
 
-    pub fn profiles_json(&self) -> Result<Vec<serde_json::Value>> {
-        let mut out: Vec<serde_json::Value> = BUILTIN_PROFILES
-            .iter()
-            .filter_map(|s| serde_json::from_str(s).ok())
-            .collect();
-        for v in self.store.profiles() {
-            {
-                let id = v["id"].as_str().unwrap_or_default().to_string();
-                if let Some(existing) = out.iter_mut().find(|p| p["id"].as_str() == Some(&id)) {
-                    let mut v = v;
-                    v["builtin"] = serde_json::Value::Bool(true);
-                    v["modified"] = serde_json::Value::Bool(true);
-                    *existing = v;
-                } else {
-                    out.push(v);
-                }
-            }
-        }
-        Ok(out)
+    /// The clubs folder of the current library.
+    pub fn clubs(&self) -> Clubs {
+        Clubs::new(&self.store.library_dir())
     }
 
-    pub fn profile(&self, id: &str) -> ProfileCore {
-        self.profiles_json()
-            .ok()
-            .and_then(|ps| ps.into_iter().find(|p| p["id"].as_str() == Some(id)))
-            .or_else(|| serde_json::from_str(BUILTIN_PROFILES[0]).ok())
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default()
+    /// One version of a club's guidelines (cached: versions don't change,
+    /// except when edited in place, which calls `forget_clubs`).
+    pub(crate) fn club(&self, r: &ClubRef) -> Option<Arc<Club>> {
+        if let Some(c) = self.club_cache.lock().get(r) {
+            return Some(c.clone());
+        }
+        let c = match self.clubs().club(&r.id, Some(&r.version)) {
+            Ok(c) => Arc::new(c),
+            Err(e) => {
+                log::warn!("club {} ({}): {e:#}", r.id, r.version);
+                return None;
+            }
+        };
+        self.club_cache.lock().insert(r.clone(), c.clone());
+        Some(c)
+    }
+
+    pub fn forget_clubs(&self) {
+        self.club_cache.lock().clear();
+    }
+
+    /// The club (and version) new sets get: the default club's latest.
+    pub(crate) fn default_club_ref(&self) -> Option<ClubRef> {
+        let id = self.settings.read().default_club.clone();
+        if id.is_empty() {
+            return None;
+        }
+        Some(ClubRef { version: self.clubs().latest(&id)?, id })
+    }
+
+    /// The open set's club and version, else the default club's latest.
+    pub(crate) fn active_club_ref(&self) -> Option<ClubRef> {
+        let sid = self.perform.lock().setlist_id.clone();
+        match sid.and_then(|s| self.store.setlist(&s).ok()) {
+            Some(s) => s.club,
+            None => self.default_club_ref(),
+        }
+    }
+
+    pub(crate) fn active_club(&self) -> Option<Arc<Club>> {
+        self.club(&self.active_club_ref()?)
     }
 
     /// Your styles and club mappings; seeded (and saved) on first use from the
@@ -314,23 +339,6 @@ impl App {
             .find(|s| s.key == key)
             .map(|s| s.name.clone())
             .unwrap_or_else(|| crate::settings::prettify_key(key))
-    }
-
-    pub(crate) fn active_profile_json(&self) -> serde_json::Value {
-        let id = self.active_profile().id;
-        self.profiles_json()
-            .ok()
-            .and_then(|ps| ps.into_iter().find(|p| p["id"].as_str() == Some(id.as_str())))
-            .unwrap_or(serde_json::Value::Null)
-    }
-
-    pub(crate) fn active_profile(&self) -> ProfileCore {
-        let sid = self.perform.lock().setlist_id.clone();
-        let id = sid
-            .and_then(|s| self.store.setlist(&s).ok())
-            .map(|s| s.profile_id)
-            .unwrap_or_else(|| self.settings.read().active_profile_id.clone());
-        self.profile(&id)
     }
 
     // ------------------------------------------------------------ audio
@@ -367,8 +375,7 @@ impl App {
             Some(ms) => ms as f64 / 1000.0,
             None => {
                 drop(s);
-                let p = self.active_profile();
-                if p.fade_out_seconds > 0.0 { p.fade_out_seconds } else { 5.0 }
+                self.active_club().and_then(|c| c.set.fade_out).filter(|f| *f > 0.0).unwrap_or(DEFAULT_FADE_SECS)
             }
         }
     }

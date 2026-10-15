@@ -3,10 +3,11 @@
 import { ask } from "@tauri-apps/plugin-dialog";
 import { api, on, type Events } from "./api";
 import type {
-  Crate, DeckState, Id, Levels, TtsStatus, LibraryInfo, StemsStatus, OutputStatus, PerformState, Profile, Row, ScanProgress, Setlist,
+  Crate, DeckState, Id, Levels, TtsStatus, LibraryInfo, StemsStatus, OutputStatus, PerformState, Row, ScanProgress, Setlist, Club, ClubInfo, ClubRef,
   SetlistEntry, SetlistSummary, Settings, SpotifyStatus, StyleDef, StylesInfo, Track, Version,
 } from "./types";
-import { NEUTRAL, clubStyle, clubStyleOfEntry, clubTargets, entryStyleKeys, myStyle, prettify, showStyle, showStyles, type Shown } from "./styles";
+import { NEUTRAL, clubContext, myStyle, mineShown, prettify, shownStyles, songFacts, styleDef, type ClubContext, type Shown } from "./styles";
+import { assess } from "./clubs";
 import type { ClubStyleOf } from "./tempo";
 import type { SmartContext } from "./smart";
 
@@ -34,11 +35,17 @@ const emptyDeck = (deck: 0 | 1): DeckState => ({
   pfl: deck === 1, error: null,
 });
 
+/** Fade-out length when neither you nor the club set one (seconds; matches the backend). */
+const DEFAULT_FADE_SECS = 5;
+
 class AppState {
   tracks = $state<Track[]>([]);
   crates = $state<Crate[]>([]);
   setlists = $state<SetlistSummary[]>([]);
-  profiles = $state<Profile[]>([]);
+  /** Every club and its versions of guidelines (newest first). */
+  clubs = $state<ClubInfo[]>([]);
+  /** Parsed club guidelines by "club/version". */
+  private clubCache = $state<Record<string, Club | null>>({});
   /** Your dance styles and their mappings onto club styles (styles.json). */
   styleLib = $state<StylesInfo | null>(null);
   settings = $state<Settings | null>(null);
@@ -102,10 +109,16 @@ class AppState {
     return out;
   });
   libraryTracks = $derived(this.tracks.filter((t) => t.inLibrary !== false));
-  profile = $derived.by((): Profile | null => {
-    const id = this.current?.profileId ?? this.settings?.activeProfileId;
-    return this.profiles.find((p) => p.id === id) ?? this.profiles[0] ?? null;
+  /** The open set's club and version; with no set open, the default club's latest. */
+  clubRef = $derived.by((): ClubRef | null => {
+    if (this.current) return this.current.club ?? null;
+    const id = this.settings?.defaultClub;
+    const v = id ? this.clubs.find((c) => c.id === id)?.versions[0]?.id : undefined;
+    return id && v ? { id, version: v } : null;
   });
+  /** Those guidelines (null: no club, or not loaded yet). */
+  club = $derived(this.clubRef ? (this.clubCache[`${this.clubRef.id}/${this.clubRef.version}`] ?? null) : null);
+  clubCtx = $derived<ClubContext | null>(clubContext(this.club, this.clubRef?.id, this.styleLib, this.settings?.tempoRangePct ?? 10));
   /** Your dance styles (what songs are tagged with). */
   myStyles = $derived(this.styleLib?.styles ?? []);
   /** Your tags (labels that aren't dance styles). */
@@ -119,27 +132,60 @@ class AppState {
     return this.myTags.find((t) => t.key === key)?.color || NEUTRAL;
   }
 
-  /** The current club has its own styles (otherwise yours are shown as they are). */
-  hasClub = $derived((this.profile?.styles.length ?? 0) > 0);
+  /** A set (or no set) is planned with a club's guidelines. */
+  hasClub = $derived(!!this.club);
 
-  /** The club style (with tempo ranges) one of your styles counts as at `bpm`, at the current club. */
-  style(key: string | null | undefined, bpm: number | null = null): StyleDef | undefined {
-    return key ? (clubStyle(this.styleLib, this.profile, key, bpm) ?? undefined) : undefined;
+  /** Loads a club version's guidelines into the cache (once). */
+  async loadClub(r: ClubRef) {
+    const key = `${r.id}/${r.version}`;
+    if (key in this.clubCache) return;
+    this.clubCache[key] = null;
+    try {
+      this.clubCache[key] = (await api.club(r.id, r.version)).club;
+    } catch {
+      this.clubCache[key] = null;
+    }
   }
 
-  /** How one of your styles is shown at the current club (its naming when it maps, else yours). */
-  show(key: string, bpm: number | null = null): Shown {
-    return showStyle(this.styleLib, this.profile, key, bpm);
+  /** "Dancebreak", or "Dancebreak (Spring 2026)" / "(Oct 14, 2026)" for an older version. */
+  clubLabel(r: ClubRef | null | undefined): string {
+    if (!r) return "No club";
+    const c = this.clubs.find((x) => x.id === r.id);
+    if (!c) return `Missing club “${r.id}”`;
+    const i = c.versions.findIndex((v) => v.id === r.version);
+    if (i < 0) return `${c.name} (missing version)`;
+    const v = c.versions[i];
+    if (v.name) return `${c.name} (${v.name})`;
+    return i === 0 ? c.name : `${c.name} (${new Date(v.imported).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })})`;
   }
 
-  /** Club styles one of your styles can count as at the current club. */
+  /** The club styles one of your styles may show as (your mapping), with tempo ranges. */
   clubTargets(key: string): StyleDef[] {
-    return clubTargets(this.styleLib, this.profile, key);
+    const c = this.club;
+    if (!c) return [];
+    return (this.clubCtx?.mapping?.[key] ?? []).filter((id) => id in c.style).map((id) => styleDef(id, c.style[id]));
+  }
+
+  /** The club style one of your styles counts as at `bpm` (the first mapped one that fits), for tempo ranges. */
+  style(key: string | null | undefined, bpm: number | null = null): StyleDef | undefined {
+    if (!key || !this.club || !this.clubCtx) return undefined;
+    const targets = this.clubTargets(key);
+    if (bpm == null) return targets[0];
+    const facts = { bpm, target: null, meter: null, meterDetected: true, lengthSecs: null };
+    return targets.find((t) => assess(t.key, this.club!.style[t.key], facts, this.clubCtx!.tempoChange).ok) ?? targets[0];
+  }
+
+  /** How one of your styles is shown at the current club: the club style it maps to (first), else yours. */
+  show(key: string, bpm: number | null = null): Shown {
+    const s = this.style(key, bpm);
+    const mine = mineShown(this.styleLib, key);
+    if (!s) return { ...mine, unmapped: this.hasClub };
+    return { ...mine, key: s.key, name: s.name, short: s.short, color: s.color, club: s };
   }
 
   /** One of your styles as you name it (ignoring the club). */
   mine(key: string): Shown {
-    return showStyle(this.styleLib, null, key, null);
+    return mineShown(this.styleLib, key);
   }
 
   /** Your name for one of your styles. */
@@ -152,12 +198,18 @@ class AppState {
     return (key && myStyle(this.styleLib, key)?.color) || NEUTRAL;
   }
 
-  /** The styles an entry (or a version) shows at the current club, deduplicated. */
-  shownFor(version: Version | undefined, entry: Partial<SetlistEntry> | null | undefined, bpm: number | null): Shown[] {
-    return showStyles(this.styleLib, this.profile, entryStyleKeys(version, entry), bpm);
+  /** What matching needs about a song. */
+  factsFor(track: Track | undefined, version: Version | undefined, entry: Partial<SetlistEntry> | null | undefined) {
+    return songFacts(track, version, entry, { fadeSeconds: this.fadeSeconds, trimSilence: this.settings?.trimSilence ?? true });
   }
 
-  clubStyleOf: ClubStyleOf = (version, entry, bpm) => clubStyleOfEntry(this.styleLib, this.profile, version, entry, bpm);
+  /** The styles an entry (or a version) shows: the club's in a club's set, else yours. */
+  shownFor(track: Track | undefined, version: Version | undefined, entry: Partial<SetlistEntry> | null | undefined): Shown[] {
+    return shownStyles(this.styleLib, this.clubCtx, this.factsFor(track, version, entry), version, entry);
+  }
+
+  /** The first club style an entry shows (for tempo ranges). */
+  clubStyleOf: ClubStyleOf = (track, version, entry) => this.shownFor(track, version, entry).find((s) => s.club)?.club ?? null;
 
   /** Tracks already played (or playing) in the open setlist. */
   playedInSet = $derived.by(() => {
@@ -178,11 +230,11 @@ class AppState {
   liveDeck = $derived<0 | 1>(this.perform?.liveDeck ?? 0);
   freeDeck = $derived<0 | 1>(this.liveDeck === 0 ? 1 : 0);
 
-  fadeSeconds = $derived(this.settings?.fadeOutMs != null ? this.settings.fadeOutMs / 1000 : this.profile?.fadeOutSeconds ?? 5);
+  fadeSeconds = $derived(this.settings?.fadeOutMs != null ? this.settings.fadeOutMs / 1000 : (this.club?.set.fade_out ?? DEFAULT_FADE_SECS));
 
   /** Context for evaluating smart crates. */
   smartCtx = $derived<SmartContext>({
-    profile: this.profile,
+    club: this.clubCtx,
     styles: this.styleLib,
     crates: this.crates,
     library: this.rows,
@@ -255,11 +307,18 @@ class AppState {
 
   async init() {
     for (const u of this.unlisten.splice(0)) u.then((f) => f());
-    const [tracks, crates, setlists, profiles, settings, perform, decks, scan, spotify, outputs, library] = await Promise.all([
-      api.tracks(), api.crates(), api.setlists(), api.profiles(), api.settings(), api.performState(),
+    const [tracks, crates, setlists, clubs, settings, perform, decks, scan, spotify, outputs, library] = await Promise.all([
+      api.tracks(), api.crates(), api.setlists(), api.clubs(), api.settings(), api.performState(),
       api.deckStates(), api.scanProgress(), api.spotifyStatus(), api.audioStatus(), api.libraryInfo(),
     ]);
-    Object.assign(this, { tracks, crates, setlists, profiles, settings, perform, decks, scan, spotify, outputs, library });
+    Object.assign(this, { tracks, crates, setlists, clubs, settings, perform, decks, scan, spotify, outputs, library });
+    // Load the guidelines the open set (or a new one) uses.
+    $effect.root(() => {
+      $effect(() => {
+        const r = this.clubRef;
+        if (r) void this.loadClub(r);
+      });
+    });
     this.styleLib = await api.styles();
     await this.reloadCurrent();
     if (library.loadErrors.length) this.toast(`${library.loadErrors.length} library file(s) could not be read — see Settings → Library`);
@@ -284,7 +343,12 @@ class AppState {
     });
     this.listen("setlists-changed", async () => (this.setlists = await api.setlists()));
     this.listen("crates-changed", async () => (this.crates = await api.crates()));
-    this.listen("profiles-changed", async () => (this.profiles = await api.profiles()));
+    this.listen("clubs-changed", async () => {
+      // Versions edited in place: reload what's shown.
+      this.clubCache = {};
+      this.clubs = await api.clubs();
+      this.setlists = await api.setlists();
+    });
     this.listen("settings-changed", (s) => (this.settings = s));
     this.listen("scan-progress", (s) => (this.scan = s));
     this.listen("spotify-status", (s) => (this.spotify = s));
@@ -337,7 +401,7 @@ export async function addToSet(versionIds: Id[], where: "next" | "end" | number)
   if (!set) {
     const name = `Live set — ${new Date().toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
     const created = await app.run(
-      api.createSetlist({ name, mode: "live", profileId: app.settings?.activeProfileId ?? app.profile?.id ?? "" }),
+      api.createSetlist({ name, mode: "live", clubId: app.settings?.defaultClub ?? "" }),
     );
     if (!created) return;
     await app.run(api.performOpen(created.id));

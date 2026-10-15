@@ -34,7 +34,7 @@
     if (kind === "tag") return app.tagName(key);
     const s = app.show(key, bpm);
     if (!app.hasClub) return app.styleName(key);
-    return s.club ? `${app.styleName(key)} → ${s.name} at ${app.profile?.name}` : `${app.styleName(key)}: not a ${app.profile?.name} style`;
+    return s.club ? `${app.styleName(key)} → ${s.name} at ${app.club?.name}` : `${app.styleName(key)}: not a ${app.club?.name} style`;
   }
 </script>
 

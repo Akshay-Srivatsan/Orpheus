@@ -1,18 +1,26 @@
 <script lang="ts">
   // Settings → Dance Styles: your own styles (what songs are tagged with) and,
-  // per club, the ordered rules that map them onto the club's styles.
+  // per club, which of the club's styles each of yours may show as (a matrix).
   import { api } from "../lib/api";
   import { app, confirmAction } from "../lib/state.svelte";
-  import { clubStyle, NEUTRAL } from "../lib/styles";
-  import type { StyleLibrary, StyleMappingRule } from "../lib/types";
+  import { NEUTRAL, styleDef } from "../lib/styles";
+  import type { Club, StyleLibrary } from "../lib/types";
   import Icon from "./Icon.svelte";
 
   const lib = $derived(app.styleLib);
   const usage = $derived(lib?.usage ?? {});
-  const clubs = $derived(app.profiles.filter((p) => p.styles.length > 0));
-  let clubId = $state(app.hasClub ? (app.profile?.id ?? "") : "");
-  const club = $derived(clubs.find((p) => p.id === clubId) ?? clubs[0]);
-  const rules = $derived((club && lib?.mappings[club.id]) ?? []);
+  let clubId = $state(app.clubRef?.id ?? app.clubs[0]?.id ?? "");
+  /** The chosen club's latest guidelines (for its styles). */
+  let club = $state<Club | null>(null);
+  $effect(() => {
+    const c = app.clubs.find((x) => x.id === clubId) ?? app.clubs[0];
+    const v = c?.versions[0];
+    club = null;
+    if (c && v) api.club(c.id, v.id).then((r) => { if (c.id === (app.clubs.find((x) => x.id === clubId) ?? app.clubs[0])?.id) club = r.club; });
+  });
+  const clubKey = $derived((app.clubs.find((x) => x.id === clubId) ?? app.clubs[0])?.id ?? "");
+  const clubStyles = $derived(Object.entries(club?.style ?? {}));
+  const matrix = $derived(lib?.clubMappings?.[clubKey] ?? {});
   let newName = $state("");
   const undefinedKeys = $derived(Object.keys(usage).filter((k) => !lib?.styles.some((s) => s.key === k)));
 
@@ -70,32 +78,32 @@
     if (ok) await app.run(api.rekeyStyle(key, into));
   }
 
-  function setRules(change: (r: StyleMappingRule[]) => void) {
-    if (!club) return;
-    const id = club.id;
+  /** Ticks or unticks "your `mine` may show as the club's `theirs`". */
+  function toggleCell(mine: string, theirs: string) {
+    const id = clubKey;
+    if (!id) return;
     update((l) => {
-      const r = l.mappings[id] ?? [];
-      change(r);
-      if (r.length) l.mappings[id] = r;
-      else delete l.mappings[id];
+      const all = (l.clubMappings ??= {});
+      const rows = (all[id] ??= {});
+      const row = rows[mine] ?? [];
+      rows[mine] = row.includes(theirs) ? row.filter((x) => x !== theirs) : [...row, theirs];
+      if (!rows[mine].length) delete rows[mine];
+      if (!Object.keys(rows).length) delete all[id];
     });
   }
 
-  function num(v: string): number | null {
-    return v.trim() === "" ? null : +v;
-  }
-
-  /** Club styles not among yours (by key or name), offered for import. */
+  /** Club styles not among yours (by name), offered for import. */
   const importable = $derived(
-    (club?.styles ?? []).filter((c) => !lib?.styles.some((s) => s.key === c.key || s.name.toLowerCase() === c.name.toLowerCase())),
+    clubStyles.map(([id, c]) => styleDef(id, c)).filter((c) => !lib?.styles.some((s) => s.key === c.key || s.name.toLowerCase() === c.name.toLowerCase())),
   );
 </script>
 
 <h2>Dance Styles &amp; Tags</h2>
 <p class="dim">
-  Your dance styles are what you tag songs with. A song can have several. Clubs can name and split styles differently, so each
-  club profile has its own styles. The rules below say how yours appear at a club. The setlist and projector always show the
-  club's names; under <b>No club</b>, your own styles are shown.
+  Your dance styles are what you tag songs with; a song can have several. In a club's set, songs show the <i>club's</i>
+  styles they match by meter, tempo and length. The table below says which club styles each of yours may show as; a song
+  then shows those it matches (or, if it matches none, all of them, with a warning). Songs with no ticks show every
+  style they match. Without a club, your own styles are shown.
 </p>
 
 <h3>Your styles</h3>
@@ -171,61 +179,41 @@
 </form>
 
 <h3>At a club</h3>
-{#if !club}
-  <p class="dim">No club profile has its own styles. Add some in Club Profiles.</p>
+{#if !app.clubs.length}
+  <p class="dim">No clubs yet: add one in <button class="plain link" onclick={() => (app.settingsOpen = "clubs")}>Clubs</button>.</p>
 {:else}
   <div class="row">
-    <select bind:value={clubId}>{#each clubs as p}<option value={p.id}>{p.name}</option>{/each}</select>
-    <span class="faint small">The first matching rule wins. A BPM range is matched in its own counting (half and double time count).</span>
+    <select bind:value={clubId}>{#each app.clubs as c}<option value={c.id}>{c.name}</option>{/each}</select>
+    <span class="faint small">Tick the club styles each of your styles may show as.</span>
   </div>
-  <table class="rules">
-    <thead><tr><th>Your style</th><th>Planned BPM</th><th></th><th>Counts at {club.name} as</th><th></th></tr></thead>
-    <tbody>
-      {#each rules as r, i (i)}
-        <tr>
-          <td>
-            <select value={r.style} onchange={(e) => setRules((rs) => (rs[i].style = e.currentTarget.value))}>
-              {#each lib?.styles ?? [] as s}<option value={s.key}>{s.name}</option>{/each}
-              {#if !lib?.styles.some((s) => s.key === r.style)}<option value={r.style}>{app.styleName(r.style)}</option>{/if}
-            </select>
-          </td>
-          <td class="nowrap">
-            <input type="number" class="w4" placeholder="any" value={r.minBpm ?? ""} onchange={(e) => setRules((rs) => (rs[i].minBpm = num(e.currentTarget.value)))} />–<input
-              type="number" class="w4" placeholder="any" value={r.maxBpm ?? ""} onchange={(e) => setRules((rs) => (rs[i].maxBpm = num(e.currentTarget.value)))} />
-          </td>
-          <td>→</td>
-          <td>
-            <select value={r.to} onchange={(e) => setRules((rs) => (rs[i].to = e.currentTarget.value))}>
-              {#each club.styles as c}<option value={c.key}>{c.name}{c.sweet ? ` (${c.sweet[0]}–${c.sweet[1]})` : ""}</option>{/each}
-              <option value="">Not danced here</option>
-            </select>
-          </td>
-          <td class="nowrap">
-            <button class="plain icon" disabled={i === 0} title="Move up" onclick={() => setRules((rs) => rs.splice(i - 1, 0, ...rs.splice(i, 1)))}>↑</button>
-            <button class="plain icon" disabled={i === rules.length - 1} title="Move down" onclick={() => setRules((rs) => rs.splice(i + 1, 0, ...rs.splice(i, 1)))}>↓</button>
-            <button class="plain icon danger" title="Delete rule" onclick={() => setRules((rs) => rs.splice(i, 1))}><Icon name="x" size={12} /></button>
-          </td>
-        </tr>
-      {/each}
-    </tbody>
-  </table>
-  <button class="small" disabled={!lib?.styles.length}
-    onclick={() => setRules((rs) => rs.push({ style: lib!.styles[0].key, minBpm: null, maxBpm: null, to: club.styles[0]?.key ?? "" }))}>
-    <Icon name="plus" size={12} /> Add Rule
-  </button>
-
-  <h3 class="small">Without a rule</h3>
-  <div class="defaults small">
-    {#each lib?.styles ?? [] as s}
-      {@const own = rules.filter((r) => r.style === s.key)}
-      {@const always = own.some((r) => r.minBpm == null && r.maxBpm == null)}
-      {@const d = clubStyle({ styles: lib?.styles ?? [], mappings: {} }, club, s.key, null)}
-      <span class:faint={own.length > 0}>
-        <span style:color={s.color}>{s.name}</span> →
-        {#if always}<i>always set by a rule</i>{:else if d}{d.name}{:else}<i>not a {club.name} style</i>{/if}{#if own.length && !always}&nbsp;(if no rule matches){/if}
-      </span>
-    {/each}
-  </div>
+  {#if club && clubStyles.length && lib?.styles.length}
+    <div class="matrix-wrap">
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th class="corner">Yours ↓ · {club.name} →</th>
+            {#each clubStyles as [id, c] (id)}
+              <th class="col" title="{c.name}{c.tempo ? ` · ${c.tempo.min ?? ''}–${c.tempo.max ?? ''} BPM` : ''}{c.meter.length ? ` · ${c.meter.join(' or ')} beats a bar` : ''}"
+                style:--c={c.color ?? NEUTRAL}><span>{c.short || c.name}</span></th>
+            {/each}
+          </tr>
+        </thead>
+        <tbody>
+          {#each lib.styles as m (m.key)}
+            {@const row = matrix[m.key] ?? []}
+            <tr>
+              <th class="mine" style:--c={m.color}>{m.name}{#if !row.length}<span class="faint"> · any match</span>{/if}</th>
+              {#each clubStyles as [id, c] (id)}
+                <td><input type="checkbox" checked={row.includes(id)} title="{m.name} → {c.name}" onchange={() => toggleCell(m.key, id)} /></td>
+              {/each}
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+  {:else if club && !clubStyles.length}
+    <p class="dim">{club.name} has no styles yet.</p>
+  {/if}
 {/if}
 
 <style>
@@ -236,15 +224,18 @@
   th { text-align: left; color: var(--text-faint); font-weight: 600; padding: 4px; border-bottom: 1px solid var(--border); }
   td { padding: 3px 4px; border-bottom: 1px solid rgba(255, 255, 255, 0.04); }
   td input[type="text"] { width: 180px; }
-  .w4 { width: 60px; }
   .w5 { width: 70px !important; }
   input[type="color"] { width: 26px; height: 22px; padding: 0; border: none; background: none; }
   .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
   .add input { width: 200px; }
-  .nowrap { white-space: nowrap; }
   .small { font-size: var(--fs-sm); }
   .danger { color: var(--red); }
   .warn { color: var(--yellow); }
   .link { padding: 0; height: auto; color: var(--blue); display: inline; }
-  .defaults { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 3px 16px; }
+  .matrix-wrap { overflow-x: auto; max-width: 100%; }
+  .matrix { border-collapse: collapse; }
+  .matrix th, .matrix td { border: 1px solid var(--border); padding: 2px 4px; text-align: center; }
+  .matrix .corner { text-align: left; color: var(--text-faint); font-weight: 500; white-space: nowrap; }
+  .matrix .col { color: color-mix(in srgb, var(--c) 85%, white); font-weight: 700; white-space: nowrap; }
+  .matrix .mine { text-align: left; white-space: nowrap; color: color-mix(in srgb, var(--c) 85%, white); }
 </style>

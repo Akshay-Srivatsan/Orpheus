@@ -1,16 +1,16 @@
 <script lang="ts">
-  import { NEUTRAL } from "../lib/styles";
-  import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+  import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api";
   import { app, confirmAction } from "../lib/state.svelte";
-  import type { AudioDevice, MidiControl, MidiInfo, MidiMapping, Profile, Settings, StyleDef } from "../lib/types";
+  import type { AudioDevice, MidiControl, MidiInfo, MidiMapping, Settings } from "../lib/types";
   import Icon from "./Icon.svelte";
   import StylesSettings from "./StylesSettings.svelte";
   import AutoModeSettings from "./AutoModeSettings.svelte";
+  import ClubsSettings from "./ClubsSettings.svelte";
 
   const tabs = [
     ["general", "General"], ["library", "Library"], ["audio", "Audio"], ["midi", "Controllers"],
-    ["stems", "Stems"], ["spotify", "Spotify"], ["projector", "Projector"], ["auto", "Auto Mode"], ["styles", "Styles & Tags"], ["profiles", "Club Profiles"],
+    ["stems", "Stems"], ["spotify", "Spotify"], ["projector", "Projector"], ["auto", "Auto Mode"], ["styles", "Styles & Tags"], ["clubs", "Clubs"],
   ] as const;
   let tab = $state<string>(typeof app.settingsOpen === "string" ? app.settingsOpen : "general");
   const s = $derived(app.settings!);
@@ -97,88 +97,6 @@
     saveMapping(m);
   }
 
-  // ---------------------------------------------------------------- profiles
-  let profileId = $state(app.profile?.id ?? app.profiles[0]?.id ?? "");
-  const profile = $derived(app.profiles.find((p) => p.id === profileId));
-  let draft = $state<Profile | null>(null);
-  $effect(() => {
-    if (profile) draft = structuredClone($state.snapshot(profile)) as Profile;
-  });
-  const dirty = $derived(!!draft && !!profile && JSON.stringify(draft) !== JSON.stringify($state.snapshot(profile)));
-
-  async function saveProfile() {
-    if (!draft) return;
-    await app.run(api.saveProfile($state.snapshot(draft) as Profile));
-  }
-  function profileId_(name: string): string {
-    const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "club";
-    let id = base;
-    for (let i = 2; app.profiles.some((p) => p.id === id); i++) id = `${base}-${i}`;
-    return id;
-  }
-  /** Saves a profile as a new club (fresh id) and selects it. */
-  async function addProfile(p: Profile, name: string) {
-    const id = profileId_(name);
-    const { builtin: _b, modified: _m, ...rest } = structuredClone($state.snapshot(p)) as Profile;
-    await app.run(api.saveProfile({ ...rest, id, name } as Profile));
-    profileId = id;
-  }
-  async function duplicateProfile() {
-    if (draft) await addProfile(draft, `${draft.name} (copy)`);
-  }
-  async function newProfile() {
-    // Start from "No club" (no styles) for its defaults.
-    const base = app.profiles.find((p) => p.builtin) ?? draft;
-    if (base) await addProfile({ ...base, styles: [], tags: [], announcements: [], description: "" } as Profile, "New club");
-  }
-  async function importProfile() {
-    const path = await openDialog({ multiple: false, title: "Import club", filters: [{ name: "Club (JSON)", extensions: ["json"] }] });
-    if (typeof path !== "string") return;
-    const text = await app.run(api.readTextFile(path));
-    if (text == null) return;
-    let p: Profile;
-    try {
-      p = JSON.parse(text);
-      if (typeof p !== "object" || !Array.isArray(p.styles) || typeof p.name !== "string") throw new Error("not a club file");
-    } catch (e) {
-      return app.toast(`Couldn't import: ${e}`);
-    }
-    // Keep the file's id when free, so setlists that refer to it reconnect.
-    const id = p.id && /^[A-Za-z0-9_-]+$/.test(p.id) && !app.profiles.some((x) => x.id === p.id) ? p.id : profileId_(p.name);
-    const { builtin: _b, modified: _m, ...rest } = p;
-    await app.run(api.saveProfile({ ...rest, id } as Profile));
-    profileId = id;
-    app.toast(`Imported “${p.name}”`, "info");
-  }
-  async function exportProfile() {
-    if (!profile) return;
-    const path = await saveDialog({ defaultPath: `${profile.id}.json`, filters: [{ name: "Club (JSON)", extensions: ["json"] }] });
-    if (!path) return;
-    const { builtin: _b, modified: _m, ...rest } = $state.snapshot(profile) as Profile;
-    await app.run(api.writeTextFile(path, JSON.stringify(rest, null, 1) + "\n"));
-  }
-  function addStyle() {
-    if (!draft) return;
-    draft.styles.push({ key: uniqueId(draft.styles.map((x) => x.key), "style"), name: "New style", short: "", color: NEUTRAL, sweet: null, extended: null });
-  }
-  function addTag() {
-    if (!draft) return;
-    draft.tags.push({ id: uniqueId(draft.tags.map((x) => x.id), "tag"), name: "New tag", color: NEUTRAL, announce: false });
-  }
-  function uniqueId(taken: string[], base: string): string {
-    let i = taken.length + 1;
-    while (taken.includes(`${base}-${i}`)) i++;
-    return `${base}-${i}`;
-  }
-  function rangeVal(r: [number, number] | null, i: 0 | 1) {
-    return r ? r[i] : "";
-  }
-  function setRange(st: StyleDef, k: "sweet" | "extended", i: 0 | 1, v: string) {
-    const cur = st[k] ?? [0, 0];
-    const next: [number, number] = [cur[0], cur[1]];
-    next[i] = +v;
-    st[k] = v === "" && (i === 0 ? !cur[1] : !cur[0]) ? null : next;
-  }
 </script>
 
 <div class="overlay" role="presentation" onmousedown={(e) => e.target === e.currentTarget && (app.settingsOpen = false)}>
@@ -195,15 +113,19 @@
         <h2>General</h2>
         <div class="form">
           <span class="l" title="Club for new setlists (each setlist can choose its own)">Default club</span>
-          <select value={s.activeProfileId} onchange={(e) => set("activeProfileId", e.currentTarget.value)}>
-            {#each app.profiles as p}<option value={p.id}>{p.name}</option>{/each}
-          </select>
+          <span class="col">
+            <select value={s.defaultClub} onchange={(e) => set("defaultClub", e.currentTarget.value)}>
+              <option value="">No club (your own styles)</option>
+              {#each app.clubs as c}<option value={c.id}>{c.name}</option>{/each}
+            </select>
+            <button class="plain small link" onclick={() => (tab = "clubs")}>Clubs and their guidelines…</button>
+          </span>
           <span class="l">Pause between songs</span>
-          <span><input type="number" min="0" step="1" placeholder={String(app.profile?.gap.targetSeconds ?? 8)} value={s.gapSeconds ?? ""}
+          <span><input type="number" min="0" step="1" placeholder={String(app.club?.set.pause.target ?? 8)} value={s.gapSeconds ?? ""}
             onchange={(e) => set("gapSeconds", e.currentTarget.value ? +e.currentTarget.value : null)} /> seconds <span class="faint">(empty = club default)</span></span>
           <span class="l">Next song</span>
           <span class="col">
-            <span>{(s.autoAdvance ?? app.profile?.autoAdvance) ? "Automatic (auto mode)" : "Manual: start each song with Play Next"}</span>
+            <span>{(s.autoAdvance ?? app.club?.set.auto_advance) ? "Automatic (auto mode)" : "Manual: start each song with Play Next"}</span>
             <button class="plain small link" onclick={() => (tab = "auto")}>Auto mode and announcements…</button>
           </span>
           <span class="l">Play Next while playing</span>
@@ -225,7 +147,7 @@
             <span class="faint small">Orpheus never moves the crossfader. Play Next, Go Live and auto mode need it centered, or on the side of the deck they start; otherwise they show an error and the controller's lights flash.</span>
           </span>
           <span class="l">Fade-out length</span>
-          <span><input type="number" min="0.5" step="0.5" placeholder={String(app.profile?.fadeOutSeconds ?? 5)} value={s.fadeOutMs != null ? s.fadeOutMs / 1000 : ""}
+          <span><input type="number" min="0.5" step="0.5" placeholder={String(app.club?.set.fade_out ?? 5)} value={s.fadeOutMs != null ? s.fadeOutMs / 1000 : ""}
             onchange={(e) => set("fadeOutMs", e.currentTarget.value ? Math.round(+e.currentTarget.value * 1000) : null)} /> seconds</span>
           <span class="l">Tempo</span>
           <span class="col">
@@ -524,63 +446,8 @@
           </div>
         </div>
 
-      {:else if tab === "profiles" && draft}
-        <h2>Club Profiles</h2>
-        <p class="dim">A club profile holds the club's own dance styles and tempo ranges, tags and announcements. How your styles map onto a club's is set in <button class="plain link" onclick={() => (tab = "styles")}>Dance Styles</button>. Built in: {app.profiles.filter((p) => p.builtin).map((p) => p.name).join(", ")}.</p>
-        <div class="row">
-          <select bind:value={profileId}>{#each app.profiles as p}<option value={p.id}>{p.name}{p.modified ? " (modified)" : ""}</option>{/each}</select>
-          <button onclick={newProfile}><Icon name="plus" size={13} /> New Club</button>
-          <button onclick={duplicateProfile}><Icon name="copy" size={13} /> Duplicate</button>
-          <button onclick={importProfile}>Import…</button>
-          <button onclick={exportProfile} disabled={!profile}>Export…</button>
-          {#if profile?.modified}<button onclick={() => confirmAction("Discard your changes to this built-in profile?", "Discard").then((ok) => { if (ok) api.deleteProfile(profileId); })}>Reset to Built-in</button>{/if}
-          {#if profile && !profile.builtin}<button class="danger" onclick={() => confirmAction(`Delete “${profile.name}”?`).then((ok) => { if (ok) api.deleteProfile(profileId); })}>Delete</button>{/if}
-          <span class="spacer"></span>
-          <button class="primary" disabled={!dirty} onclick={saveProfile}>Save Profile</button>
-        </div>
-        <div class="form" style="margin-top:10px">
-          <span class="l">Name</span><input type="text" bind:value={draft.name} />
-          <span class="l">Set length</span><span><input type="number" bind:value={draft.setMinutes} /> minutes</span>
-          <span class="l">Pause</span><span><input type="number" bind:value={draft.gap.targetSeconds} /> s (range <input type="number" bind:value={draft.gap.minSeconds} />–<input type="number" bind:value={draft.gap.maxSeconds} />)</span>
-          <span class="l">Fade-out</span><span><input type="number" step="0.5" bind:value={draft.fadeOutSeconds} /> s</span>
-          <span class="l">Tempo changes</span><span>warn when slowing more than <input type="number" bind:value={draft.tempo.maxSlowdownPct} />% or speeding up more than <input type="number" bind:value={draft.tempo.maxSpeedupPct} />%</span>
-        </div>
-        <h3>Dance styles</h3>
-        <table class="stable">
-          <thead><tr><th></th><th>Name</th><th>Short</th><th>Key</th><th>Sweet BPM</th><th>Acceptable BPM</th><th></th></tr></thead>
-          <tbody>
-            {#each draft.styles as st, i (i)}
-              <tr>
-                <td><input type="color" bind:value={st.color} /></td>
-                <td><input type="text" bind:value={st.name} /></td>
-                <td><input type="text" class="w5" bind:value={st.short} /></td>
-                <td><input type="text" class="w9" bind:value={st.key} title="Stable id stored on songs; change with care" /></td>
-                <td class="nowrap"><input type="number" class="w4" value={rangeVal(st.sweet, 0)} onchange={(e) => setRange(st, "sweet", 0, e.currentTarget.value)} />–<input type="number" class="w4" value={rangeVal(st.sweet, 1)} onchange={(e) => setRange(st, "sweet", 1, e.currentTarget.value)} /></td>
-                <td class="nowrap"><input type="number" class="w4" value={rangeVal(st.extended, 0)} onchange={(e) => setRange(st, "extended", 0, e.currentTarget.value)} />–<input type="number" class="w4" value={rangeVal(st.extended, 1)} onchange={(e) => setRange(st, "extended", 1, e.currentTarget.value)} /></td>
-                <td><button class="plain icon" onclick={() => draft!.styles.splice(i, 1)} title="Remove"><Icon name="x" size={12} /></button></td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-        <button class="small" onclick={addStyle}><Icon name="plus" size={12} /> Add Style</button>
-        {#if !draft.styles.length}<p class="faint small">No styles: your own dance styles are shown as they are.</p>{/if}
-        <h3>Tags <span class="faint small">(marks on setlist entries, e.g. “Last dance”)</span></h3>
-        <table class="stable">
-          <thead><tr><th></th><th>Name</th><th>Show on projector</th><th></th></tr></thead>
-          <tbody>
-            {#each draft.tags as t, i (i)}
-              <tr>
-                <td><input type="color" bind:value={t.color} /></td>
-                <td><input type="text" bind:value={t.name} title="Id: {t.id}" /></td>
-                <td><input type="checkbox" bind:checked={t.announce} /></td>
-                <td><button class="plain icon" onclick={() => draft!.tags.splice(i, 1)} title="Remove"><Icon name="x" size={12} /></button></td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-        <button class="small" onclick={addTag}><Icon name="plus" size={12} /> Add Tag</button>
-        <h3>Announcements</h3>
-        <textarea rows="4" value={draft.announcements.join("\n")} onchange={(e) => (draft!.announcements = e.currentTarget.value.split("\n").filter((x) => x.trim()))}></textarea>
+      {:else if tab === "clubs"}
+        <ClubsSettings />
       {:else if tab === "auto"}
         <AutoModeSettings />
       {:else if tab === "styles"}
@@ -601,13 +468,11 @@
   .content { position: relative; overflow-y: auto; padding: 18px 24px 30px; user-select: text; }
   .close { position: absolute; right: 12px; top: 12px; }
   h2 { margin: 0 0 8px; font: 600 var(--fs-lg) var(--font-display); }
-  h3 { margin: 18px 0 6px; font-size: var(--fs-md); }
   p { margin: 0 0 14px; max-width: 720px; }
   .form { display: grid; grid-template-columns: 170px 1fr; gap: 12px 14px; align-items: start; }
   .l { color: var(--text-dim); text-align: right; padding-top: 4px; }
   .col { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
   .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-  .spacer { flex: 1; }
   code { font: var(--fs-sm) var(--font-mono); background: var(--bg); padding: 3px 6px; border-radius: 4px; word-break: break-all; }
   .err { color: var(--red); }
   .warn { color: var(--yellow); }
@@ -617,11 +482,6 @@
   table { border-collapse: collapse; width: 100%; font-size: var(--fs-sm); }
   th { text-align: left; color: var(--text-faint); font-weight: 600; padding: 4px; border-bottom: 1px solid var(--border); }
   td { padding: 3px 4px; border-bottom: 1px solid rgba(255,255,255,0.04); }
-  .stable input[type="text"] { width: 130px; }
-  .w4 { width: 54px !important; } .w5 { width: 60px !important; } .w9 { width: 130px !important; }
-  input[type="color"] { width: 26px; height: 22px; padding: 0; border: none; background: none; }
-  .nowrap { white-space: nowrap; }
-  textarea { width: 100%; }
   .link { padding: 0; height: auto; color: var(--blue); display: inline; }
   .danger { color: var(--red); }
 </style>

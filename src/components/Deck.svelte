@@ -22,8 +22,8 @@
   const track = $derived(row?.track ?? (d.trackId ? app.trackMap.get(d.trackId) : undefined));
   const entry = $derived(d.entryId ? app.current?.entries.find((e) => e.id === d.entryId) : undefined);
   const pb = $derived(playback(track, row?.version, entry ?? null, app.clubStyleOf));
-  const shown = $derived(row ? app.shownFor(row.version, entry, pb.target) : []);
-  const style = $derived(row ? (app.clubStyleOf(row.version, entry, pb.target) ?? undefined) : undefined);
+  const shown = $derived(row ? app.shownFor(track, row.version, entry) : []);
+  const style = $derived(shown.find((s) => s.club)?.club ?? undefined);
   const baseBpm = $derived(track?.bpm ? (pb.target ? foldBpm(track.bpm, pb.target) : (pb.base ?? track.bpm)) : null);
   const liveBpm = $derived(baseBpm ? baseBpm * d.tempo : null);
   const fit = $derived(tempoFit(liveBpm, style));
@@ -41,7 +41,7 @@
   const audible = $derived(d.onAir && (playing || d.status === "loading"));
   const isProtected = $derived(audible && (app.settings?.protectOnAir ?? true));
   const isNext = $derived(!!d.entryId && d.entryId === app.perform?.nextEntryId);
-  const warnSlow = $derived(d.tempo < 1 - (app.profile?.tempo.maxSlowdownPct ?? 8) / 100 - 1e-6);
+  const warnSlow = $derived(d.tempo < 1 - (app.clubCtx?.tempoChange.slower ?? app.settings?.tempoRangePct ?? 10) / 100 - 1e-6);
   const nearEnd = $derived(audible && remaining < 15000 && !d.fading);
   const hotCues = $derived(track?.hotCues ?? []);
   const atCue = $derived(loaded && !playing && Math.abs(d.positionMs - d.cueMs) < 60);
@@ -202,7 +202,7 @@
           <span class="chips">
           <StyleBadge styles={shown} label={customLabel(row?.version, entry)} />
           {#each entry?.tags ?? [] as tag}
-            {@const t = app.profile?.tags.find((x) => x.id === tag)}
+            {@const t = app.club?.tag[tag]}
             <span class="badge" style:--c={t?.color ?? "#999"}>{t?.name ?? tag}</span>
           {/each}
           {#if track.sources.some((s) => s.kind === "spotify") && (track.files.length === 0 || track.preferredSource === "spotify")}
@@ -306,7 +306,7 @@
       oninput={(e) => setTempo(+e.currentTarget.value)} onchange={() => (tempoDraft = null)}
       ondblclick={() => api.deckTempoReset(deck)} disabled={!loaded} aria-label="Tempo" />
     <button class="plain pct num" class:warn={warnSlow} disabled={!loaded} onclick={() => api.deckTempoReset(deck)}
-      title={warnSlow ? "Slowed more than the profile's recommended maximum — may sound warbly" : "Reset to the version's tempo"}>
+      title={warnSlow ? "Slowed more than the club allows — may sound warbly" : "Reset to the version's tempo"}>
       {fmtPct(tempoShown)}
     </button>
   </div>

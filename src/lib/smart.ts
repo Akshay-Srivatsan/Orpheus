@@ -1,9 +1,10 @@
 // Smart crates: rule-based collections evaluated against the library.
 // Pure functions (no Tauri imports) so they're unit-testable.
 
-import { clubStyle, clubStyleOfEntry, myStyle, prettify } from "./styles";
+import { assess } from "./clubs";
+import { myStyle, prettify, shownStyles, songFacts, styleDef, type ClubContext } from "./styles";
 import { playback, playedDurationMs, tempoFit, bpmForStyle } from "./tempo";
-import type { Crate, Id, Profile, Row, StyleLibrary } from "./types";
+import type { Crate, Id, Row, StyleDef, StyleLibrary } from "./types";
 
 export type SmartField =
   | "style" | "bpm" | "tempoFit" | "meter" | "duration" | "text" | "source"
@@ -121,8 +122,8 @@ export function defaultCondition(field: SmartField = "style"): SmartCondition {
 }
 
 export interface SmartContext {
-  /** The club whose tempo ranges "fits the range of" uses. */
-  profile: Profile | null;
+  /** The club whose tempo ranges "fits the range of" uses (with your mapping). */
+  club: ClubContext | null;
   /** Your styles and their club mappings. */
   styles: StyleLibrary | null;
   crates: Crate[];
@@ -152,8 +153,19 @@ export function crateMembers(c: Crate, ctx: SmartContext, depth = 0): Set<Id> {
 function test(cond: SmartCondition, row: Row, ctx: SmartContext, depth: number): boolean {
   const { track: t, version: v } = row;
   const own = v.styles ?? [];
-  const clubOf = (k: string, bpm: number | null) => clubStyle(ctx.styles, ctx.profile, k, bpm) ?? undefined;
-  const pb = playback(t, v, null, (ver, e, bpm) => clubStyleOfEntry(ctx.styles, ctx.profile, ver, e, bpm));
+  const opts = { fadeSeconds: ctx.fadeSeconds, trimSilence: ctx.trimSilence };
+  const shownClub = (): StyleDef | undefined =>
+    shownStyles(ctx.styles, ctx.club, songFacts(t, v, null, opts), v, null).find((s) => s.club)?.club ?? undefined;
+  // The club style one of your styles maps to that fits `bpm` (else the first mapped).
+  const clubOf = (k: string, bpm: number | null): StyleDef | undefined => {
+    const c = ctx.club;
+    if (!c) return undefined;
+    const ids = (c.mapping?.[k] ?? []).filter((id) => id in c.club.style);
+    const facts = { bpm, target: null, meter: null, meterDetected: true, lengthSecs: null };
+    const id = ids.find((id) => assess(id, c.club.style[id], facts, c.tempoChange).ok) ?? ids[0];
+    return id ? styleDef(id, c.club.style[id]) : undefined;
+  };
+  const pb = playback(t, v, null, () => shownClub() ?? null);
   switch (cond.field) {
     case "style":
       switch (cond.op) {
@@ -175,7 +187,7 @@ function test(cond: SmartCondition, row: Row, ctx: SmartContext, depth: number):
       return cmp(bpm, cond.op, cond.value);
     }
     case "tempoFit": {
-      const st = clubStyleOfEntry(ctx.styles, ctx.profile, v, null, pb.target ?? t.bpm) ?? undefined;
+      const st = shownClub();
       const fit = tempoFit(pb.target ?? (t.bpm ? bpmForStyle(t.bpm, st) : null), st);
       if (cond.op === "sweet") return fit === "sweet";
       if (cond.op === "ok") return fit === "sweet" || fit === "extended";

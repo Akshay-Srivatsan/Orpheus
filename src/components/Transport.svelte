@@ -31,7 +31,7 @@
   });
   const next = $derived(app.entryRow(p?.nextEntryId));
   const nextPb = $derived(next?.row ? playback(next.row.track, next.row.version, next.entry, app.clubStyleOf) : null);
-  const nextShown = $derived(next ? app.shownFor(next.row?.version, next.entry, nextPb?.target ?? null) : []);
+  const nextShown = $derived(next ? app.shownFor(next.row?.track, next.row?.version, next.entry) : []);
   const inGap = $derived(!!p?.gapStartedAt && !playing);
   const gapMs = $derived(inGap && p?.gapStartedAt ? now - p.gapStartedAt : 0);
   /** Expected pause: the general pause, or with announcements, both pauses and the speech. */

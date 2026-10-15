@@ -2,8 +2,8 @@
 
 import type { Overrides, SetlistEntry, StyleDef, Track, Version } from "./types";
 
-/** The club style (with its tempo ranges) a version is danced as at a given tempo; see `styles.ts`. */
-export type ClubStyleOf = (version: Version | undefined, entry: Partial<SetlistEntry> | null | undefined, bpm: number | null) => StyleDef | null;
+/** The club style (with its tempo ranges) a song is danced as; see `styles.ts`. */
+export type ClubStyleOf = (track: Track | undefined, version: Version | undefined, entry: Partial<SetlistEntry> | null | undefined) => StyleDef | null;
 
 /** Folds `bpm` by octaves so it is as close as possible to `target`. */
 export function foldBpm(bpm: number, target: number): number {
@@ -58,7 +58,7 @@ export function playback(track: Track | undefined, version: Version | undefined,
     const base = foldBpm(track.bpm, target);
     return { base, target, rate: Math.min(2, Math.max(0.5, target / base)) };
   }
-  const base = bpmForStyle(track.bpm, clubStyleOf(version, entry, track.bpm) ?? undefined);
+  const base = bpmForStyle(track.bpm, clubStyleOf(track, version, entry) ?? undefined);
   return { base, target: base, rate: 1 };
 }
 

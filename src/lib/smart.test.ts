@@ -1,10 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { evaluate, type SmartContext, type SmartRules } from "./smart";
-import type { Crate, Profile, Row, Track, Version } from "./types";
+import { emptyClub, type Club, type ClubStyle } from "./clubs";
+import type { ClubContext } from "./styles";
+import type { Crate, Row, Track, Version } from "./types";
 
-const profileModules = import.meta.glob("../../examples/clubs/*.json", { eager: true, import: "default" });
-const dancebreak = () =>
-  structuredClone(Object.entries(profileModules).find(([p]) => p.endsWith("/dancebreak.json"))![1]) as Profile;
+const style = (name: string, tempo: [number, number], preferred: [number, number]): ClubStyle => ({
+  name, meter: [3], tempo: { min: tempo[0], max: tempo[1] }, preferred: { min: preferred[0], max: preferred[1] },
+  length: null, count: null, share: null, when: [], first: false, last: false,
+});
+// Waltzes like the Dancebreak example's, and your styles mapped onto them.
+const club: Club = {
+  ...emptyClub("Club"),
+  style: { rotary: style("Rotary Waltz", [135, 160], [140, 155]), "cross-step": style("Cross-Step Waltz", [105, 125], [110, 120]) },
+};
+const clubCtx: ClubContext = {
+  club,
+  mapping: { "rotary-waltz": ["rotary"], "cross-step-waltz": ["cross-step"] },
+  tempoChange: { faster: 10, slower: 8 },
+};
 
 let seq = 0;
 function row(style: string | null, bpm: number | null, extra: Partial<Track> = {}, vextra: Partial<Version> = {}): Row {
@@ -23,7 +36,6 @@ function row(style: string | null, bpm: number | null, extra: Partial<Track> = {
 const ids = (rs: Row[]) => rs.map((r) => r.version.id);
 
 describe("smart crates", () => {
-  const profile = dancebreak();
   // Rotary sweet 140–155 (ok 135–160); cross-step 110–120 (ok 105–125).
   const rotary = row("rotary-waltz", 150);
   const csw = row("cross-step-waltz", 116);
@@ -32,7 +44,7 @@ describe("smart crates", () => {
   const spotify = row(null, 96, { sources: [{ kind: "spotify", key: "spotify:track:x" }], durationMs: 300_000 });
   const rows = [rotary, csw, unlabelledRotaryTempo, unlabelledSlow, spotify];
   const waltzes: Crate = { id: "w", name: "Waltzes", position: 1, versionIds: [rotary.version.id, csw.version.id, unlabelledRotaryTempo.version.id, unlabelledSlow.version.id] };
-  const ctx: SmartContext = { profile, styles: null, crates: [waltzes], library: rows, now: 10 * 86_400_000, trimSilence: false };
+  const ctx: SmartContext = { club: clubCtx, styles: null, crates: [waltzes], library: rows, now: 10 * 86_400_000, trimSilence: false };
   const run = (rules: SmartRules) => ids(evaluate(rules, rows, ctx));
 
   it("filters by style label", () => {

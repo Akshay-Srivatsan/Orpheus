@@ -6,13 +6,13 @@
   const today = new Date().toISOString().slice(0, 10);
   let name = $state("");
   let mode = $state<SetlistMode>("preset");
-  let profileId = $state(app.settings?.activeProfileId ?? app.profiles[0]?.id ?? "");
+  let clubId = $state(app.settings?.defaultClub ?? "");
   let date = $state(today);
-  const profile = $derived(app.profiles.find((p) => p.id === profileId));
+  const club = $derived(app.clubs.find((c) => c.id === clubId));
 
   async function create() {
     const set = await app.run(api.createSetlist({
-      name: name.trim() || `${profile?.name ?? "Social"} — ${date}`, mode, profileId, eventDate: date || null,
+      name: name.trim() || `${club?.name ?? "Social"} — ${date}`, mode, clubId, eventDate: date || null,
     }));
     if (!set) return;
     await app.run(api.performOpen(set.id));
@@ -27,11 +27,17 @@
     <div class="form">
       <span class="l">Name</span>
       <!-- svelte-ignore a11y_autofocus -->
-      <input type="text" bind:value={name} placeholder="{profile?.name ?? 'Social'} — {date}" autofocus />
+      <input type="text" bind:value={name} placeholder="{club?.name ?? 'Social'} — {date}" autofocus />
       <span class="l">Date</span>
       <input type="date" bind:value={date} />
       <span class="l">Club</span>
-      <select bind:value={profileId}>{#each app.profiles as p}<option value={p.id}>{p.name}</option>{/each}</select>
+      <span class="col">
+        <select bind:value={clubId}>
+          <option value="">No club (your own styles)</option>
+          {#each app.clubs as c}<option value={c.id}>{c.name}</option>{/each}
+        </select>
+        <span class="faint small">The set keeps the club's current guidelines, even if the club publishes new ones (you can move it later).{#if !app.clubs.length} Add clubs in Settings → Clubs.{/if}</span>
+      </span>
       <span class="l">Style</span>
       <div class="col">
         <label><input type="radio" bind:group={mode} value="preset" /> <b>Preset</b> — plan the songs ahead; the projector shows the whole setlist</label>
