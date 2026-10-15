@@ -15,7 +15,7 @@
   const known = $derived.by(() => {
     const m = new Map<string, { id: Id; inLibrary: boolean }>();
     for (const t of app.tracks)
-      for (const s of t.sources) if (s.kind === "spotify") m.set(s.key, { id: t.id, inLibrary: t.inLibrary !== false });
+      for (const r of t.recordings) for (const s of r.sources) if (s.kind === "spotify") m.set(s.key, { id: t.id, inLibrary: t.inLibrary !== false });
     return m;
   });
 

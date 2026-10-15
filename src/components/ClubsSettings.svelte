@@ -214,19 +214,22 @@
 
   // ---------------------------------------------------------------- suggested songs
 
-  const trackTitle = (id: string) => {
-    const t = app.trackMap.get(id);
-    return t ? `${t.title}${t.artist ? ` — ${t.artist}` : ""}` : id;
+  /** The songs playing a recording (or the recording's own title, if none does). */
+  const trackTitle = (recId: string) => {
+    const songs = app.tracks.filter((t) => t.versions.some((v) => v.recording === recId));
+    const rec = app.tracks.flatMap((t) => t.recordings).find((r) => r.id === recId);
+    const name = (x: { title: string; artist: string }) => `${x.title}${x.artist ? ` — ${x.artist}` : ""}`;
+    return songs.length ? songs.map(name).join(", ") : rec ? `${name(rec)} (hidden)` : recId;
   };
 
-  /** Adds the song selected in the library to a style's suggested songs. */
+  /** Adds the song version selected in the library to a style's suggested songs. */
   async function addSelectedSong(styleId: string) {
-    const tid = app.inspectTrack;
-    if (!tid) {
+    const vid = app.selected[app.selected.length - 1] ?? (app.inspectTrack ? app.trackMap.get(app.inspectTrack)?.versions[0]?.id : undefined);
+    if (!vid) {
       app.toast("Select a song in the library first.", "info");
       return;
     }
-    const song = await app.run(api.clubSongForTrack(tid));
+    const song = await app.run(api.clubSongForVersion(vid));
     if (song) edit((d) => (d.style[styleId].song = [...(d.style[styleId].song ?? []), song]));
   }
 

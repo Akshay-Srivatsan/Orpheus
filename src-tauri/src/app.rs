@@ -297,10 +297,10 @@ impl App {
         self.club_cache.lock().clear();
     }
 
-    /// Which library songs are songs a club lists for its styles (e.g. a
-    /// choreography's accepted edits): track id → style ids. A song is one
-    /// of them if its file hash, its Spotify track or its fingerprint (the
-    /// same version, in any audio format) agrees.
+    /// Which recordings are songs a club lists for its styles (e.g. a
+    /// choreography's accepted edits): recording id → style ids. A recording
+    /// is one of them if its file hash, its Spotify track or its fingerprint
+    /// (the same version, in any audio format) agrees.
     pub fn club_song_matches(&self, r: &ClubRef) -> HashMap<Id, Vec<String>> {
         let mut out: HashMap<Id, Vec<String>> = HashMap::new();
         for (style, entries) in self.club_song_entries(r) {
@@ -316,8 +316,8 @@ impl App {
         out
     }
 
-    /// For each style with suggested songs, each song's matching library
-    /// tracks (in the style's song order).
+    /// For each style with suggested songs, each song's matching recordings
+    /// (in the style's song order).
     pub fn club_song_entries(&self, r: &ClubRef) -> HashMap<String, Vec<Vec<Id>>> {
         let mut out: HashMap<String, Vec<Vec<Id>>> = HashMap::new();
         let Some(club) = self.club(r) else { return out };
@@ -357,7 +357,7 @@ impl App {
             return out;
         }
         let item = crate::fingerprint::item_secs();
-        for t in self.store.all_tracks() {
+        for t in self.store.all_recordings() {
             let files: Vec<&str> = t.rec.sources.iter().filter(|s| s.kind == "file").map(|s| s.key.as_str()).collect();
             let spotify: Vec<String> =
                 t.rec.sources.iter().filter(|s| s.kind == "spotify").filter_map(|s| crate::club::spotify_id(&s.key)).collect();
@@ -500,40 +500,41 @@ impl App {
         }
     }
 
-    /// Picks the source to play: the track's preferred kind if available,
+    /// Picks the source to play: the recording's preferred kind if available,
     /// otherwise a file on disk, otherwise Spotify.
-    fn choose_source(&self, track: &Track) -> Result<(String, String)> {
-        let file = || crate::library::resolve_path(&self.store, &track.rec.id).map(|p| ("file".to_string(), p.to_string_lossy().to_string()));
-        let spotify = || track.rec.sources.iter().find(|s| s.kind == "spotify").map(|s| ("spotify".to_string(), s.key.clone()));
-        let pick = match track.rec.preferred_source.as_deref() {
+    fn choose_source(&self, rec: &Recording, title: &str) -> Result<(String, String)> {
+        let file = || crate::library::resolve_path(&self.store, &rec.rec.id).map(|p| ("file".to_string(), p.to_string_lossy().to_string()));
+        let spotify = || rec.rec.sources.iter().find(|s| s.kind == "spotify").map(|s| ("spotify".to_string(), s.key.clone()));
+        let pick = match rec.rec.preferred_source.as_deref() {
             Some("spotify") => spotify().or_else(file),
             _ => file().or_else(spotify),
         };
-        pick.ok_or_else(|| anyhow!("No playable source for \"{}\": its file is missing. Rescan your library folders or link a Spotify track.", track.rec.title))
+        pick.ok_or_else(|| anyhow!("No playable source for \"{title}\": its file is missing. Rescan your library folders or link a Spotify track."))
     }
 
-    /// Builds a deck load request for a version (optionally in the context of a setlist entry).
+    /// Builds a deck load request for a version of a song (optionally in the context of a setlist entry).
     pub fn load_request(&self, deck: usize, track: &Track, version: &Version, entry: Option<&SetlistEntry>, play: bool) -> Result<LoadRequest> {
         let s = self.settings.read().clone();
         let r = Self::resolve_settings(version, entry);
-        let tempo = match (r.target_bpm, track.rec.bpm) {
+        let rec = track.recording_of(&version.id).ok_or_else(|| anyhow!("\"{}\" ({}) has no recording", track.rec.title, version.name))?;
+        let tempo = match (r.target_bpm, rec.rec.bpm) {
             (Some(t), Some(b)) if b > 0.0 => (t / fold_bpm(b, t)).clamp(0.5, 2.0),
             _ => 1.0,
         };
         let start_ms = r
             .cue_in_ms
-            .or(if s.trim_silence { track.rec.audio_start_ms.map(|v| (v - 50).max(0)) } else { None })
+            .or(if s.trim_silence { rec.rec.audio_start_ms.map(|v| (v - 50).max(0)) } else { None })
             .unwrap_or(0);
-        let end_ms = r.cue_out_ms.or(if s.trim_silence { track.rec.audio_end_ms.map(|v| v + 100) } else { None });
-        let mut gain = r.gain_db.unwrap_or(track.rec.gain_db);
+        let end_ms = r.cue_out_ms.or(if s.trim_silence { rec.rec.audio_end_ms.map(|v| v + 100) } else { None });
+        let mut gain = r.gain_db.unwrap_or(rec.rec.gain_db);
         if s.auto_gain {
-            if let Some(l) = track.rec.loudness_db {
+            if let Some(l) = rec.rec.loudness_db {
                 gain += (s.target_loudness_db - l).clamp(-12.0, 12.0);
             }
         }
-        let (kind, key) = self.choose_source(track)?;
+        let (kind, key) = self.choose_source(rec, &track.rec.title)?;
         if kind == "spotify" {
-            self.analyse_spotify_once(&track.rec.id);
+            self.analyse_spotify_once(&rec.rec.id);
         }
         // Stem defaults: version / entry settings, e.g. {"vocals": false}.
         let stems_on: [bool; 4] = std::array::from_fn(|i| {
@@ -549,7 +550,7 @@ impl App {
                 return Err(anyhow!("Spotify is not connected"));
             }
             let spotify = self.spotify.clone();
-            let dur = track.rec.duration_ms;
+            let dur = rec.rec.duration_ms;
             let start = start_ms as f64 / 1000.0;
             // On the deck's thread when the song opens: reconnects there if Spotify dropped the session.
             Box::new(move || {
@@ -573,6 +574,7 @@ impl App {
         };
         Ok(LoadRequest {
             track_id: Some(track.rec.id.clone()),
+            recording_id: Some(rec.rec.id.clone()),
             version_id: Some(version.id.clone()),
             entry_id: entry.map(|e| e.id.clone()),
             open,
@@ -592,6 +594,7 @@ impl App {
     pub fn test_tone(&self, deck: usize) {
         let req = LoadRequest {
             track_id: None,
+            recording_id: None,
             version_id: None,
             entry_id: None,
             open: Box::new(|| Ok(Box::new(ToneSource::new(4.0)) as Box<dyn Source>)),
@@ -648,7 +651,7 @@ impl App {
     /// Spotify songs aren't analysed on import (that would stream every
     /// song); a song without a waveform is analysed when first loaded.
     fn analyse_spotify_once(&self, id: &Id) {
-        let current = self.store.track(id).is_ok_and(|t| t.rec.analysis_version >= crate::analysis::VERSION);
+        let current = self.store.recording(id).is_ok_and(|r| r.rec.analysis_version >= crate::analysis::VERSION);
         if (current && self.store.waveform(id).is_some()) || !self.spotify_analysed.lock().insert(id.clone()) {
             return;
         }
@@ -795,20 +798,21 @@ impl App {
                         let Some(app) = weak.upgrade() else { return };
                         let r = app.analyze(&id);
                         if let Err(e) = r {
-                            log::warn!("analysis of track {id} failed: {e:#}");
+                            log::warn!("analysis of recording {id} failed: {e:#}");
                         }
-                        emit(&app.handle, "library-changed", vec![id]);
+                        emit(&app.handle, "library-changed", app.store.songs_for_recording(&id));
                     }
                 })
                 .unwrap();
         }
     }
 
+    /// Analyses a recording (from its file, else from Spotify).
     fn analyze(&self, id: &str) -> Result<()> {
         if crate::library::resolve_path(&self.store, id).is_some() {
-            return crate::library::analyze_track(&self.store, id);
+            return crate::library::analyze_recording(&self.store, id);
         }
-        let t = self.store.track(id)?;
+        let t = self.store.recording(id)?;
         let uri = t
             .rec
             .sources

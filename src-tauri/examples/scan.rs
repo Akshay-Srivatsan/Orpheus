@@ -13,16 +13,16 @@ fn main() -> anyhow::Result<()> {
     let ids = store.needs_analysis();
     use rayon::prelude::*;
     ids.par_iter().for_each(|id| {
-        if let Err(e) = library::analyze_track(&store, id) {
+        if let Err(e) = library::analyze_recording(&store, id) {
             eprintln!("analyze {id}: {e:#}");
         }
     });
-    println!("analysis of {} tracks in {:?}", ids.len(), t0.elapsed());
-    for t in store.all_tracks().iter().take(args.get(4).and_then(|n| n.parse().ok()).unwrap_or(usize::MAX)) {
+    println!("analysis of {} recordings in {:?}", ids.len(), t0.elapsed());
+    for r in store.all_recordings().iter().take(args.get(4).and_then(|n| n.parse().ok()).unwrap_or(usize::MAX)) {
         println!(
-            "{} | {:<38.38} | {:<20.20} | {:>6} ms | bpm {:>6} | files {}",
-            t.rec.id, t.rec.title, t.rec.artist, t.rec.duration_ms,
-            t.rec.bpm.map(|b| format!("{b:.1}")).unwrap_or("-".into()), t.files.len()
+            "{} | {:<38.38} | {:<20.20} | {:>6} ms | bpm {:>6} | files {} | songs {}",
+            r.rec.id, r.rec.title, r.rec.artist, r.rec.duration_ms,
+            r.rec.bpm.map(|b| format!("{b:.1}")).unwrap_or("-".into()), r.files.len(), r.songs.len()
         );
     }
     Ok(())

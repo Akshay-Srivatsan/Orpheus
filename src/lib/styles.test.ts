@@ -21,11 +21,13 @@ const lib: StyleLibrary = {
   clubRules: { club: [{ mine: "waltz", club: "rotary" }, { mine: "waltz", club: "cross-step" }] },
 };
 const track = (bpm: number, meter: number): Track => ({
-  id: "t", title: "Song", artist: "", album: "", durationMs: 180_000, bpm, bpmSource: "detected", beatsPerBar: meter, meterSource: "detected",
-  rating: null, loudnessDb: null, audioStartMs: null, audioEndMs: null, analyzed: true, addedAt: 0, sources: [], versions: [],
-  files: [], missing: false, playCount: 0, lastPlayedAt: null,
+  id: "t", title: "Song", artist: "", album: "", rating: null, addedAt: 0, versions: [], missing: false, playCount: 0, lastPlayedAt: null,
+  recordings: [{
+    id: "r", title: "Song", artist: "", album: "", durationMs: 180_000, bpm, bpmSource: "detected", beatsPerBar: meter, meterSource: "detected",
+    loudnessDb: null, audioStartMs: null, audioEndMs: null, analyzed: true, addedAt: 0, sources: [], files: [], missing: false, songs: ["t"],
+  }],
 });
-const version = (styles: string[]): Version => ({ id: "v", name: "Original", styles });
+const version = (styles: string[]): Version => ({ id: "v", name: "Original", recording: "r", styles });
 
 describe("what songs show", () => {
   const ctx = clubContext(club, "club", lib, 10);

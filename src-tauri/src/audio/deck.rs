@@ -13,7 +13,10 @@ use std::time::Duration;
 pub type SourceOpener = Box<dyn FnOnce() -> Result<Box<dyn Source>> + Send>;
 
 pub struct LoadRequest {
+    /// The song.
     pub track_id: Option<String>,
+    /// The recording it plays (waveform, hot cues, artwork).
+    pub recording_id: Option<String>,
     pub version_id: Option<String>,
     pub entry_id: Option<String>,
     pub open: SourceOpener,
@@ -59,6 +62,7 @@ pub struct DeckSnapshot {
     /// `empty`, `loading`, `paused`, `playing`, `ended`, `error`.
     pub status: String,
     pub track_id: Option<String>,
+    pub recording_id: Option<String>,
     pub version_id: Option<String>,
     pub entry_id: Option<String>,
     pub position_ms: i64,
@@ -85,6 +89,7 @@ pub struct DeckSnapshot {
 struct Info {
     status: String,
     track_id: Option<String>,
+    recording_id: Option<String>,
     version_id: Option<String>,
     entry_id: Option<String>,
     duration: f64,
@@ -180,6 +185,7 @@ impl Deck {
             let mut i = self.shared.info.lock();
             i.status = "loading".into();
             i.track_id = req.track_id.clone();
+            i.recording_id = req.recording_id.clone();
             i.version_id = req.version_id.clone();
             i.entry_id = req.entry_id.clone();
             i.error = None;
@@ -224,6 +230,10 @@ impl Deck {
 
     pub fn track_id(&self) -> Option<String> {
         self.shared.info.lock().track_id.clone()
+    }
+
+    pub fn recording_id(&self) -> Option<String> {
+        self.shared.info.lock().recording_id.clone()
     }
 
     pub fn version_id(&self) -> Option<String> {
@@ -371,6 +381,7 @@ impl Deck {
             deck: s.index,
             status: i.status.clone(),
             track_id: i.track_id.clone(),
+            recording_id: i.recording_id.clone(),
             version_id: i.version_id.clone(),
             entry_id: i.entry_id.clone(),
             position_ms: (s.position.get() * 1000.0) as i64,

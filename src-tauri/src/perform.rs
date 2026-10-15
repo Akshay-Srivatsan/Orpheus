@@ -128,8 +128,9 @@ pub struct ProjEntry {
     pub id: Id,
     /// `song` or `pause` (a pause / announcement without a song).
     pub kind: EntryKind,
-    /// For cover art (`track_artwork`).
     pub track_id: Option<Id>,
+    /// For cover art (`recording_artwork`).
+    pub recording_id: Option<Id>,
     pub title: String,
     pub artist: String,
     /// Your style keys (the page shows the club styles they match).
@@ -966,21 +967,23 @@ impl App {
         let styles = e.styles.clone().or_else(|| vt.map(|(v, _)| v.styles.clone())).unwrap_or_default();
         let settings = vt.map(|(v, _)| Self::resolve_settings(v, Some(e)));
         let target = settings.as_ref().and_then(|s| s.target_bpm);
+        let rec = vt.and_then(|(v, t)| t.recording_of(&v.id)).map(|r| &r.rec);
         // From the cue-in point to the fade-out / cue-out point (or the end).
-        let length_secs = vt.zip(settings.as_ref()).map(|((_, t), s)| {
-            let end = s.fade_out_ms.or(s.cue_out_ms).unwrap_or(t.rec.duration_ms);
+        let length_secs = rec.zip(settings.as_ref()).map(|(r, s)| {
+            let end = s.fade_out_ms.or(s.cue_out_ms).unwrap_or(r.duration_ms);
             (end - s.cue_in_ms.unwrap_or(0)).max(0) as f64 / 1000.0
         });
         ProjEntry {
             id: e.id.clone(),
             kind: e.kind,
             track_id: vt.map(|(_, t)| t.rec.id.clone()),
+            recording_id: rec.map(|r| r.id.clone()),
             title: vt.map(|(_, t)| t.rec.title.clone()).unwrap_or_default(),
             artist: vt.map(|(_, t)| t.rec.artist.clone()).unwrap_or_default(),
             styles,
             club_styles: e.club_styles.clone(),
-            meter: vt.and_then(|(_, t)| t.rec.beats_per_bar),
-            club_listed: vt.and_then(|(_, t)| listed.get(&t.rec.id).cloned()).unwrap_or_default(),
+            meter: rec.and_then(|r| r.beats_per_bar),
+            club_listed: rec.and_then(|r| listed.get(&r.id).cloned()).unwrap_or_default(),
             length_secs,
             // Entry label, else the version's display name (e.g. a line dance's name).
             label: e
@@ -995,7 +998,7 @@ impl App {
                 .map(|(id, t)| ProjTag { id: id.clone(), name: t.name.clone(), color: t.color.clone().unwrap_or_default() })
                 .collect(),
             status: e.status.clone(),
-            bpm: target.or_else(|| vt.and_then(|(_, t)| t.rec.bpm)),
+            bpm: target.or_else(|| rec.and_then(|r| r.bpm)),
         }
     }
 

@@ -6,7 +6,9 @@
   import Deck from "./Deck.svelte";
   import Inspector from "./Inspector.svelte";
   import LibraryTable from "./LibraryTable.svelte";
+  import RecordingsView from "./RecordingsView.svelte";
   import NewSetlistDialog from "./NewSetlistDialog.svelte";
+  import MergeDialog from "./MergeDialog.svelte";
   import SetPanel from "./SetPanel.svelte";
   import SettingsDialog from "./SettingsDialog.svelte";
   import Sidebar from "./Sidebar.svelte";
@@ -60,6 +62,7 @@
       case "setlist": return app.setlists.find((s) => s.id === v.id)?.name ?? "Setlist";
       case "history": return "History";
       case "missing": return "Missing Files";
+      case "recordings": return "Recordings";
       case "spotify-search": return "Spotify";
       case "spotify-playlist": return v.name;
     }
@@ -118,7 +121,7 @@
               <input type="search" placeholder="Search" bind:value={app.search} bind:this={searchEl} />
             </div>
           </div>
-          <div class="tablewrap"><LibraryTable /></div>
+          <div class="tablewrap">{#if app.view.kind === "recordings"}<RecordingsView />{:else}<LibraryTable />{/if}</div>
           {#if app.spotify?.connected}<SpotifySearchSection query={app.search} />{/if}
         {/if}
       </main>
@@ -139,6 +142,7 @@
   </div>
   {#if app.settingsOpen}<SettingsDialog />{/if}
   {#if app.newSetlistOpen}<NewSetlistDialog />{/if}
+  {#if app.mergeDialog}<MergeDialog kind={app.mergeDialog.kind} ids={app.mergeDialog.ids} />{/if}
   {#if app.smartEditor}<SmartCrateDialog />{/if}
   {#if dragging}<div class="dropzone">Drop music files or folders to add them to your library</div>{/if}
 {:else}

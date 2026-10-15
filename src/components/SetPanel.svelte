@@ -36,7 +36,9 @@
       const label = customLabel(r?.version, e) || (many ? `${shown.slice(0, 2).map((s) => s.short).join(" / ")} +${shown.length - 2}` : shown.map((s) => s.short).join(" / "));
       // A song coming up that the room has already heard in this set.
       const repeat = e.status === "pending" && !!r && app.playedInSet.has(r.track.id);
-      return { e, i, r, pb, dur, shown, label, repeat, isPause, warnings, noStyle, many };
+      // Its recording was already played as another song (e.g. for another line dance).
+      const heardAs = e.status === "pending" && r && !repeat ? app.playedRecordingsInSet.get(r.rec.id) : undefined;
+      return { e, i, r, pb, dur, shown, label, repeat, heardAs, isPause, warnings, noStyle, many };
     }),
   );
   const clubValue = $derived(set?.club ? `${set.club.id}/${set.club.version}` : "");
@@ -439,6 +441,9 @@
               {#if x.warnings.length}
                 <span class="warn-mark" title={x.warnings.join("\n")}><Icon name="warning" size={11} /></span>
               {/if}
+              {#if x.heardAs}
+                <span class="heard" title="This recording was already played in this set (as “{x.heardAs.title}”)"><Icon name="history" size={11} /></span>
+              {/if}
               {#if x.isPause}
                 <span class="t pausename"><Icon name="pause" size={11} /> {x.e.label || "Pause"}</span>
               {:else if x.r}
@@ -534,6 +539,7 @@
   .entry.played { opacity: 0.45; }
   .entry.skipped { opacity: 0.35; }
   .entry.skipped .t { text-decoration: line-through; }
+  .heard { color: var(--text-faint); display: inline-flex; flex: none; }
   /* Already played earlier in this set. */
   .entry.repeat .t, .entry.repeat .a { color: var(--text-faint); }
   .entry.filling { box-shadow: inset 0 0 0 1px var(--yellow); }

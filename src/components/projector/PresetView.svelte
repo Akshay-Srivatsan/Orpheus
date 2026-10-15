@@ -59,9 +59,9 @@
   const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
   let art = $state<string | null>(null);
   $effect(() => {
-    const id = !revealNext && s.showArtwork && inTauri ? banner?.trackId : null;
+    const id = !revealNext && s.showArtwork && inTauri ? banner?.recordingId : null;
     art = null;
-    if (id) artwork(id).then((a) => { if (banner?.trackId === id) art = a; });
+    if (id) artwork(id).then((a) => { if (banner?.recordingId === id) art = a; });
   });
 </script>
 

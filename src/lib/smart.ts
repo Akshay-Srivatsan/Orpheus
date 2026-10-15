@@ -151,7 +151,7 @@ export function crateMembers(c: Crate, ctx: SmartContext, depth = 0): Set<Id> {
 }
 
 function test(cond: SmartCondition, row: Row, ctx: SmartContext, depth: number): boolean {
-  const { track: t, version: v } = row;
+  const { track: t, version: v, rec } = row;
   const own = v.styles ?? [];
   const opts = { fadeSeconds: ctx.fadeSeconds, trimSilence: ctx.trimSilence };
   const shownClub = (): StyleDef | undefined =>
@@ -176,7 +176,7 @@ function test(cond: SmartCondition, row: Row, ctx: SmartContext, depth: number):
       }
       return false;
     case "bpm": {
-      const bpm = pb.target ?? t.bpm;
+      const bpm = pb.target ?? rec.bpm;
       if (cond.op === "isEmpty") return bpm == null;
       if (bpm == null) return false;
       if (cond.op === "fitsStyle") {
@@ -188,7 +188,7 @@ function test(cond: SmartCondition, row: Row, ctx: SmartContext, depth: number):
     }
     case "tempoFit": {
       const st = shownClub();
-      const fit = tempoFit(pb.target ?? (t.bpm ? bpmForStyle(t.bpm, st) : null), st);
+      const fit = tempoFit(pb.target ?? (rec.bpm ? bpmForStyle(rec.bpm, st) : null), st);
       if (cond.op === "sweet") return fit === "sweet";
       if (cond.op === "ok") return fit === "sweet" || fit === "extended";
       if (cond.op === "outside") return fit === "outside";
@@ -206,11 +206,11 @@ function test(cond: SmartCondition, row: Row, ctx: SmartContext, depth: number):
       return cond.op === "notContains" ? !hay.includes(q) : hay.includes(q);
     }
     case "source": {
-      const has = t.sources.some((s) => s.kind === cond.value);
+      const has = rec.sources.some((s) => s.kind === cond.value);
       return cond.op === "isNot" ? !has : has;
     }
     case "meter": {
-      const m = t.beatsPerBar ?? null;
+      const m = rec.beatsPerBar ?? null;
       if (cond.op === "isEmpty") return m == null;
       return cond.op === "triple" ? m === 3 || m === 6 : m === 2 || m === 4;
     }

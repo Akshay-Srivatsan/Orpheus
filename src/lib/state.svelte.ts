@@ -6,6 +6,7 @@ import type {
   Crate, DeckState, Id, Levels, TtsStatus, LibraryInfo, StemsStatus, OutputStatus, PerformState, Row, ScanProgress, Setlist, Club, ClubInfo, ClubRef,
   NewEntry, SetlistEntry, SetlistSummary, Settings, SpotifyStatus, StyleDef, StylesInfo, Track, Version,
 } from "./types";
+import { recordingOf, rowsOf } from "./types";
 import { NEUTRAL, clubContext, myStyle, mineShown, prettify, shownStyles, songFacts, styleDef, type ClubContext, type Shown } from "./styles";
 import { assess } from "./clubs";
 import { resolveSettings, type ClubStyleOf } from "./tempo";
@@ -17,6 +18,7 @@ export type SourceView =
   | { kind: "setlist"; id: Id }
   | { kind: "history" }
   | { kind: "missing" }
+  | { kind: "recordings" }
   | { kind: "spotify-search" }
   | { kind: "spotify-playlist"; uri: string; name: string };
 
@@ -30,7 +32,7 @@ export interface Toast {
 export const NO_STYLE = "__none";
 
 const emptyDeck = (deck: 0 | 1): DeckState => ({
-  deck, status: "empty", trackId: null, versionId: null, entryId: null, positionMs: 0, durationMs: 0, startMs: 0,
+  deck, status: "empty", trackId: null, recordingId: null, versionId: null, entryId: null, positionMs: 0, durationMs: 0, startMs: 0,
   endMs: null, fadeAtMs: null, cueMs: 0, onAir: deck === 0, stems: null, fading: false, tempo: 1, keylock: true, gainDb: 0, trimDb: 0,
   pfl: deck === 1, error: null,
 });
@@ -96,6 +98,8 @@ class AppState {
   rightTab = $state<"set" | "info">("set");
   settingsOpen = $state<false | string>(false);
   newSetlistOpen = $state(false);
+  /** Combining songs, or marking recordings as the same audio (ids of songs / recordings, the first kept). */
+  mergeDialog = $state<{ kind: "songs" | "recordings"; ids: Id[] } | null>(null);
   /** A style slot in the open set the DJ is choosing a song for. */
   fillingSlot = $state<Id | null>(null);
   /** Smart crate being edited: its id, or "new". */
@@ -106,15 +110,17 @@ class AppState {
   midiNav = $state<{ action: string; delta?: number; deck?: 0 | 1; n: number }>({ action: "", n: 0 });
 
   trackMap = $derived(new Map(this.tracks.map((t) => [t.id, t])));
+  /** Recordings that songs play (hidden ones: `api.recordings()`). */
+  recordingMap = $derived(new Map(this.tracks.flatMap((t) => t.recordings).map((r) => [r.id, r])));
   versionMap = $derived.by(() => {
     const m = new Map<Id, Row>();
-    for (const t of this.tracks) for (const v of t.versions) m.set(v.id, { track: t, version: v });
+    for (const t of this.tracks) for (const r of rowsOf(t)) m.set(r.version.id, r);
     return m;
   });
   /** Rows in the library (excludes set-only songs, which are still in versionMap). */
   rows = $derived.by(() => {
     const out: Row[] = [];
-    for (const t of this.tracks) if (t.inLibrary !== false) for (const v of t.versions) out.push({ track: t, version: v });
+    for (const t of this.tracks) if (t.inLibrary !== false) out.push(...rowsOf(t));
     return out;
   });
   libraryTracks = $derived(this.tracks.filter((t) => t.inLibrary !== false));
@@ -127,7 +133,7 @@ class AppState {
   });
   /** Those guidelines (null: no club, or not loaded yet). */
   club = $derived(this.clubRef ? (this.clubCache[`${this.clubRef.id}/${this.clubRef.version}`] ?? null) : null);
-  /** Library songs that are the club's suggested songs: track id → style ids. */
+  /** Recordings that are the club's suggested songs: recording id → style ids. */
   songMatches = $state<Record<Id, string[]>>({});
   private songMatchesFor = "";
   /** Refreshes `songMatches` (when the club or the library changes). */
@@ -221,7 +227,8 @@ class AppState {
 
   /** What matching needs about a song. */
   factsFor(track: Track | undefined, version: Version | undefined, entry: Partial<SetlistEntry> | null | undefined) {
-    return songFacts(track, version, entry, { fadeSeconds: this.fadeSeconds, trimSilence: this.settings?.trimSilence ?? true }, track ? (this.songMatches[track.id] ?? []) : []);
+    const rec = recordingOf(track, version);
+    return songFacts(track, version, entry, { fadeSeconds: this.fadeSeconds, trimSilence: this.settings?.trimSilence ?? true }, rec ? (this.songMatches[rec.id] ?? []) : []);
   }
 
   /** The styles an entry (or a version) shows: the club's in a club's set, else yours. */
@@ -252,7 +259,19 @@ class AppState {
   /** The first club style an entry shows (for tempo ranges). */
   clubStyleOf: ClubStyleOf = (track, version, entry) => this.shownFor(track, version, entry).find((s) => s.club)?.club ?? null;
 
-  /** Tracks already played (or playing) in the open setlist. */
+  /** Recordings already played (or playing) in the open setlist → the song they were played as. */
+  playedRecordingsInSet = $derived.by(() => {
+    const out = new Map<Id, Track>();
+    for (const e of this.current?.entries ?? []) {
+      if ((e.status === "played" || e.status === "playing") && e.versionId) {
+        const r = this.versionMap.get(e.versionId);
+        if (r && !out.has(r.rec.id)) out.set(r.rec.id, r.track);
+      }
+    }
+    return out;
+  });
+
+  /** Songs already played (or playing) in the open setlist (any of their versions). */
   playedInSet = $derived.by(() => {
     const out = new Set<Id>();
     for (const e of this.current?.entries ?? []) {
@@ -493,7 +512,7 @@ export async function spotifyVersions(tracks: import("./types").SpotifyTrack[], 
 /** Loads a version onto the free deck and plays it in the headphones. */
 export async function audition(versionId: Id, entryId?: Id | null) {
   const row = app.versionMap.get(versionId);
-  if (row?.track.missing) {
+  if (row?.rec.missing) {
     app.toast(`"${row.track.title}" has no playable source on this computer.`);
     return;
   }

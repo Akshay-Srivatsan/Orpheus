@@ -17,7 +17,7 @@ fn main() -> anyhow::Result<()> {
     deck.shared.master_tap.gain.set(1.0);
     let p2 = path.clone();
     deck.load(LoadRequest {
-        track_id: None, version_id: None, entry_id: None,
+        track_id: None, recording_id: None, version_id: None, entry_id: None,
         open: Box::new(move || Ok(Box::new(LocalSource::open(&p2)?) as Box<dyn Source>)),
         start_secs: 0.0, end_secs: Some(60.0), fade_at_secs: None, fade_secs: 5.0,
         tempo, gain_db: 0.0, play: true, cue_secs: None, has_stems: false, stems_on: [true; 4],

@@ -2,7 +2,7 @@
   import { api, on } from "../lib/api";
   import { evaluate } from "../lib/smart";
   import { NO_STYLE, addToSet, app, audition, confirmAction, fillSlot, loadDeck } from "../lib/state.svelte";
-  import type { SetlistEntry } from "../lib/types";
+  import { rowsOf, type SetlistEntry } from "../lib/types";
   import { fmtBpm, fmtPct, fmtTime, playback, playedDurationMs, tempoFit } from "../lib/tempo";
   import type { HistoryItem, Id, Row } from "../lib/types";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
@@ -49,7 +49,7 @@
       case "all":
         return app.rows.map((r) => mk(r));
       case "missing":
-        return app.rows.filter((r) => r.track.missing).map((r) => mk(r));
+        return app.rows.filter((r) => r.rec.missing).map((r) => mk(r));
       case "crate": {
         const c = app.crates.find((c) => c.id === v.id);
         if (c?.smart) return evaluate(c.smart, app.rows, app.smartCtx).map((r) => mk(r));
@@ -67,7 +67,7 @@
         return history.flatMap((h, i) => {
           const r = h.versionId ? app.versionMap.get(h.versionId) : undefined;
           const t = app.trackMap.get(h.trackId);
-          const row = r ?? (t ? { track: t, version: t.versions[0] } : undefined);
+          const row = r ?? (t ? rowsOf(t)[0] : undefined);
           return row ? [mk(row, { key: `${h.entryId}-${i}`, playedAt: h.playedAt, historyEntryId: h.entryId })] : [];
         });
       default:
@@ -86,7 +86,7 @@
     if (!f || !app.suggestByTempo || !app.clubTargets(f).some((t) => t.sweet || t.extended)) return labelled;
     const have = new Set(labelled.map((r) => r.track.id));
     const suggested = baseRows
-      .filter((r) => !r.version.styles?.length && !have.has(r.track.id) && r.track.bpm)
+      .filter((r) => !r.version.styles?.length && !have.has(r.track.id) && r.rec.bpm)
       .map((r) => ({ ...r, key: "s-" + r.key, suggested: true }))
       .filter((r) => { const i = info(r); return !!i.st && i.fit !== "outside"; });
     return [...labelled, ...suggested];
@@ -124,9 +124,9 @@
         case "artist": return `${x.r.track.artist.toLowerCase()}\u0000${x.r.track.title.toLowerCase()}`;
         case "version": return x.r.version.name.toLowerCase();
         case "style": return (x.r.version.styles ?? []).map((k) => app.styleName(k)).join(" ");
-        case "bpm": return x.i.pb.target ?? x.r.track.bpm ?? 0;
+        case "bpm": return x.i.pb.target ?? x.r.rec.bpm ?? 0;
         case "time": return x.i.dur;
-        case "meter": return x.r.track.beatsPerBar ?? 0;
+        case "meter": return x.r.rec.beatsPerBar ?? 0;
         case "plays": return x.r.track.playCount;
         case "played": return x.r.playedAt ?? x.r.track.lastPlayedAt ?? 0;
       }
@@ -278,10 +278,8 @@
       ...tagMenu(ids),
       { separator: true },
       { label: "New Version of This Song…", action: () => { app.inspectTrack = r.track.id; app.rightTab = "info"; } },
-      { label: "Re-analyze", action: () => api.analyze([...new Set(ids.map((id) => app.versionMap.get(id)?.track.id).filter(Boolean) as Id[])]) },
-      ...(new Set(ids.map((id) => app.versionMap.get(id)?.track.id)).size > 1
-        ? [{ label: "Merge Selected Songs (same recording)", action: () => mergeSelected(ids) }]
-        : []),
+      { label: "Re-analyze", action: () => api.analyze([...new Set(ids.map((id) => app.versionMap.get(id)?.rec.id).filter(Boolean) as Id[])]) },
+      ...mergeMenu(ids),
       { separator: true },
       { label: "Remove from Library…", danger: true, action: () => deleteSelected(ids) },
     ];
@@ -319,15 +317,24 @@
     return items;
   }
 
-  async function mergeSelected(ids: Id[]) {
-    const tids = [...new Set(ids.map((id) => app.versionMap.get(id)!.track.id))];
-    if (!(await confirmAction(`Merge ${tids.length} songs into one? Their sources and versions are combined; setlists keep working.`, "Merge"))) return;
-    await app.run(api.mergeTracks(tids[0], tids.slice(1)));
+  /** Combining songs, marking recordings as the same audio, and separating a song's versions again. */
+  function mergeMenu(ids: Id[]): MenuItem[] {
+    const rows = ids.map((id) => app.versionMap.get(id)).filter(Boolean) as Row[];
+    const songs = [...new Set(rows.map((r) => r.track.id))];
+    const recs = [...new Set(rows.map((r) => r.rec.id))];
+    const items: MenuItem[] = [];
+    if (songs.length > 1) items.push({ label: "Combine into One Song…", action: () => (app.mergeDialog = { kind: "songs", ids: songs }) });
+    if (recs.length > 1) items.push({ label: "Same Recording (the same audio)…", action: () => (app.mergeDialog = { kind: "recordings", ids: recs }) });
+    // Versions of one song that has others: they can become a song of their own.
+    if (songs.length === 1 && rows[0].track.versions.length > rows.length) {
+      items.push({ label: rows.length > 1 ? "Separate into Their Own Song" : "Separate into Its Own Song", action: () => app.run(api.separateVersions(rows.map((r) => r.version.id))) });
+    }
+    return items;
   }
 
   async function deleteSelected(ids: Id[]) {
     const tids = [...new Set(ids.map((id) => app.versionMap.get(id)!.track.id))];
-    if (!(await confirmAction(`Remove ${tids.length} song(s) and all their versions from the library? Your music files are not touched.`, "Remove"))) return;
+    if (!(await confirmAction(`Remove ${tids.length} song(s) and all their versions from the library? Your music files are not touched; their recordings stay in Library → Recordings (hidden), unless only on Spotify.`, "Remove"))) return;
     await app.run(api.deleteTracks(tids));
   }
 
@@ -382,20 +389,20 @@
         >
           {#if showPos}<span class="c pos num faint">{r.position}</span>{/if}
           <span class="c title" title={r.track.title}>
-            {#if r.track.missing}<span title="File missing on this computer"><Icon name="warning" size={12} /></span>{/if}
-            {#if r.track.sources.some((s) => s.kind === "spotify") && !r.track.files.length}<span class="sp" title="Spotify">●</span>{/if}
+            {#if r.rec.missing}<span title="File missing on this computer"><Icon name="warning" size={12} /></span>{/if}
+            {#if r.rec.sources.some((s) => s.kind === "spotify") && !r.rec.files.length}<span class="sp" title="Spotify">●</span>{/if}
             {r.track.title}
           </span>
           <span class="c artist" title={r.track.artist}>{r.track.artist}</span>
           <span class="c version faint" title={r.version.comment ?? ""}>{app.versionLabel(r.version, r.track)}</span>
           <span class="c style">{#if r.suggested}<span class="sugg">tempo fits</span>{:else}<StyleBadge styles={(r.version.styles ?? []).map((k) => app.mine(k))} short />{/if}</span>
           <span class="c bpm num" class:fit-sweet={fit === "sweet"} class:fit-out={fit === "outside"}>
-            {fmtBpm(inf.pb.target ?? r.track.bpm)}
+            {fmtBpm(inf.pb.target ?? r.rec.bpm)}
             {#if Math.abs(inf.pb.rate - 1) > 0.001}<span class="rate">{fmtPct(inf.pb.rate)}</span>{/if}
-            {#if !r.track.bpm && !r.track.analyzed && r.track.files.length}<span class="faint">…</span>{/if}
+            {#if !r.rec.bpm && !r.rec.analyzed && r.rec.files.length}<span class="faint">…</span>{/if}
           </span>
           <span class="c time num" class:long={inf.dur > 270000}>{fmtTime(inf.dur)}</span>
-          <span class="c meter num faint" title={r.track.meterSource === "user" ? "set by you" : r.track.beatsPerBar ? "detected" : ""}>{meterLabel(r.track.beatsPerBar)}</span>
+          <span class="c meter num faint" title={r.rec.meterSource === "user" ? "set by you" : r.rec.beatsPerBar ? "detected" : ""}>{meterLabel(r.rec.beatsPerBar)}</span>
           <span class="c plays num faint">
             {#if r.playedAt}{new Date(r.playedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}{:else}{r.track.playCount || ""}{/if}
           </span>

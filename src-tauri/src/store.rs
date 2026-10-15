@@ -6,7 +6,8 @@
 //!
 //! ```text
 //! <library>/
-//!   tracks/<id>.json      a recording: metadata, analysis, sources, versions
+//!   tracks/<id>.json      a song: title etc. and its versions (each plays a recording)
+//!   recordings/<id>.json  a recording: sources (the same audio), analysis, hot cues
 //!   setlists/<id>.json    a setlist and its entries
 //!   crates/<id>.json      a hand-picked collection of versions
 //!   clubs/<club>/         club guidelines, one TOML file per version (see club.rs)
@@ -74,10 +75,17 @@ struct FileIndex {
 
 #[derive(Default)]
 struct Inner {
+    /// Songs.
     tracks: HashMap<Id, TrackRecord>,
+    recordings: HashMap<Id, RecordingRecord>,
+    /// Version id → song id.
     version_owner: HashMap<Id, Id>,
+    /// Source → recording id.
     source_owner: HashMap<SourceRef, Id>,
+    /// Combined songs' old ids → song id.
     alias: HashMap<Id, Id>,
+    /// Merged recordings' old ids → recording id.
+    rec_alias: HashMap<Id, Id>,
     setlists: HashMap<Id, Setlist>,
     entry_owner: HashMap<Id, Id>,
     crates: HashMap<Id, Crate>,
@@ -153,16 +161,37 @@ fn json_files(dir: &Path) -> Vec<PathBuf> {
     v
 }
 
+/// A song's first version, playing `recording`.
+fn original_version(recording: &str) -> Version {
+    Version {
+        id: new_id(),
+        name: "Original".into(),
+        recording: recording.to_string(),
+        display_name: None,
+        styles: vec![],
+        legacy_style: None,
+        settings: Overrides::default(),
+        comment: String::new(),
+        tags: vec![],
+    }
+}
+
 impl Inner {
     fn reindex_track(&mut self, t: &TrackRecord) {
         for v in &t.versions {
             self.version_owner.insert(v.id.clone(), t.id.clone());
         }
-        for s in &t.sources {
-            self.source_owner.insert(s.clone(), t.id.clone());
-        }
         for a in &t.aliases {
             self.alias.insert(a.clone(), t.id.clone());
+        }
+    }
+
+    fn reindex_recording(&mut self, r: &RecordingRecord) {
+        for s in &r.sources {
+            self.source_owner.insert(s.clone(), r.id.clone());
+        }
+        for a in &r.aliases {
+            self.rec_alias.insert(a.clone(), r.id.clone());
         }
     }
 
@@ -181,6 +210,26 @@ impl Inner {
 
     fn canonical(&self, track_id: &str) -> Id {
         self.alias.get(track_id).cloned().unwrap_or_else(|| track_id.to_string())
+    }
+
+    fn canonical_rec(&self, rec_id: &str) -> Id {
+        self.rec_alias.get(rec_id).cloned().unwrap_or_else(|| rec_id.to_string())
+    }
+
+    /// Recording id → the songs whose versions play it.
+    fn recording_users(&self) -> HashMap<Id, Vec<Id>> {
+        let mut out: HashMap<Id, Vec<Id>> = HashMap::new();
+        let mut songs: Vec<&TrackRecord> = self.tracks.values().collect();
+        songs.sort_by(|a, b| a.id.cmp(&b.id));
+        for t in songs {
+            for v in &t.versions {
+                let users = out.entry(self.canonical_rec(&v.recording)).or_default();
+                if !users.contains(&t.id) {
+                    users.push(t.id.clone());
+                }
+            }
+        }
+        out
     }
 
     /// Track id → (number of setlists it was played in, last played), derived
@@ -206,7 +255,7 @@ impl Inner {
         stats
     }
 
-    fn to_track(&self, rec: &TrackRecord, stats: &HashMap<Id, (i64, i64)>) -> Track {
+    fn to_recording(&self, rec: &RecordingRecord, users: &HashMap<Id, Vec<Id>>) -> Recording {
         let mut files = vec![];
         for s in rec.sources.iter().filter(|s| s.kind == "file") {
             if let Some(paths) = self.by_hash.get(&s.key) {
@@ -215,13 +264,37 @@ impl Inner {
         }
         files.sort();
         let has_spotify = rec.sources.iter().any(|s| s.kind == "spotify");
-        let (count, last) = stats.get(&rec.id).copied().unwrap_or((0, 0));
-        Track {
+        Recording {
             missing: files.is_empty() && !has_spotify,
             files,
+            songs: users.get(&rec.id).cloned().unwrap_or_default(),
+            rec: rec.clone(),
+        }
+    }
+
+    fn to_track(&self, rec: &TrackRecord, stats: &HashMap<Id, (i64, i64)>, users: &HashMap<Id, Vec<Id>>) -> Track {
+        let mut recordings: Vec<Recording> = vec![];
+        for v in &rec.versions {
+            let id = self.canonical_rec(&v.recording);
+            if recordings.iter().any(|r| r.rec.id == id) {
+                continue;
+            }
+            if let Some(r) = self.recordings.get(&id) {
+                recordings.push(self.to_recording(r, users));
+            }
+        }
+        let (count, last) = stats.get(&rec.id).copied().unwrap_or((0, 0));
+        let mut rec = rec.clone();
+        // Versions name their recording by its current id.
+        for v in rec.versions.iter_mut() {
+            v.recording = self.canonical_rec(&v.recording);
+        }
+        Track {
+            missing: recordings.iter().all(|r| r.missing),
+            recordings,
             play_count: count,
             last_played_at: (last > 0).then_some(last),
-            rec: rec.clone(),
+            rec,
         }
     }
 }
@@ -247,7 +320,7 @@ impl Store {
 
     /// (Re)loads everything from disk, e.g. after `git pull` or switching libraries.
     pub fn reload(&self, library_dir: &Path) -> Result<()> {
-        for d in ["tracks", "setlists", "crates", "clubs"] {
+        for d in ["tracks", "recordings", "setlists", "crates", "clubs"] {
             fs::create_dir_all(library_dir.join(d))
                 .with_context(|| format!("creating {}", library_dir.join(d).display()))?;
         }
@@ -259,10 +332,35 @@ impl Store {
         }
         let mut inner = Inner::default();
         let mut errors = vec![];
+        for p in json_files(&library_dir.join("recordings")) {
+            match read_json::<RecordingRecord>(&p) {
+                Ok(r) if !r.id.is_empty() => {
+                    inner.reindex_recording(&r);
+                    inner.recordings.insert(r.id.clone(), r);
+                }
+                Ok(_) => errors.push(format!("{}: missing id", p.display())),
+                Err(e) => errors.push(format!("{e:#}")),
+            }
+        }
+        // Older songs kept their recording inside: move it out.
+        let mut upgraded: Vec<(TrackRecord, Option<RecordingRecord>)> = vec![];
         for p in json_files(&library_dir.join("tracks")) {
             match read_json::<TrackRecord>(&p) {
                 Ok(mut t) if !t.id.is_empty() => {
                     t.versions.iter_mut().for_each(Version::normalize);
+                    let legacy = t.take_legacy_recording();
+                    if t.versions.iter().any(|v| v.recording.is_empty()) {
+                        let rid = legacy.as_ref().map(|r| r.id.clone()).unwrap_or_else(|| t.id.clone());
+                        for v in t.versions.iter_mut().filter(|v| v.recording.is_empty()) {
+                            v.recording = rid.clone();
+                        }
+                        let new = legacy.filter(|r| !inner.recordings.contains_key(&r.id));
+                        if let Some(r) = &new {
+                            inner.reindex_recording(r);
+                            inner.recordings.insert(r.id.clone(), r.clone());
+                        }
+                        upgraded.push((t.clone(), new));
+                    }
                     inner.reindex_track(&t);
                     inner.tracks.insert(t.id.clone(), t);
                 }
@@ -314,6 +412,16 @@ impl Store {
         inner.load_errors = errors;
         *self.inner.write() = inner;
         *self.lib.write() = library_dir.to_path_buf();
+        // Recording first: a crash in between leaves the old song file, which upgrades again.
+        if !upgraded.is_empty() {
+            log::info!("library: moved {} songs' recordings to recordings/", upgraded.len());
+        }
+        for (t, r) in &upgraded {
+            if let Some(r) = r {
+                self.save_recording(r)?;
+            }
+            self.save_track(t)?;
+        }
         Ok(())
     }
 
@@ -323,6 +431,10 @@ impl Store {
 
     fn save_track(&self, t: &TrackRecord) -> Result<()> {
         write_json(&self.lib_path("tracks", &t.id), t)
+    }
+
+    fn save_recording(&self, r: &RecordingRecord) -> Result<()> {
+        write_json(&self.lib_path("recordings", &r.id), r)
     }
 
     fn save_setlist(&self, s: &Setlist) -> Result<()> {
@@ -338,17 +450,34 @@ impl Store {
         write_json(&self.local.join("file-index.json"), &ix)
     }
 
-    /// Mutates a track and writes its file.
+    fn waveform_path(&self, rec_id: &str) -> PathBuf {
+        self.local.join("waveforms").join(format!("{rec_id}.bin"))
+    }
+
+    /// Mutates a song and writes its file.
     fn with_track<R>(&self, id: &str, f: impl FnOnce(&mut TrackRecord) -> Result<R>) -> Result<R> {
         let mut inner = self.inner.write();
         let id = inner.canonical(id);
-        let t = inner.tracks.get_mut(&id).ok_or_else(|| anyhow!("track {id} not found"))?;
+        let t = inner.tracks.get_mut(&id).ok_or_else(|| anyhow!("song {id} not found"))?;
         let r = f(t)?;
         let t = t.clone();
         inner.reindex_track(&t);
         drop(inner);
         self.save_track(&t)?;
         Ok(r)
+    }
+
+    /// Mutates a recording and writes its file.
+    fn with_recording<R>(&self, id: &str, f: impl FnOnce(&mut RecordingRecord) -> Result<R>) -> Result<R> {
+        let mut inner = self.inner.write();
+        let id = inner.canonical_rec(id);
+        let r = inner.recordings.get_mut(&id).ok_or_else(|| anyhow!("recording {id} not found"))?;
+        let out = f(r)?;
+        let r = r.clone();
+        inner.reindex_recording(&r);
+        drop(inner);
+        self.save_recording(&r)?;
+        Ok(out)
     }
 
     fn with_setlist<R>(&self, id: &str, f: impl FnOnce(&mut Setlist) -> Result<R>) -> Result<R> {
@@ -373,12 +502,13 @@ impl Store {
         Ok(r)
     }
 
-    // ---------------------------------------------------------------- tracks
+    // ---------------------------------------------------------------- songs
 
     pub fn all_tracks(&self) -> Vec<Track> {
         let inner = self.inner.read();
         let stats = inner.play_stats();
-        let mut v: Vec<Track> = inner.tracks.values().map(|t| inner.to_track(t, &stats)).collect();
+        let users = inner.recording_users();
+        let mut v: Vec<Track> = inner.tracks.values().map(|t| inner.to_track(t, &stats, &users)).collect();
         v.sort_by(|a, b| (&a.rec.artist, &a.rec.title).cmp(&(&b.rec.artist, &b.rec.title)));
         v
     }
@@ -387,113 +517,56 @@ impl Store {
         let inner = self.inner.read();
         let id = inner.canonical(id);
         let stats = inner.play_stats();
-        inner.tracks.get(&id).map(|t| inner.to_track(t, &stats)).ok_or_else(|| anyhow!("track {id} not found"))
+        let users = inner.recording_users();
+        inner.tracks.get(&id).map(|t| inner.to_track(t, &stats, &users)).ok_or_else(|| anyhow!("song {id} not found"))
     }
 
-    /// Creates a track with one source and a default version.
-    pub fn insert_track(&self, t: &NewTrack, source: SourceRef) -> Result<Id> {
-        if let Some(existing) = self.track_for_source(&source) {
-            return Ok(existing);
-        }
-        let rec = TrackRecord {
+    /// A new song with one version playing the recording, named after it.
+    pub fn song_from_recording(&self, rec_id: &str, in_library: bool) -> Result<Id> {
+        let r = self.recording(rec_id)?.rec;
+        let song = TrackRecord {
             id: new_id(),
-            title: t.title.clone(),
-            artist: t.artist.clone(),
-            album: t.album.clone(),
-            genre: t.genre.clone(),
-            duration_ms: t.duration_ms,
-            bpm: t.bpm,
-            bpm_source: t.bpm_source.clone(),
-            tag_bpm: if t.bpm_source.as_deref() == Some("tag") { t.bpm } else { None },
-            artwork_url: t.artwork_url.clone(),
+            title: r.title.clone(),
+            artist: r.artist.clone(),
+            album: r.album.clone(),
+            genre: r.genre.clone(),
             added_at: now_ms(),
-            in_library: true,
-            sources: vec![source],
-            versions: vec![Version {
-                id: new_id(),
-                name: "Original".into(),
-                display_name: None,
-                styles: vec![],
-                legacy_style: None,
-                settings: Overrides::default(),
-                comment: String::new(),
-                tags: vec![],
-            }],
+            in_library,
+            versions: vec![original_version(&r.id)],
             ..Default::default()
         };
-        self.save_track(&rec)?;
+        self.save_track(&song)?;
         let mut inner = self.inner.write();
-        inner.reindex_track(&rec);
-        let id = rec.id.clone();
-        inner.tracks.insert(id.clone(), rec);
+        inner.reindex_track(&song);
+        let id = song.id.clone();
+        inner.tracks.insert(id.clone(), song);
         Ok(id)
     }
 
-    pub fn track_for_source(&self, s: &SourceRef) -> Option<Id> {
-        self.inner.read().source_owner.get(s).cloned()
+    /// A song for new audio: the source's recording (created if new) and,
+    /// unless a song already plays it, a song for it.
+    pub fn insert_track(&self, t: &NewTrack, source: SourceRef) -> Result<Id> {
+        let (rid, _) = self.insert_recording(t, source)?;
+        match self.song_for_recording(&rid) {
+            Some(id) => Ok(id),
+            None => self.song_from_recording(&rid, true),
+        }
     }
 
-    pub fn add_source(&self, track_id: &str, s: SourceRef) -> Result<()> {
-        if let Some(owner) = self.track_for_source(&s) {
-            if owner != track_id {
-                return Err(anyhow!("that source already belongs to another track (merge the tracks instead)"));
-            }
-            return Ok(());
-        }
-        self.with_track(track_id, |t| {
-            t.sources.push(s);
-            Ok(())
-        })
+    /// The songs playing a recording.
+    pub fn songs_for_recording(&self, rec_id: &str) -> Vec<Id> {
+        let inner = self.inner.read();
+        let rid = inner.canonical_rec(rec_id);
+        inner.recording_users().remove(&rid).unwrap_or_default()
     }
 
-    pub fn remove_source(&self, track_id: &str, s: &SourceRef) -> Result<()> {
-        self.with_track(track_id, |t| {
-            if t.sources.len() <= 1 {
-                return Err(anyhow!("a track needs at least one source"));
-            }
-            t.sources.retain(|x| x != s);
-            Ok(())
-        })?;
-        self.inner.write().source_owner.remove(s);
-        Ok(())
-    }
-
-    /// Moves the sources and versions of `others` into `keep` and deletes them.
-    /// Setlists and crates keep working because version ids don't change.
-    pub fn merge_tracks(&self, keep: &str, others: &[Id]) -> Result<()> {
-        let mut moved = vec![];
-        {
-            let inner = self.inner.read();
-            for o in others.iter().filter(|o| o.as_str() != keep) {
-                if let Some(t) = inner.tracks.get(o) {
-                    moved.push(t.clone());
-                }
-            }
-        }
-        self.with_track(keep, |k| {
-            for o in &moved {
-                for s in &o.sources {
-                    if !k.sources.contains(s) {
-                        k.sources.push(s.clone());
-                    }
-                }
-                k.versions.extend(o.versions.iter().cloned());
-                k.aliases.push(o.id.clone());
-                k.aliases.extend(o.aliases.iter().cloned());
-                if k.notes.is_empty() {
-                    k.notes = o.notes.clone();
-                }
-            }
-            Ok(())
-        })?;
-        let lib = self.library_dir();
-        let mut inner = self.inner.write();
-        for o in &moved {
-            inner.tracks.remove(&o.id);
-            let _ = fs::remove_file(lib.join("tracks").join(format!("{}.json", o.id)));
-            let _ = fs::remove_file(self.local.join("waveforms").join(format!("{}.bin", o.id)));
-        }
-        Ok(())
+    /// A song playing the recording (one in the library first).
+    pub fn song_for_recording(&self, rec_id: &str) -> Option<Id> {
+        let inner = self.inner.read();
+        let rid = inner.canonical_rec(rec_id);
+        let mut users: Vec<&TrackRecord> = inner.tracks.values().filter(|t| t.versions.iter().any(|v| inner.canonical_rec(&v.recording) == rid)).collect();
+        users.sort_by_key(|t| (!t.in_library, t.added_at));
+        users.first().map(|t| t.id.clone())
     }
 
     pub fn update_track(&self, id: &str, p: &TrackPatch) -> Result<()> {
@@ -502,70 +575,8 @@ impl Store {
             if let Some(v) = &p.artist { t.artist = v.clone(); }
             if let Some(v) = &p.album { t.album = v.clone(); }
             if let Some(v) = &p.genre { t.genre = v.clone(); }
-            if let Some(v) = &p.bpm {
-                t.bpm = *v;
-                t.bpm_source = v.map(|_| p.bpm_source.clone().unwrap_or_else(|| "user".into()));
-            }
-            if let Some(v) = &p.beats_per_bar {
-                t.beats_per_bar = v.or(t.detected_meter);
-                t.meter_source = match v {
-                    Some(_) => Some("user".into()),
-                    None => t.detected_meter.map(|_| "detected".into()),
-                };
-            }
             if let Some(v) = &p.rating { t.rating = *v; }
-            if let Some(v) = &p.gain_db { t.gain_db = *v; }
             if let Some(v) = &p.notes { t.notes = v.clone(); }
-            if let Some(v) = &p.preferred_source { t.preferred_source = v.clone(); }
-            Ok(())
-        })
-    }
-
-    /// A BPM the DJ entered (or from tags), which analysis should use for the meter.
-    pub fn known_bpm(&self, id: &str) -> Option<f64> {
-        self.track(id).ok().filter(|t| t.rec.bpm_source.as_deref() != Some("detected")).and_then(|t| t.rec.bpm)
-    }
-
-    pub fn set_analysis(&self, id: &str, a: &Analysis) -> Result<()> {
-        let id = self.inner.read().canonical(id);
-        if !a.waveform.is_empty() {
-            write_atomic(&self.local.join("waveforms").join(format!("{id}.bin")), &a.waveform)?;
-        }
-        self.with_track(&id, |t| {
-            t.analyzed = true;
-            t.analysis_version = crate::analysis::VERSION;
-            t.loudness_db = a.loudness_db.map(|l| (l * 10.0).round() / 10.0);
-            t.audio_start_ms = a.audio_start_ms;
-            t.audio_end_ms = a.audio_end_ms;
-            if a.fingerprint.is_some() {
-                t.fingerprint = a.fingerprint.clone();
-            }
-            if a.duration_ms > 0 {
-                t.duration_ms = a.duration_ms;
-            }
-            t.detected_bpm = a.bpm;
-            t.detected_meter = a.meter;
-            if t.meter_source.as_deref() != Some("user") {
-                t.beats_per_bar = a.meter;
-                t.meter_source = a.meter.map(|_| "detected".into());
-            }
-            // Never overwrite a BPM the DJ entered (or one from tags).
-            if t.bpm.is_none() || t.bpm_source.as_deref() == Some("detected") {
-                t.bpm = a.bpm;
-                t.bpm_source = a.bpm.map(|_| "detected".into());
-            }
-            Ok(())
-        })
-    }
-
-    /// Sets (`Some`) or clears (`None`) hot cue `slot` on a track.
-    pub fn set_hot_cue(&self, id: &str, slot: u8, ms: Option<i64>) -> Result<()> {
-        self.with_track(id, |t| {
-            t.hot_cues.retain(|c| c.slot != slot);
-            if let Some(ms) = ms {
-                t.hot_cues.push(HotCue { slot, ms: ms.max(0) });
-                t.hot_cues.sort_by_key(|c| c.slot);
-            }
             Ok(())
         })
     }
@@ -577,8 +588,81 @@ impl Store {
         })
     }
 
-    /// Deletes set-only tracks that no setlist or crate references any more.
-    /// `keep` protects tracks that are loaded on a deck.
+    /// Moves the versions of `others` into `keep` and deletes them. Setlists
+    /// and crates keep working because version ids don't change. (The UI asks
+    /// which title etc. to keep first; `separate_versions` undoes it.)
+    pub fn combine_songs(&self, keep: &str, others: &[Id]) -> Result<()> {
+        let keep = self.inner.read().canonical(keep);
+        let moved: Vec<TrackRecord> = {
+            let inner = self.inner.read();
+            others.iter().map(|o| inner.canonical(o)).filter(|o| *o != keep).filter_map(|o| inner.tracks.get(&o).cloned()).collect()
+        };
+        self.with_track(&keep, |k| {
+            for o in &moved {
+                for v in &o.versions {
+                    let mut v = v.clone();
+                    // Two "Original"s: name it after the song it was.
+                    if k.versions.iter().any(|x| x.name == v.name) {
+                        v.name = if o.title.trim().is_empty() || k.versions.iter().any(|x| x.name == o.title) { format!("{} ({})", v.name, k.versions.len() + 1) } else { o.title.clone() };
+                    }
+                    k.versions.push(v);
+                }
+                k.aliases.push(o.id.clone());
+                k.aliases.extend(o.aliases.iter().cloned());
+                if k.notes.is_empty() {
+                    k.notes = o.notes.clone();
+                }
+                k.in_library |= o.in_library;
+            }
+            Ok(())
+        })?;
+        let mut inner = self.inner.write();
+        for o in &moved {
+            inner.tracks.remove(&o.id);
+            let _ = fs::remove_file(self.lib_path("tracks", &o.id));
+        }
+        Ok(())
+    }
+
+    /// Moves versions (of one song) into a new song of their own, named after
+    /// the first one's recording.
+    pub fn separate_versions(&self, version_ids: &[Id]) -> Result<Id> {
+        let first = version_ids.first().ok_or_else(|| anyhow!("no versions given"))?;
+        let (v, tid) = self.version(first)?;
+        let song = self.track(&tid)?;
+        if version_ids.iter().any(|id| !song.rec.versions.iter().any(|v| &v.id == id)) {
+            return Err(anyhow!("the versions must belong to one song"));
+        }
+        if song.rec.versions.iter().all(|v| version_ids.contains(&v.id)) {
+            return Err(anyhow!("those are all of the song's versions"));
+        }
+        let r = self.recording(&v.recording)?.rec;
+        let moved: Vec<Version> = song.rec.versions.iter().filter(|v| version_ids.contains(&v.id)).cloned().collect();
+        self.with_track(&tid, |t| {
+            t.versions.retain(|v| !version_ids.contains(&v.id));
+            Ok(())
+        })?;
+        let new = TrackRecord {
+            id: new_id(),
+            title: r.title,
+            artist: r.artist,
+            album: r.album,
+            genre: r.genre,
+            added_at: now_ms(),
+            in_library: song.rec.in_library,
+            versions: moved,
+            ..Default::default()
+        };
+        self.save_track(&new)?;
+        let mut inner = self.inner.write();
+        inner.reindex_track(&new);
+        let id = new.id.clone();
+        inner.tracks.insert(id.clone(), new);
+        Ok(id)
+    }
+
+    /// Deletes set-only songs that no setlist or crate references any more.
+    /// `keep` protects songs that are loaded on a deck.
     pub fn prune_unused(&self, keep: &[Id]) -> Result<usize> {
         let doomed: Vec<Id> = {
             let inner = self.inner.read();
@@ -605,71 +689,20 @@ impl Store {
         Ok(doomed.len())
     }
 
-    /// Reverts the BPM to the analysed value (`detected`) or the file's tag
-    /// (`tag`, passing the tag value if the record doesn't have it yet).
-    /// Returns `true` if the track must be re-analysed first.
-    pub fn reset_bpm(&self, id: &str, from: &str, tag_bpm: Option<f64>) -> Result<bool> {
-        self.with_track(id, |t| match from {
-            "tag" => {
-                if tag_bpm.is_some() {
-                    t.tag_bpm = tag_bpm;
-                }
-                let b = t.tag_bpm.ok_or_else(|| anyhow!("This song has no BPM in its tags."))?;
-                t.bpm = Some(b);
-                t.bpm_source = Some("tag".into());
-                Ok(false)
-            }
-            "detected" => match t.detected_bpm {
-                Some(b) => {
-                    t.bpm = Some(b);
-                    t.bpm_source = Some("detected".into());
-                    Ok(false)
-                }
-                None => {
-                    // Not analysed since this field existed: clear and re-analyse.
-                    t.bpm = None;
-                    t.bpm_source = None;
-                    Ok(true)
-                }
-            },
-            other => Err(anyhow!("unknown BPM source {other}")),
-        })
-    }
-
-    pub fn waveform(&self, id: &str) -> Option<Vec<u8>> {
-        let id = self.inner.read().canonical(id);
-        fs::read(self.local.join("waveforms").join(format!("{id}.bin"))).ok()
-    }
-
-    /// Tracks with a file on this machine but no analysis (or no cached waveform).
-    pub fn needs_analysis(&self) -> Vec<Id> {
-        let inner = self.inner.read();
-        inner
-            .tracks
-            .values()
-            .filter(|t| {
-                let has_file = t.sources.iter().any(|s| s.kind == "file" && inner.by_hash.contains_key(&s.key));
-                has_file
-                    && (!t.analyzed
-                        || t.analysis_version < crate::analysis::VERSION
-                        || !self.local.join("waveforms").join(format!("{}.bin", t.id)).exists())
-            })
-            .map(|t| t.id.clone())
-            .collect()
-    }
-
+    /// Deletes songs (their versions leave setlists and crates). Their
+    /// recordings stay, hidden, unless they're Spotify-only and nothing else
+    /// plays them (they can be added from Spotify again).
     pub fn delete_tracks(&self, ids: &[Id]) -> Result<()> {
-        let lib = self.library_dir();
         let mut changed_setlists = vec![];
         let mut changed_crates = vec![];
+        let mut recs: Vec<Id> = vec![];
         {
             let mut inner = self.inner.write();
             for id in ids {
-                let Some(t) = inner.tracks.remove(id) else { continue };
+                let id = inner.canonical(id);
+                let Some(t) = inner.tracks.remove(&id) else { continue };
                 let vids: Vec<Id> = t.versions.iter().map(|v| v.id.clone()).collect();
-                for s in &t.sources {
-                    inner.source_owner.remove(s);
-                }
+                recs.extend(t.versions.iter().map(|v| inner.canonical_rec(&v.recording)));
                 for v in &vids {
                     inner.version_owner.remove(v);
                 }
@@ -692,8 +725,7 @@ impl Store {
                         changed_crates.push(c.clone());
                     }
                 }
-                let _ = fs::remove_file(lib.join("tracks").join(format!("{id}.json")));
-                let _ = fs::remove_file(self.local.join("waveforms").join(format!("{id}.bin")));
+                let _ = fs::remove_file(self.lib_path("tracks", &id));
             }
         }
         for s in changed_setlists {
@@ -702,7 +734,16 @@ impl Store {
         for c in changed_crates {
             self.save_crate(&c)?;
         }
-        Ok(())
+        let users = self.inner.read().recording_users();
+        let spotify_only: Vec<Id> = {
+            let inner = self.inner.read();
+            recs.iter()
+                .filter(|r| !users.contains_key(*r))
+                .filter(|r| inner.recordings.get(*r).is_some_and(|x| x.sources.iter().all(|s| s.kind == "spotify")))
+                .cloned()
+                .collect()
+        };
+        self.delete_recordings(&spotify_only)
     }
 
     /// Songs played in setlists (newest first). Deleting a setlist removes its plays.
@@ -734,19 +775,334 @@ impl Store {
         out
     }
 
+    // ---------------------------------------------------------------- recordings
+
+    /// Every recording (hidden ones too), with the songs that play it.
+    pub fn all_recordings(&self) -> Vec<Recording> {
+        let inner = self.inner.read();
+        let users = inner.recording_users();
+        let mut v: Vec<Recording> = inner.recordings.values().map(|r| inner.to_recording(r, &users)).collect();
+        v.sort_by(|a, b| (&a.rec.artist, &a.rec.title, &a.rec.id).cmp(&(&b.rec.artist, &b.rec.title, &b.rec.id)));
+        v
+    }
+
+    pub fn recording(&self, id: &str) -> Result<Recording> {
+        let inner = self.inner.read();
+        let id = inner.canonical_rec(id);
+        let users = inner.recording_users();
+        inner.recordings.get(&id).map(|r| inner.to_recording(r, &users)).ok_or_else(|| anyhow!("recording {id} not found"))
+    }
+
+    /// A version and the recording it plays.
+    pub fn version_recording(&self, version_id: &str) -> Result<(Version, Recording)> {
+        let (v, _) = self.version(version_id)?;
+        let r = self.recording(&v.recording)?;
+        Ok((v, r))
+    }
+
+    /// The source's recording, created if it's new (`true`). No song is made.
+    pub fn insert_recording(&self, t: &NewTrack, source: SourceRef) -> Result<(Id, bool)> {
+        if let Some(existing) = self.recording_for_source(&source) {
+            return Ok((existing, false));
+        }
+        let rec = RecordingRecord {
+            id: new_id(),
+            title: t.title.clone(),
+            artist: t.artist.clone(),
+            album: t.album.clone(),
+            genre: t.genre.clone(),
+            duration_ms: t.duration_ms,
+            bpm: t.bpm,
+            bpm_source: t.bpm_source.clone(),
+            tag_bpm: if t.bpm_source.as_deref() == Some("tag") { t.bpm } else { None },
+            artwork_url: t.artwork_url.clone(),
+            added_at: now_ms(),
+            sources: vec![source],
+            ..Default::default()
+        };
+        self.save_recording(&rec)?;
+        let mut inner = self.inner.write();
+        inner.reindex_recording(&rec);
+        let id = rec.id.clone();
+        inner.recordings.insert(id.clone(), rec);
+        Ok((id, true))
+    }
+
+    pub fn recording_for_source(&self, s: &SourceRef) -> Option<Id> {
+        self.inner.read().source_owner.get(s).cloned()
+    }
+
+    pub fn add_source(&self, rec_id: &str, s: SourceRef) -> Result<()> {
+        if let Some(owner) = self.recording_for_source(&s) {
+            if owner != self.inner.read().canonical_rec(rec_id) {
+                return Err(anyhow!("that source already belongs to another recording (mark the two as the same recording instead)"));
+            }
+            return Ok(());
+        }
+        self.with_recording(rec_id, |r| {
+            r.sources.push(s);
+            Ok(())
+        })
+    }
+
+    pub fn remove_source(&self, rec_id: &str, s: &SourceRef) -> Result<()> {
+        self.with_recording(rec_id, |r| {
+            if r.sources.len() <= 1 {
+                return Err(anyhow!("a recording needs at least one source"));
+            }
+            r.sources.retain(|x| x != s);
+            Ok(())
+        })?;
+        self.inner.write().source_owner.remove(s);
+        Ok(())
+    }
+
+    pub fn update_recording(&self, id: &str, p: &RecordingPatch) -> Result<()> {
+        self.with_recording(id, |t| {
+            if let Some(v) = &p.bpm {
+                t.bpm = *v;
+                t.bpm_source = v.map(|_| p.bpm_source.clone().unwrap_or_else(|| "user".into()));
+            }
+            if let Some(v) = &p.beats_per_bar {
+                t.beats_per_bar = v.or(t.detected_meter);
+                t.meter_source = match v {
+                    Some(_) => Some("user".into()),
+                    None => t.detected_meter.map(|_| "detected".into()),
+                };
+            }
+            if let Some(v) = &p.gain_db { t.gain_db = *v; }
+            if let Some(v) = &p.preferred_source { t.preferred_source = v.clone(); }
+            Ok(())
+        })
+    }
+
+    /// Marks recordings as the same audio (e.g. a file and its Spotify
+    /// track): their sources join `keep` and versions playing them play
+    /// `keep`. (The UI asks which BPM etc. to keep first; `split_source`
+    /// undoes it.)
+    pub fn merge_recordings(&self, keep: &str, others: &[Id]) -> Result<()> {
+        let keep = self.inner.read().canonical_rec(keep);
+        let moved: Vec<RecordingRecord> = {
+            let inner = self.inner.read();
+            others.iter().map(|o| inner.canonical_rec(o)).filter(|o| *o != keep).filter_map(|o| inner.recordings.get(&o).cloned()).collect()
+        };
+        self.with_recording(&keep, |k| {
+            for o in &moved {
+                for s in &o.sources {
+                    if !k.sources.contains(s) {
+                        k.sources.push(s.clone());
+                    }
+                }
+                k.aliases.push(o.id.clone());
+                k.aliases.extend(o.aliases.iter().cloned());
+                if k.hot_cues.is_empty() {
+                    k.hot_cues = o.hot_cues.clone();
+                }
+            }
+            Ok(())
+        })?;
+        // Versions follow (their files name the recording directly).
+        let ids: Vec<&Id> = moved.iter().map(|o| &o.id).collect();
+        let songs: Vec<Id> = {
+            let inner = self.inner.read();
+            inner.tracks.values().filter(|t| t.versions.iter().any(|v| ids.contains(&&v.recording))).map(|t| t.id.clone()).collect()
+        };
+        for sid in songs {
+            self.with_track(&sid, |t| {
+                for v in t.versions.iter_mut().filter(|v| ids.contains(&&v.recording)) {
+                    v.recording = keep.clone();
+                }
+                Ok(())
+            })?;
+        }
+        let mut inner = self.inner.write();
+        for o in &moved {
+            inner.recordings.remove(&o.id);
+            let _ = fs::remove_file(self.lib_path("recordings", &o.id));
+            let _ = fs::remove_file(self.waveform_path(&o.id));
+        }
+        Ok(())
+    }
+
+    /// Takes one source out of a recording into a new recording of its own
+    /// (analysed afresh); `versions` switch to it. Undoes `merge_recordings`,
+    /// including merges made before recordings were separate.
+    pub fn split_source(&self, rec_id: &str, source: &SourceRef, versions: &[Id]) -> Result<Id> {
+        let old = self.recording(rec_id)?.rec;
+        if !old.sources.contains(source) {
+            return Err(anyhow!("that source isn't part of this recording"));
+        }
+        if old.sources.len() <= 1 {
+            return Err(anyhow!("a recording needs at least one source"));
+        }
+        self.remove_source(&old.id, source)?;
+        let new = RecordingRecord {
+            id: new_id(),
+            title: old.title.clone(),
+            artist: old.artist.clone(),
+            album: old.album.clone(),
+            genre: old.genre.clone(),
+            duration_ms: old.duration_ms,
+            artwork_url: old.artwork_url.clone(),
+            added_at: now_ms(),
+            sources: vec![source.clone()],
+            ..Default::default()
+        };
+        self.save_recording(&new)?;
+        {
+            let mut inner = self.inner.write();
+            inner.reindex_recording(&new);
+            inner.recordings.insert(new.id.clone(), new.clone());
+        }
+        for vid in versions {
+            self.version_update(vid, &VersionPatch { recording: Some(new.id.clone()), ..Default::default() })?;
+        }
+        Ok(new.id)
+    }
+
+    /// Deletes recordings no song plays, unless a file of theirs is on this
+    /// machine (the next scan would only add it again: it stays hidden).
+    pub fn delete_recordings(&self, ids: &[Id]) -> Result<()> {
+        let users = self.inner.read().recording_users();
+        for id in ids {
+            let r = self.recording(id)?;
+            if users.contains_key(&r.rec.id) {
+                return Err(anyhow!("“{}” is played by a song; delete the song (or its version) first", r.rec.title));
+            }
+            if !r.files.is_empty() {
+                return Err(anyhow!("“{}” is a file in the library folder ({}); it stays hidden unless the file is removed", r.rec.title, r.files[0]));
+            }
+            let mut inner = self.inner.write();
+            inner.recordings.remove(&r.rec.id);
+            for s in &r.rec.sources {
+                inner.source_owner.remove(s);
+            }
+            drop(inner);
+            let _ = fs::remove_file(self.lib_path("recordings", &r.rec.id));
+            let _ = fs::remove_file(self.waveform_path(&r.rec.id));
+        }
+        Ok(())
+    }
+
+    /// A BPM the DJ entered (or from tags), which analysis should use for the meter.
+    pub fn known_bpm(&self, rec_id: &str) -> Option<f64> {
+        self.recording(rec_id).ok().filter(|r| r.rec.bpm_source.as_deref() != Some("detected")).and_then(|r| r.rec.bpm)
+    }
+
+    pub fn set_analysis(&self, rec_id: &str, a: &Analysis) -> Result<()> {
+        let id = self.inner.read().canonical_rec(rec_id);
+        if !a.waveform.is_empty() {
+            write_atomic(&self.waveform_path(&id), &a.waveform)?;
+        }
+        self.with_recording(&id, |t| {
+            t.analyzed = true;
+            t.analysis_version = crate::analysis::VERSION;
+            t.loudness_db = a.loudness_db.map(|l| (l * 10.0).round() / 10.0);
+            t.audio_start_ms = a.audio_start_ms;
+            t.audio_end_ms = a.audio_end_ms;
+            if a.fingerprint.is_some() {
+                t.fingerprint = a.fingerprint.clone();
+            }
+            if a.duration_ms > 0 {
+                t.duration_ms = a.duration_ms;
+            }
+            t.detected_bpm = a.bpm;
+            t.detected_meter = a.meter;
+            if t.meter_source.as_deref() != Some("user") {
+                t.beats_per_bar = a.meter;
+                t.meter_source = a.meter.map(|_| "detected".into());
+            }
+            // Never overwrite a BPM the DJ entered (or one from tags).
+            if t.bpm.is_none() || t.bpm_source.as_deref() == Some("detected") {
+                t.bpm = a.bpm;
+                t.bpm_source = a.bpm.map(|_| "detected".into());
+            }
+            Ok(())
+        })
+    }
+
+    /// Sets (`Some`) or clears (`None`) hot cue `slot` on a recording.
+    pub fn set_hot_cue(&self, rec_id: &str, slot: u8, ms: Option<i64>) -> Result<()> {
+        self.with_recording(rec_id, |t| {
+            t.hot_cues.retain(|c| c.slot != slot);
+            if let Some(ms) = ms {
+                t.hot_cues.push(HotCue { slot, ms: ms.max(0) });
+                t.hot_cues.sort_by_key(|c| c.slot);
+            }
+            Ok(())
+        })
+    }
+
+    /// Reverts the BPM to the analysed value (`detected`) or the file's tag
+    /// (`tag`, passing the tag value if the record doesn't have it yet).
+    /// Returns `true` if the recording must be re-analysed first.
+    pub fn reset_bpm(&self, rec_id: &str, from: &str, tag_bpm: Option<f64>) -> Result<bool> {
+        self.with_recording(rec_id, |t| match from {
+            "tag" => {
+                if tag_bpm.is_some() {
+                    t.tag_bpm = tag_bpm;
+                }
+                let b = t.tag_bpm.ok_or_else(|| anyhow!("This song has no BPM in its tags."))?;
+                t.bpm = Some(b);
+                t.bpm_source = Some("tag".into());
+                Ok(false)
+            }
+            "detected" => match t.detected_bpm {
+                Some(b) => {
+                    t.bpm = Some(b);
+                    t.bpm_source = Some("detected".into());
+                    Ok(false)
+                }
+                None => {
+                    // Not analysed since this field existed: clear and re-analyse.
+                    t.bpm = None;
+                    t.bpm_source = None;
+                    Ok(true)
+                }
+            },
+            other => Err(anyhow!("unknown BPM source {other}")),
+        })
+    }
+
+    pub fn waveform(&self, rec_id: &str) -> Option<Vec<u8>> {
+        let id = self.inner.read().canonical_rec(rec_id);
+        fs::read(self.waveform_path(&id)).ok()
+    }
+
+    /// Recordings with a file on this machine but no analysis (or no cached waveform).
+    pub fn needs_analysis(&self) -> Vec<Id> {
+        let inner = self.inner.read();
+        inner
+            .recordings
+            .values()
+            .filter(|t| {
+                let has_file = t.sources.iter().any(|s| s.kind == "file" && inner.by_hash.contains_key(&s.key));
+                has_file && (!t.analyzed || t.analysis_version < crate::analysis::VERSION || !self.waveform_path(&t.id).exists())
+            })
+            .map(|t| t.id.clone())
+            .collect()
+    }
+
     // ---------------------------------------------------------------- versions
 
-    /// A version and the id of the track that owns it.
+    /// A version and the id of the song that owns it.
     pub fn version(&self, id: &str) -> Result<(Version, Id)> {
         let inner = self.inner.read();
         let tid = inner.version_owner.get(id).ok_or_else(|| anyhow!("version {id} not found"))?;
-        let t = inner.tracks.get(tid).ok_or_else(|| anyhow!("track {tid} not found"))?;
-        let v = t.versions.iter().find(|v| v.id == id).ok_or_else(|| anyhow!("version {id} not found"))?;
-        Ok((v.clone(), tid.clone()))
+        let t = inner.tracks.get(tid).ok_or_else(|| anyhow!("song {tid} not found"))?;
+        let mut v = t.versions.iter().find(|v| v.id == id).ok_or_else(|| anyhow!("version {id} not found"))?.clone();
+        v.recording = inner.canonical_rec(&v.recording);
+        Ok((v, tid.clone()))
     }
 
+    /// Adds a version to a song (playing `v.recording`, or the song's first version's recording).
     pub fn version_create(&self, track_id: &str, mut v: Version) -> Result<Version> {
         v.id = new_id();
+        if v.recording.is_empty() {
+            v.recording = self.track(track_id)?.rec.versions.first().map(|f| f.recording.clone()).ok_or_else(|| anyhow!("that song has no recording"))?;
+        } else {
+            self.recording(&v.recording)?;
+        }
         let out = v.clone();
         self.with_track(track_id, |t| {
             t.versions.push(v);
@@ -757,9 +1113,13 @@ impl Store {
 
     pub fn version_update(&self, id: &str, p: &VersionPatch) -> Result<Version> {
         let (_, tid) = self.version(id)?;
+        if let Some(r) = &p.recording {
+            self.recording(r)?;
+        }
         self.with_track(&tid, |t| {
             let v = t.versions.iter_mut().find(|v| v.id == id).ok_or_else(|| anyhow!("version not found"))?;
             if let Some(x) = &p.name { v.name = x.clone(); }
+            if let Some(x) = &p.recording { v.recording = x.clone(); }
             if let Some(x) = &p.display_name { v.display_name = x.clone().filter(|s| !s.trim().is_empty()); }
             if let Some(x) = &p.styles { v.styles = dedup(x); }
             if let Some(x) = &p.target_bpm { v.settings.target_bpm = *x; }
@@ -788,7 +1148,7 @@ impl Store {
         }
         self.with_track(&tid, |t| {
             if t.versions.len() <= 1 {
-                return Err(anyhow!("a track needs at least one version"));
+                return Err(anyhow!("a song needs at least one version"));
             }
             t.versions.retain(|v| v.id != id);
             Ok(())
@@ -835,8 +1195,8 @@ impl Store {
         inner.rebuild_hash_index();
     }
 
-    pub fn track_file_paths(&self, track_id: &str) -> Vec<String> {
-        self.track(track_id).map(|t| t.files).unwrap_or_default()
+    pub fn recording_file_paths(&self, rec_id: &str) -> Vec<String> {
+        self.recording(rec_id).map(|r| r.files).unwrap_or_default()
     }
 
     // ---------------------------------------------------------------- crates
@@ -1293,27 +1653,46 @@ mod tests {
         (base.join("lib"), base.join("local"))
     }
 
+    fn file(k: &str) -> SourceRef {
+        SourceRef { kind: "file".into(), key: k.into() }
+    }
+
+    fn spotify(k: &str) -> SourceRef {
+        SourceRef { kind: "spotify".into(), key: format!("spotify:track:{k}") }
+    }
+
+    fn song(store: &Store, title: &str, src: SourceRef) -> Id {
+        store.insert_track(&NewTrack { title: title.into(), ..Default::default() }, src).unwrap()
+    }
+
+    /// The first version of a song, and the recording it plays.
+    fn first(store: &Store, song: &str) -> (Id, Id) {
+        let v = store.track(song).unwrap().rec.versions[0].clone();
+        (v.id, v.recording)
+    }
+
     #[test]
     fn bpm_can_be_reset_after_editing() {
         let (lib, local) = temp_dirs();
         let store = Store::open(&lib, &local).unwrap();
         let nt = NewTrack { title: "W".into(), bpm: Some(120.0), bpm_source: Some("tag".into()), ..Default::default() };
-        let id = store.insert_track(&nt, SourceRef { kind: "file".into(), key: "h".into() }).unwrap();
-        store.set_analysis(&id, &Analysis { bpm: Some(93.1), ..Default::default() }).unwrap();
+        let id = store.insert_track(&nt, file("h")).unwrap();
+        let (_, rid) = first(&store, &id);
+        store.set_analysis(&rid, &Analysis { bpm: Some(93.1), ..Default::default() }).unwrap();
         // Tag BPM wins over analysis, but the analysed value is remembered.
-        assert_eq!(store.track(&id).unwrap().rec.bpm, Some(120.0));
-        store.update_track(&id, &TrackPatch { bpm: Some(Some(139.6)), ..Default::default() }).unwrap();
-        assert_eq!(store.track(&id).unwrap().rec.bpm_source.as_deref(), Some("user"));
+        assert_eq!(store.recording(&rid).unwrap().rec.bpm, Some(120.0));
+        store.update_recording(&rid, &RecordingPatch { bpm: Some(Some(139.6)), ..Default::default() }).unwrap();
+        assert_eq!(store.recording(&rid).unwrap().rec.bpm_source.as_deref(), Some("user"));
 
-        assert!(!store.reset_bpm(&id, "detected", None).unwrap());
-        let t = store.track(&id).unwrap().rec;
+        assert!(!store.reset_bpm(&rid, "detected", None).unwrap());
+        let t = store.recording(&rid).unwrap().rec;
         assert_eq!((t.bpm, t.bpm_source.as_deref()), (Some(93.1), Some("detected")));
-        assert!(!store.reset_bpm(&id, "tag", None).unwrap());
-        assert_eq!(store.track(&id).unwrap().rec.bpm, Some(120.0));
+        assert!(!store.reset_bpm(&rid, "tag", None).unwrap());
+        assert_eq!(store.recording(&rid).unwrap().rec.bpm, Some(120.0));
 
         // Survives a reload from disk.
         let store2 = Store::open(&lib, &local).unwrap();
-        assert_eq!(store2.track(&id).unwrap().rec.detected_bpm, Some(93.1));
+        assert_eq!(store2.recording(&rid).unwrap().rec.detected_bpm, Some(93.1));
         let _ = fs::remove_dir_all(lib.parent().unwrap());
     }
 
@@ -1321,10 +1700,9 @@ mod tests {
     fn set_only_tracks_are_pruned_when_unused() {
         let (lib, local) = temp_dirs();
         let store = Store::open(&lib, &local).unwrap();
-        let src = SourceRef { kind: "spotify".into(), key: "spotify:track:abc".into() };
-        let id = store.insert_track(&NewTrack { title: "S".into(), ..Default::default() }, src).unwrap();
+        let id = song(&store, "S", spotify("abc"));
+        let (vid, rid) = first(&store, &id);
         store.set_in_library(&id, false).unwrap();
-        let vid = store.track(&id).unwrap().rec.versions[0].id.clone();
         let sid = store.setlist_create("Set", "live", None, None).unwrap();
         let eids = store.entries_insert(&sid, None, &[NewEntry { version_id: Some(vid), ..Default::default() }]).unwrap();
         assert_eq!(store.prune_unused(&[]).unwrap(), 0, "still used by the set");
@@ -1335,6 +1713,8 @@ mod tests {
         assert_eq!(store.prune_unused(&[id.clone()]).unwrap(), 0, "protected while on a deck");
         assert_eq!(store.prune_unused(&[]).unwrap(), 1);
         assert!(store.track(&id).is_err());
+        // Its Spotify-only recording goes with it.
+        assert!(store.recording(&rid).is_err());
         let _ = fs::remove_dir_all(lib.parent().unwrap());
     }
 
@@ -1342,9 +1722,8 @@ mod tests {
     fn styles_are_labels_and_crates_mix_styles() {
         let (lib, local) = temp_dirs();
         let store = Store::open(&lib, &local).unwrap();
-        let src = |k: &str| SourceRef { kind: "file".into(), key: k.into() };
-        let a = store.insert_track(&NewTrack { title: "A".into(), ..Default::default() }, src("a")).unwrap();
-        let b = store.insert_track(&NewTrack { title: "B".into(), ..Default::default() }, src("b")).unwrap();
+        let a = song(&store, "A", file("a"));
+        let b = song(&store, "B", file("b"));
         let va = store.track(&a).unwrap().rec.versions[0].id.clone();
         let vb = store.track(&b).unwrap().rec.versions[0].id.clone();
 
@@ -1392,7 +1771,7 @@ mod tests {
     fn plays_and_history_come_from_setlists() {
         let (lib, local) = temp_dirs();
         let store = Store::open(&lib, &local).unwrap();
-        let tid = store.insert_track(&NewTrack { title: "S".into(), ..Default::default() }, SourceRef { kind: "file".into(), key: "h".into() }).unwrap();
+        let tid = song(&store, "S", file("h"));
         let vid = store.track(&tid).unwrap().rec.versions[0].id.clone();
         let mut sets = vec![];
         for _ in 0..2 {
@@ -1424,12 +1803,12 @@ mod tests {
     fn roundtrip_through_files() {
         let (lib, local) = temp_dirs();
         let store = Store::open(&lib, &local).unwrap();
-        let tid = store
-            .insert_track(&NewTrack { title: "Song".into(), ..Default::default() }, SourceRef { kind: "file".into(), key: "h1".into() })
-            .unwrap();
+        let tid = song(&store, "Song", file("h1"));
+        let (_, rid) = first(&store, &tid);
         assert!(store.track(&tid).unwrap().missing);
         store.upsert_file("/music/a.flac", FileEntry { hash: "h1".into(), size: 1, mtime: 2, root: None });
-        assert_eq!(store.track(&tid).unwrap().files, vec!["/music/a.flac".to_string()]);
+        assert_eq!(store.recording(&rid).unwrap().files, vec!["/music/a.flac".to_string()]);
+        assert!(!store.track(&tid).unwrap().missing);
         store.save_index().unwrap();
 
         let v = store
@@ -1438,6 +1817,7 @@ mod tests {
                 Version {
                     id: String::new(),
                     name: "Rotary @150".into(),
+                    recording: String::new(),
                     display_name: None,
                     styles: vec!["rotary-waltz".into()],
                     legacy_style: None,
@@ -1447,6 +1827,7 @@ mod tests {
                 },
             )
             .unwrap();
+        assert_eq!(v.recording, rid, "a new version plays the song's recording");
         let sid = store.setlist_create("Social", "preset", None, None).unwrap();
         let mk = |n: &str| NewEntry { note: n.into(), ..Default::default() };
         store.entries_insert(&sid, None, &[mk("a"), mk("b"), mk("c")]).unwrap();
@@ -1462,27 +1843,154 @@ mod tests {
         assert!(store2.load_errors().is_empty(), "{:?}", store2.load_errors());
         let t = store2.track(&tid).unwrap();
         assert_eq!(t.rec.versions.len(), 2);
+        assert_eq!(t.recordings.len(), 1);
         assert_eq!(t.play_count, 1);
-        assert_eq!(t.files.len(), 1);
+        assert_eq!(t.recordings[0].files.len(), 1);
         let (e, _) = store2.entry(&ids[0]).unwrap();
         assert_eq!(e.overrides.target_bpm, Some(148.0));
         assert_eq!(store2.version(&v.id).unwrap().1, tid);
-
-        // Merging keeps version ids (and so setlist references) intact.
-        let sp = store2
-            .insert_track(&NewTrack { title: "Song".into(), ..Default::default() }, SourceRef { kind: "spotify".into(), key: "spotify:track:x".into() })
-            .unwrap();
-        store2.merge_tracks(&tid, &[sp.clone()]).unwrap();
-        let t = store2.track(&tid).unwrap();
-        assert_eq!(t.rec.sources.len(), 2);
-        assert_eq!(t.rec.versions.len(), 3);
-        assert_eq!(store2.track(&sp).unwrap().rec.id, tid, "old id resolves via alias");
 
         // A hand-edited, broken file is reported instead of failing the load.
         fs::write(lib.join("tracks").join("broken.json"), "{ not json").unwrap();
         let store3 = Store::open(&lib, &local).unwrap();
         assert_eq!(store3.load_errors().len(), 1);
         assert_eq!(store3.all_tracks().len(), 1);
+        let _ = fs::remove_dir_all(lib.parent().unwrap());
+    }
+
+    #[test]
+    fn older_songs_move_their_recording_out() {
+        let (lib, local) = temp_dirs();
+        fs::create_dir_all(lib.join("tracks")).unwrap();
+        // A song from before recordings were separate, merged from two (a file and its Spotify track).
+        let old = r#"{"id":"s1","title":"Song","artist":"A","album":"","durationMs":180000,"bpm":121.5,"bpmSource":"user",
+            "beatsPerBar":4,"meterSource":"detected","analyzed":true,"analysisVersion":4,"addedAt":5,"rating":3,
+            "sources":[{"kind":"file","key":"h1"},{"kind":"spotify","key":"spotify:track:x"}],
+            "hotCues":[{"slot":1,"ms":1000}],"aliases":["s2"],
+            "versions":[{"id":"v1","name":"Original","styles":["polka"]},{"id":"v2","name":"Short","cueOutMs":60000}]}"#;
+        fs::write(lib.join("tracks").join("s1.json"), old).unwrap();
+        let store = Store::open(&lib, &local).unwrap();
+        assert!(store.load_errors().is_empty(), "{:?}", store.load_errors());
+        let t = store.track("s1").unwrap();
+        assert_eq!(t.rec.rating, Some(3));
+        assert!(t.rec.versions.iter().all(|v| v.recording == "s1"), "the recording keeps the song's id (waveforms stay valid)");
+        let r = store.recording("s1").unwrap().rec;
+        assert_eq!((r.bpm, r.bpm_source.as_deref(), r.beats_per_bar, r.analysis_version), (Some(121.5), Some("user"), Some(4), 4));
+        assert_eq!(r.sources.len(), 2);
+        assert_eq!(r.hot_cues.len(), 1);
+        assert_eq!(r.title, "Song");
+        assert_eq!(store.track("s2").unwrap().rec.id, "s1", "a merged song's old id still resolves");
+        // Both files were rewritten in the new form; loading again changes nothing.
+        let text = fs::read_to_string(lib.join("tracks").join("s1.json")).unwrap();
+        assert!(!text.contains("sources") && !text.contains("bpm") && text.contains("\"recording\": \"s1\""), "{text}");
+        assert!(lib.join("recordings").join("s1.json").exists());
+        let again = Store::open(&lib, &local).unwrap();
+        assert_eq!(again.recording("s1").unwrap().rec, r);
+
+        // The old merge can be undone: the Spotify track becomes a recording
+        // of its own, and the short version plays it.
+        let new = again.split_source("s1", &spotify("x"), &["v2".to_string()]).unwrap();
+        assert_eq!(again.recording("s1").unwrap().rec.sources, vec![file("h1")]);
+        assert_eq!(again.recording(&new).unwrap().rec.sources, vec![spotify("x")]);
+        assert!(!again.recording(&new).unwrap().rec.analyzed, "analysed afresh");
+        assert_eq!(again.version("v2").unwrap().0.recording, new);
+        assert_eq!(again.recording_for_source(&spotify("x")), Some(new.clone()));
+        // … and the short version can become a song of its own.
+        let s = again.separate_versions(&["v2".to_string()]).unwrap();
+        assert_eq!(again.track(&s).unwrap().rec.versions[0].id, "v2");
+        assert_eq!(again.track("s1").unwrap().rec.versions.len(), 1);
+        let _ = fs::remove_dir_all(lib.parent().unwrap());
+    }
+
+    #[test]
+    fn songs_combine_and_separate() {
+        let (lib, local) = temp_dirs();
+        let store = Store::open(&lib, &local).unwrap();
+        // Two people's edits for one line dance.
+        let a = song(&store, "Barbie (RP edit)", file("a"));
+        let b = song(&store, "Barbie (Lucas edit)", file("b"));
+        let (vb, rb) = first(&store, &b);
+        let sid = store.setlist_create("Set", "live", None, None).unwrap();
+        store.entries_insert(&sid, None, &[NewEntry { version_id: Some(vb.clone()), ..Default::default() }]).unwrap();
+
+        store.combine_songs(&a, &[b.clone()]).unwrap();
+        let t = store.track(&a).unwrap();
+        assert_eq!(t.rec.versions.len(), 2);
+        assert_eq!(t.rec.versions[1].name, "Barbie (Lucas edit)", "named after the song it was, not a second “Original”");
+        assert_eq!(t.recordings.len(), 2, "each edit keeps its own audio");
+        assert_eq!(store.version(&vb).unwrap().1, a, "set entries follow");
+        assert_eq!(store.track(&b).unwrap().rec.id, a, "the old id resolves");
+        assert_eq!(store.all_tracks().len(), 1);
+        assert!(store.separate_versions(&t.rec.versions.iter().map(|v| v.id.clone()).collect::<Vec<_>>()).is_err(), "one must stay");
+
+        // Undone: the edit is a song again, named after its recording.
+        let back = store.separate_versions(&[vb.clone()]).unwrap();
+        let t = store.track(&back).unwrap();
+        assert_eq!(t.rec.title, "Barbie (Lucas edit)");
+        assert_eq!(t.recordings[0].rec.id, rb);
+        assert_eq!(store.version(&vb).unwrap().1, back);
+        let _ = fs::remove_dir_all(lib.parent().unwrap());
+    }
+
+    #[test]
+    fn recordings_merge_and_split() {
+        let (lib, local) = temp_dirs();
+        let store = Store::open(&lib, &local).unwrap();
+        let f = song(&store, "Song", file("h"));
+        let s = song(&store, "Song (Spotify)", spotify("x"));
+        let (vf, rf) = first(&store, &f);
+        let (vs, rs) = first(&store, &s);
+        store.set_hot_cue(&rs, 2, Some(500)).unwrap();
+
+        // The same audio: one recording; the songs stay as they are.
+        store.merge_recordings(&rf, &[rs.clone()]).unwrap();
+        assert_eq!(store.recording(&rf).unwrap().rec.sources, vec![file("h"), spotify("x")]);
+        assert_eq!(store.recording(&rf).unwrap().rec.hot_cues.len(), 1, "cues come along when the kept one has none");
+        assert_eq!(store.version(&vs).unwrap().0.recording, rf);
+        assert_eq!(store.recording(&rs).unwrap().rec.id, rf, "the old id resolves");
+        assert_eq!(store.recording(&rf).unwrap().songs.len(), 2);
+        assert_eq!(store.all_tracks().len(), 2);
+        let reloaded = Store::open(&lib, &local).unwrap();
+        assert_eq!(reloaded.version(&vs).unwrap().0.recording, rf);
+
+        // Undone.
+        let back = reloaded.split_source(&rf, &spotify("x"), &[vs.clone()]).unwrap();
+        assert_eq!(reloaded.version(&vs).unwrap().0.recording, back);
+        assert_eq!(reloaded.version(&vf).unwrap().0.recording, rf);
+        assert!(reloaded.split_source(&rf, &file("h"), &[]).is_err(), "a recording keeps one source");
+        let _ = fs::remove_dir_all(lib.parent().unwrap());
+    }
+
+    #[test]
+    fn recordings_without_songs_are_hidden() {
+        let (lib, local) = temp_dirs();
+        let store = Store::open(&lib, &local).unwrap();
+        let a = song(&store, "Walk Like an Egyptian", file("h"));
+        let (_, r) = first(&store, &a);
+        store.upsert_file("/music/w.flac", FileEntry { hash: "h".into(), size: 1, mtime: 2, root: None });
+        // A second song (another line dance) plays the same recording.
+        let b = store.song_from_recording(&r, true).unwrap();
+        assert_eq!(store.recording(&r).unwrap().songs.len(), 2);
+        store.delete_tracks(&[a.clone()]).unwrap();
+        assert_eq!(store.recording(&r).unwrap().songs, vec![b.clone()]);
+        store.delete_tracks(&[b]).unwrap();
+        // No song plays it: hidden, but still there (its file is in the library folder).
+        let hidden = store.recording(&r).unwrap();
+        assert!(hidden.songs.is_empty());
+        assert!(store.all_tracks().is_empty());
+        assert!(store.delete_recordings(&[r.clone()]).is_err(), "the next scan would only add it again");
+        // Scanning the file again finds the recording and makes no song.
+        assert_eq!(store.insert_recording(&NewTrack::default(), file("h")).unwrap(), (r.clone(), false));
+        assert!(store.all_tracks().is_empty());
+        // Shown again on request.
+        let c = store.song_from_recording(&r, true).unwrap();
+        assert_eq!(store.track(&c).unwrap().rec.title, "Walk Like an Egyptian");
+        // Without its file, a hidden recording can be deleted.
+        store.delete_tracks(&[c]).unwrap();
+        store.remove_file("/music/w.flac");
+        store.delete_recordings(&[r.clone()]).unwrap();
+        assert!(store.recording(&r).is_err());
+        assert!(store.recording_for_source(&file("h")).is_none());
         let _ = fs::remove_dir_all(lib.parent().unwrap());
     }
 }

@@ -51,12 +51,8 @@ pub async fn track_get(app: S<'_>, id: Id) -> Res<Track> {
 pub async fn track_update(app: S<'_>, id: Id, patch: serde_json::Value) -> Res<Track> {
     let patch: TrackPatch = serde_json::from_value(patch).map_err(err)?;
     app.store.update_track(&id, &patch).map_err(ae)?;
-    // The meter is detected on the beat grid of the BPM; follow a corrected BPM.
-    if patch.bpm.is_some() && app.store.track(&id).map_err(ae)?.rec.meter_source.as_deref() != Some("user") {
-        app.queue_analysis(id.clone(), true);
-    }
     crate::app::emit(&app.handle, "library-changed", vec![id.clone()]);
-    // The projector shows titles from tracks.
+    // The projector shows titles from songs.
     app.emit_perform();
     app.store.track(&id).map_err(ae)
 }
@@ -70,12 +66,36 @@ pub async fn tracks_delete(app: S<'_>, ids: Vec<Id>) -> Res<()> {
     Ok(())
 }
 
-/// Resets a track's BPM to the analysed value (`from = "detected"`) or the
+/// Tells the UI the songs playing a recording changed.
+fn emit_recording_changed(app: &S<'_>, rec_id: &str) {
+    crate::app::emit(&app.handle, "library-changed", app.store.songs_for_recording(rec_id));
+    crate::app::emit(&app.handle, "recordings-changed", ());
+}
+
+#[tauri::command]
+pub async fn recordings_list(app: S<'_>) -> Res<Vec<Recording>> {
+    Ok(app.store.all_recordings())
+}
+
+#[tauri::command]
+pub async fn recording_update(app: S<'_>, id: Id, patch: serde_json::Value) -> Res<Recording> {
+    let patch: RecordingPatch = serde_json::from_value(patch).map_err(err)?;
+    app.store.update_recording(&id, &patch).map_err(ae)?;
+    // The meter is detected on the beat grid of the BPM; follow a corrected BPM.
+    if patch.bpm.is_some() && app.store.recording(&id).map_err(ae)?.rec.meter_source.as_deref() != Some("user") {
+        app.queue_analysis(id.clone(), true);
+    }
+    emit_recording_changed(&app, &id);
+    app.emit_perform();
+    app.store.recording(&id).map_err(ae)
+}
+
+/// Resets a recording's BPM to the analysed value (`from = "detected"`) or the
 /// value in the file's tags (`from = "tag"`).
 #[tauri::command]
-pub async fn track_reset_bpm(app: S<'_>, id: Id, from: String) -> Res<Track> {
+pub async fn recording_reset_bpm(app: S<'_>, id: Id, from: String) -> Res<Recording> {
     let mut tag = None;
-    if from == "tag" && app.store.track(&id).map_err(ae)?.rec.tag_bpm.is_none() {
+    if from == "tag" && app.store.recording(&id).map_err(ae)?.rec.tag_bpm.is_none() {
         // Older library entries didn't record the tag value; read it now.
         if let Some(path) = crate::library::resolve_path(&app.store, &id) {
             let t = crate::library::read_tags(&path);
@@ -87,19 +107,19 @@ pub async fn track_reset_bpm(app: S<'_>, id: Id, from: String) -> Res<Track> {
     if app.store.reset_bpm(&id, &from, tag).map_err(ae)? {
         app.queue_analysis(id.clone(), true);
     }
-    crate::app::emit(&app.handle, "library-changed", vec![id.clone()]);
+    emit_recording_changed(&app, &id);
     app.emit_perform();
-    app.store.track(&id).map_err(ae)
+    app.store.recording(&id).map_err(ae)
 }
 
 #[tauri::command]
-pub async fn track_waveform(app: S<'_>, id: Id) -> Res<Vec<u8>> {
+pub async fn recording_waveform(app: S<'_>, id: Id) -> Res<Vec<u8>> {
     Ok(app.store.waveform(&id).unwrap_or_default())
 }
 
 /// Cover art: a data URL of the local file's art, else the Spotify artwork URL.
 #[tauri::command]
-pub async fn track_artwork(app: S<'_>, id: Id) -> Res<Option<String>> {
+pub async fn recording_artwork(app: S<'_>, id: Id) -> Res<Option<String>> {
     use base64::Engine;
     let local = tauri::async_runtime::spawn_blocking({
         let store = app.store.clone();
@@ -111,14 +131,30 @@ pub async fn track_artwork(app: S<'_>, id: Id) -> Res<Option<String>> {
     if let Some((mime, bytes)) = local {
         return Ok(Some(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))));
     }
-    Ok(app.store.track(&id).ok().and_then(|t| t.rec.artwork_url.clone()))
+    Ok(app.store.recording(&id).ok().and_then(|r| r.rec.artwork_url.clone()))
 }
 
 #[tauri::command]
-pub async fn track_analyze(app: S<'_>, ids: Vec<Id>) -> Res<()> {
+pub async fn recordings_analyze(app: S<'_>, ids: Vec<Id>) -> Res<()> {
     for id in ids {
         app.queue_analysis(id, true);
     }
+    Ok(())
+}
+
+/// A new song (in the library) for a recording, e.g. a hidden one.
+#[tauri::command]
+pub async fn song_from_recording(app: S<'_>, id: Id) -> Res<Track> {
+    let sid = app.store.song_from_recording(&id, true).map_err(ae)?;
+    emit_recording_changed(&app, &id);
+    app.store.track(&sid).map_err(ae)
+}
+
+/// Deletes recordings no song plays (see `Store::delete_recordings`).
+#[tauri::command]
+pub async fn recordings_delete(app: S<'_>, ids: Vec<Id>) -> Res<()> {
+    app.store.delete_recordings(&ids).map_err(ae)?;
+    crate::app::emit(&app.handle, "recordings-changed", ());
     Ok(())
 }
 
@@ -176,41 +212,29 @@ pub async fn history(app: S<'_>, limit: usize) -> Res<Vec<HistoryItem>> {
 
 // ---------------------------------------------------------------- sources & versions
 
-/// Adds Spotify tracks to the library (idempotent). Returns track ids in order.
+/// Adds Spotify tracks to the library (idempotent). Returns song ids in order.
 #[tauri::command]
 pub async fn spotify_import(app: S<'_>, tracks: Vec<SpotifyTrack>, in_library: Option<bool>) -> Res<Vec<Id>> {
     let in_library = in_library.unwrap_or(true);
     let mut ids = vec![];
     for t in tracks {
         let src = SourceRef { kind: "spotify".into(), key: t.uri.clone() };
-        if let Some(existing) = app.store.track_for_source(&src) {
-            // Already known: promote set-only songs when added to the library.
-            if in_library && !app.store.track(&existing).map_err(ae)?.rec.in_library {
-                app.store.set_in_library(&existing, true).map_err(ae)?;
+        let nt = NewTrack { title: t.title, artist: t.artist, album: t.album, duration_ms: t.duration_ms, artwork_url: t.artwork_url, ..Default::default() };
+        let (rid, _) = app.store.insert_recording(&nt, src).map_err(ae)?;
+        let id = match app.store.song_for_recording(&rid) {
+            Some(existing) => {
+                // Already known: promote set-only songs when added to the library.
+                if in_library && !app.store.track(&existing).map_err(ae)?.rec.in_library {
+                    app.store.set_in_library(&existing, true).map_err(ae)?;
+                }
+                existing
             }
-            ids.push(existing);
-            continue;
-        }
-        let id = app
-            .store
-            .insert_track(
-                &NewTrack {
-                    title: t.title,
-                    artist: t.artist,
-                    album: t.album,
-                    duration_ms: t.duration_ms,
-                    artwork_url: t.artwork_url,
-                    ..Default::default()
-                },
-                src,
-            )
-            .map_err(ae)?;
-        if !in_library {
-            app.store.set_in_library(&id, false).map_err(ae)?;
-        }
+            None => app.store.song_from_recording(&rid, in_library).map_err(ae)?,
+        };
         ids.push(id);
     }
     crate::app::emit(&app.handle, "library-changed", ids.clone());
+    crate::app::emit(&app.handle, "recordings-changed", ());
     Ok(ids)
 }
 
@@ -225,30 +249,63 @@ pub async fn track_set_in_library(app: S<'_>, id: Id, value: bool) -> Res<Track>
     app.store.track(&id).map_err(ae)
 }
 
-/// Links a Spotify track (URI or URL) as an additional source of a track.
+/// Links a Spotify track (URI or URL) as another source of a recording (the same audio).
 #[tauri::command]
-pub async fn source_link_spotify(app: S<'_>, track_id: Id, uri: String) -> Res<Track> {
+pub async fn source_link_spotify(app: S<'_>, recording_id: Id, uri: String) -> Res<Recording> {
     let uri = crate::spotify::normalize_uri(&uri)
         .filter(|u| u.starts_with("spotify:track:"))
         .ok_or("Not a Spotify track link")?;
-    app.store.add_source(&track_id, SourceRef { kind: "spotify".into(), key: uri }).map_err(ae)?;
-    crate::app::emit(&app.handle, "library-changed", vec![track_id.clone()]);
-    app.store.track(&track_id).map_err(ae)
+    app.store.add_source(&recording_id, SourceRef { kind: "spotify".into(), key: uri }).map_err(ae)?;
+    emit_recording_changed(&app, &recording_id);
+    app.store.recording(&recording_id).map_err(ae)
 }
 
 #[tauri::command]
-pub async fn source_remove(app: S<'_>, track_id: Id, source: SourceRef) -> Res<Track> {
-    app.store.remove_source(&track_id, &source).map_err(ae)?;
-    crate::app::emit(&app.handle, "library-changed", vec![track_id.clone()]);
-    app.store.track(&track_id).map_err(ae)
+pub async fn source_remove(app: S<'_>, recording_id: Id, source: SourceRef) -> Res<Recording> {
+    app.store.remove_source(&recording_id, &source).map_err(ae)?;
+    emit_recording_changed(&app, &recording_id);
+    app.store.recording(&recording_id).map_err(ae)
 }
 
+/// Combines songs into `keep` (their versions move; undo with `versions_separate`).
 #[tauri::command]
-pub async fn tracks_merge(app: S<'_>, keep: Id, others: Vec<Id>) -> Res<Track> {
-    app.store.merge_tracks(&keep, &others).map_err(ae)?;
+pub async fn songs_combine(app: S<'_>, keep: Id, others: Vec<Id>) -> Res<Track> {
+    app.store.combine_songs(&keep, &others).map_err(ae)?;
     crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
+    crate::app::emit(&app.handle, "recordings-changed", ());
     app.emit_perform();
     app.store.track(&keep).map_err(ae)
+}
+
+/// Moves versions of one song into a new song; returns it.
+#[tauri::command]
+pub async fn versions_separate(app: S<'_>, version_ids: Vec<Id>) -> Res<Track> {
+    let id = app.store.separate_versions(&version_ids).map_err(ae)?;
+    crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
+    crate::app::emit(&app.handle, "recordings-changed", ());
+    app.emit_perform();
+    app.store.track(&id).map_err(ae)
+}
+
+/// Marks recordings as the same audio, kept as `keep` (undo with `recording_split_source`).
+#[tauri::command]
+pub async fn recordings_merge(app: S<'_>, keep: Id, others: Vec<Id>) -> Res<Recording> {
+    app.store.merge_recordings(&keep, &others).map_err(ae)?;
+    crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
+    crate::app::emit(&app.handle, "recordings-changed", ());
+    app.emit_perform();
+    app.store.recording(&keep).map_err(ae)
+}
+
+/// Takes a source out into a recording of its own (analysed afresh); `versions` play it.
+#[tauri::command]
+pub async fn recording_split_source(app: S<'_>, id: Id, source: SourceRef, versions: Vec<Id>) -> Res<Recording> {
+    let new = app.store.split_source(&id, &source, &versions).map_err(ae)?;
+    app.queue_analysis(new.clone(), true);
+    crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
+    crate::app::emit(&app.handle, "recordings-changed", ());
+    app.emit_perform();
+    app.store.recording(&new).map_err(ae)
 }
 
 #[tauri::command]
@@ -779,17 +836,21 @@ pub async fn club_song_entries(app: S<'_>, club_id: String, version_id: String) 
     blocking(move || Ok(a.club_song_entries(&ClubRef { id: club_id, version: version_id }))).await
 }
 
-/// A club-file song entry for one of your songs (to accept it for a style).
+/// A club-file song entry for a version of one of your songs (to accept it
+/// for a style): the song's title, its recording's audio.
 #[tauri::command]
-pub async fn club_song_for_track(app: S<'_>, track_id: Id) -> Res<club::ClubSong> {
-    let t = app.store.track(&track_id).map_err(ae)?;
+pub async fn club_song_for_version(app: S<'_>, version_id: Id) -> Res<club::ClubSong> {
+    let (_, tid) = app.store.version(&version_id).map_err(ae)?;
+    let t = app.store.track(&tid).map_err(ae)?;
+    let (_, r) = app.store.version_recording(&version_id).map_err(ae)?;
+    let r = r.rec;
     Ok(club::ClubSong {
         title: Some(t.rec.title.clone()).filter(|s| !s.is_empty()),
         artist: Some(t.rec.artist.clone()).filter(|s| !s.is_empty()),
-        length: (t.rec.duration_ms > 0).then(|| (t.rec.duration_ms as f64 / 1000.0).round()),
-        fingerprint: t.rec.fingerprint.clone(),
-        spotify: t.rec.sources.iter().find(|s| s.kind == "spotify").map(|s| s.key.clone()),
-        hash: t.rec.sources.iter().find(|s| s.kind == "file").map(|s| s.key.clone()),
+        length: (r.duration_ms > 0).then(|| (r.duration_ms as f64 / 1000.0).round()),
+        fingerprint: r.fingerprint.clone(),
+        spotify: r.sources.iter().find(|s| s.kind == "spotify").map(|s| s.key.clone()),
+        hash: r.sources.iter().find(|s| s.kind == "file").map(|s| s.key.clone()),
         ..Default::default()
     })
 }
@@ -849,8 +910,8 @@ fn percent_decode(s: &str) -> String {
 
 /// The same entry as club-file text (Info → Copy for a club file).
 #[tauri::command]
-pub async fn club_song_text(app: S<'_>, track_id: Id) -> Res<String> {
-    let song = club_song_for_track(app, track_id).await?;
+pub async fn club_song_text(app: S<'_>, version_id: Id) -> Res<String> {
+    let song = club_song_for_version(app, version_id).await?;
     Ok(club::song_toml(&song))
 }
 
@@ -1091,20 +1152,20 @@ pub async fn stems_download_model(app: S<'_>) -> Res<()> {
     Ok(())
 }
 
-/// Queues stem separation; returns how many songs were queued.
+/// Queues stem separation for recordings; returns how many were queued.
 #[tauri::command]
-pub async fn stems_prepare(app: S<'_>, track_ids: Vec<Id>) -> Res<usize> {
-    app.prepare_stems(&track_ids).map_err(ae)
+pub async fn stems_prepare(app: S<'_>, recording_ids: Vec<Id>) -> Res<usize> {
+    app.prepare_stems(&recording_ids).map_err(ae)
 }
 
 #[tauri::command]
-pub async fn stems_delete(app: S<'_>, track_id: Id) -> Res<()> {
-    let t = app.store.track(&track_id).map_err(ae)?;
+pub async fn stems_delete(app: S<'_>, recording_id: Id) -> Res<()> {
+    let t = app.store.recording(&recording_id).map_err(ae)?;
     for s in t.rec.sources.iter().filter(|s| s.kind == "file") {
         app.stems.delete(&s.key).map_err(ae)?;
     }
     crate::app::emit(&app.handle, "stems-status", app.stems.status());
-    crate::app::emit(&app.handle, "library-changed", vec![track_id]);
+    crate::app::emit(&app.handle, "library-changed", app.store.songs_for_recording(&recording_id));
     Ok(())
 }
 
@@ -1144,11 +1205,12 @@ pub async fn spotify_clear_cache(app: S<'_>) -> Res<u64> {
     app.spotify.clear_cache().map_err(ae)
 }
 
+/// Recordings with prepared stems.
 #[tauri::command]
 pub async fn stems_ready(app: S<'_>) -> Res<Vec<Id>> {
     Ok(app
         .store
-        .all_tracks()
+        .all_recordings()
         .into_iter()
         .filter(|t| t.rec.sources.iter().any(|s| s.kind == "file" && app.stems.files(&s.key).is_some()))
         .map(|t| t.rec.id)

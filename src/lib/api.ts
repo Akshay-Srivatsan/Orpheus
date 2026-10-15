@@ -12,11 +12,23 @@ export const api = {
   track: (id: T.Id) => call<T.Track>("track_get", { id }),
   updateTrack: (id: T.Id, patch: T.TrackPatch) => call<T.Track>("track_update", { id, patch }),
   deleteTracks: (ids: T.Id[]) => call<void>("tracks_delete", { ids }),
-  resetBpm: (id: T.Id, from: "detected" | "tag") => call<T.Track>("track_reset_bpm", { id, from }),
+  // recordings (ids are recording ids)
+  /** Every recording, hidden ones (no song plays them) too. */
+  recordings: () => call<T.Recording[]>("recordings_list"),
+  updateRecording: (id: T.Id, patch: T.RecordingPatch) => call<T.Recording>("recording_update", { id, patch }),
+  resetBpm: (id: T.Id, from: "detected" | "tag") => call<T.Recording>("recording_reset_bpm", { id, from }),
   /** Cover art: a data URL (local files) or a Spotify image URL. */
-  artwork: (id: T.Id) => call<string | null>("track_artwork", { id }),
-  waveform: (id: T.Id) => call<number[]>("track_waveform", { id }),
-  analyze: (ids: T.Id[]) => call<void>("track_analyze", { ids }),
+  artwork: (id: T.Id) => call<string | null>("recording_artwork", { id }),
+  waveform: (id: T.Id) => call<number[]>("recording_waveform", { id }),
+  analyze: (ids: T.Id[]) => call<void>("recordings_analyze", { ids }),
+  /** A new song (in the library) for a recording, e.g. a hidden one. */
+  songFromRecording: (id: T.Id) => call<T.Track>("song_from_recording", { id }),
+  /** Deletes recordings no song plays (not ones whose file is in the library folder). */
+  deleteRecordings: (ids: T.Id[]) => call<void>("recordings_delete", { ids }),
+  /** Marks recordings as the same audio, kept as `keep`. */
+  mergeRecordings: (keep: T.Id, others: T.Id[]) => call<T.Recording>("recordings_merge", { keep, others }),
+  /** Takes a source out into a recording of its own; `versions` play it. */
+  splitSource: (id: T.Id, source: T.SourceRef, versions: T.Id[]) => call<T.Recording>("recording_split_source", { id, source, versions }),
   rescan: () => call<void>("library_rescan"),
   reloadLibrary: () => call<string[]>("library_reload"),
   libraryInfo: () => call<T.LibraryInfo>("library_info"),
@@ -27,9 +39,12 @@ export const api = {
   removeHistory: (entryIds: T.Id[]) => call<void>("history_remove", { entryIds }),
 
   // sources & versions
-  linkSpotify: (trackId: T.Id, uri: string) => call<T.Track>("source_link_spotify", { trackId, uri }),
-  removeSource: (trackId: T.Id, source: T.SourceRef) => call<T.Track>("source_remove", { trackId, source }),
-  mergeTracks: (keep: T.Id, others: T.Id[]) => call<T.Track>("tracks_merge", { keep, others }),
+  linkSpotify: (recordingId: T.Id, uri: string) => call<T.Recording>("source_link_spotify", { recordingId, uri }),
+  removeSource: (recordingId: T.Id, source: T.SourceRef) => call<T.Recording>("source_remove", { recordingId, source }),
+  /** Combines songs into `keep` (their versions move). */
+  combineSongs: (keep: T.Id, others: T.Id[]) => call<T.Track>("songs_combine", { keep, others }),
+  /** Moves versions of one song into a new song. */
+  separateVersions: (versionIds: T.Id[]) => call<T.Track>("versions_separate", { versionIds }),
   createVersion: (trackId: T.Id, version: T.VersionPatch) => call<T.Version>("version_create", { trackId, version }),
   updateVersion: (id: T.Id, patch: T.VersionPatch) => call<T.Version>("version_update", { id, patch }),
   deleteVersion: (id: T.Id) => call<void>("version_delete", { id }),
@@ -93,14 +108,14 @@ export const api = {
   clubDeleteVersion: (clubId: string, versionId: string) => call<void>("club_delete_version", { clubId, versionId }),
   clubDelete: (clubId: string) => call<void>("club_delete", { clubId }),
   clubExport: (clubId: string, versionId: string, path: string) => call<void>("club_export", { clubId, versionId, path }),
-  /** Library songs that are the club's suggested songs: track id → style ids. */
+  /** Recordings that are the club's suggested songs: recording id → style ids. */
   clubSongMatches: (clubId: string, versionId: string) => call<Record<T.Id, string[]>>("club_song_matches", { clubId, versionId }),
-  /** For each style with suggested songs: each song's matching library tracks. */
+  /** For each style with suggested songs: each song's matching recordings. */
   clubSongEntries: (clubId: string, versionId: string) => call<Record<string, T.Id[][]>>("club_song_entries", { clubId, versionId }),
-  /** A club-file song entry for one of your songs. */
-  clubSongForTrack: (trackId: T.Id) => call<import("./clubs").ClubSong>("club_song_for_track", { trackId }),
+  /** A club-file song entry for a version of one of your songs. */
+  clubSongForVersion: (versionId: T.Id) => call<import("./clubs").ClubSong>("club_song_for_version", { versionId }),
   /** The same as text to paste into a club file. */
-  clubSongText: (trackId: T.Id) => call<string>("club_song_text", { trackId }),
+  clubSongText: (versionId: T.Id) => call<string>("club_song_text", { versionId }),
   /** Downloads a suggested song (checked against its hash) and adds it to the library. */
   clubSongDownload: (url: string, hash: string) => call<string>("club_song_download", { url, hash }),
   /** Bundled examples: [id, name, description]. */
@@ -131,9 +146,9 @@ export const api = {
   deckStem: (deck: 0 | 1, index: number) => call<void>("deck_stem", { deck, index }),
   stemsStatus: () => call<T.StemsStatus>("stems_status"),
   stemsDownloadModel: () => call<void>("stems_download_model"),
-  stemsPrepare: (trackIds: T.Id[]) => call<number>("stems_prepare", { trackIds }),
-  stemsDelete: (trackId: T.Id) => call<void>("stems_delete", { trackId }),
-  /** Tracks that have prepared stems on this computer. */
+  stemsPrepare: (recordingIds: T.Id[]) => call<number>("stems_prepare", { recordingIds }),
+  stemsDelete: (recordingId: T.Id) => call<void>("stems_delete", { recordingId }),
+  /** Recordings that have prepared stems on this computer. */
   stemsReady: () => call<T.Id[]>("stems_ready"),
   stemsDeleteAll: () => call<void>("stems_delete_all"),
   stemsRemoveModel: () => call<void>("stems_remove_model"),
@@ -216,6 +231,7 @@ export interface Events {
   "crates-changed": null;
   "clubs-changed": null;
   "styles-changed": null;
+  "recordings-changed": null;
   "settings-changed": T.Settings;
   "scan-progress": T.ScanProgress;
   "spotify-status": T.SpotifyStatus;

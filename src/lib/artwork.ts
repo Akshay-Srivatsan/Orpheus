@@ -1,4 +1,4 @@
-// Cover art by track id (embedded in the file, an image next to it, or
+// Cover art by recording id (embedded in the file, an image next to it, or
 // Spotify's), cached for the session.
 
 import { api } from "./api";
@@ -6,15 +6,15 @@ import { api } from "./api";
 const MAX = 64;
 const cache = new Map<string, Promise<string | null>>();
 
-export function artwork(trackId: string): Promise<string | null> {
-  let p = cache.get(trackId);
+export function artwork(recordingId: string): Promise<string | null> {
+  let p = cache.get(recordingId);
   if (p) {
     // Most recently used last.
-    cache.delete(trackId);
+    cache.delete(recordingId);
   } else {
-    p = api.artwork(trackId).catch(() => null);
+    p = api.artwork(recordingId).catch(() => null);
     if (cache.size >= MAX) cache.delete(cache.keys().next().value!);
   }
-  cache.set(trackId, p);
+  cache.set(recordingId, p);
   return p;
 }

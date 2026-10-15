@@ -8,7 +8,7 @@
 
 import { clubShown, rangeText, round1, type Assessment, type Club, type ClubStyle, type Fit, type Range, type SongFacts, type TempoChange } from "./clubs";
 import { playedDurationMs, resolveSettings } from "./tempo";
-import type { LibraryStyle, ProjEntry, ProjectorPayload, SetlistEntry, StyleDef, StyleLibrary, Track, Version } from "./types";
+import { recordingOf, type LibraryStyle, type ProjEntry, type ProjectorPayload, type SetlistEntry, type StyleDef, type StyleLibrary, type Track, type Version } from "./types";
 
 /** Colour for styles without one (and songs without a style). */
 export const NEUTRAL = "#8e8e93";
@@ -148,14 +148,15 @@ export function songFacts(
   opts: { fadeSeconds?: number; trimSilence?: boolean } = {},
   listed: string[] = [],
 ): SongFacts | null {
-  if (!track) return null;
+  const rec = recordingOf(track, version);
+  if (!track || !rec) return null;
   return {
     listed,
-    bpm: track.bpm,
+    bpm: rec.bpm,
     target: resolveSettings(version, entry).targetBpm ?? null,
-    meter: track.beatsPerBar ?? null,
-    meterDetected: track.meterSource !== "user",
-    lengthSecs: track.durationMs ? playedDurationMs(track, version, entry ?? null, 1, opts) / 1000 : null,
+    meter: rec.beatsPerBar ?? null,
+    meterDetected: rec.meterSource !== "user",
+    lengthSecs: rec.durationMs ? playedDurationMs(track, version, entry ?? null, 1, opts) / 1000 : null,
   };
 }
 

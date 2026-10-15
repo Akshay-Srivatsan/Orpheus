@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { evaluate, type SmartContext, type SmartRules } from "./smart";
 import { emptyClub, type Club, type ClubStyle } from "./clubs";
 import type { ClubContext } from "./styles";
-import type { Crate, Row, Track, Version } from "./types";
+import type { Crate, Row, Track, Version, Recording } from "./types";
 
 const style = (name: string, tempo: [number, number], preferred: [number, number]): ClubStyle => ({
   name, meter: [3], tempo: { min: tempo[0], max: tempo[1] }, preferred: { min: preferred[0], max: preferred[1] },
@@ -20,17 +20,20 @@ const clubCtx: ClubContext = {
 };
 
 let seq = 0;
-function row(style: string | null, bpm: number | null, extra: Partial<Track> = {}, vextra: Partial<Version> = {}): Row {
+function row(style: string | null, bpm: number | null, extra: Partial<Recording> = {}, vextra: Partial<Version> = {}): Row {
   const id = `t${++seq}`;
-  const track: Track = {
-    id, title: id, artist: "", album: "", durationMs: 180_000, bpm, bpmSource: "user",
-    rating: null, loudnessDb: null, audioStartMs: null, audioEndMs: null, analyzed: true, addedAt: 0,
-    sources: [{ kind: "file", key: id }], versions: [], files: ["/x"], missing: false, playCount: 0, lastPlayedAt: null,
+  const rec: Recording = {
+    id: `r${seq}`, title: id, artist: "", album: "", durationMs: 180_000, bpm, bpmSource: "user",
+    loudnessDb: null, audioStartMs: null, audioEndMs: null, analyzed: true, addedAt: 0,
+    sources: [{ kind: "file", key: id }], files: ["/x"], missing: false, songs: [id],
     ...extra,
   };
-  const version: Version = { id: `v${seq}`, name: "Original", styles: style ? [style] : [], ...vextra };
+  const track: Track = {
+    id, title: id, artist: "", album: "", rating: null, addedAt: 0, versions: [], recordings: [rec], missing: false, playCount: 0, lastPlayedAt: null,
+  };
+  const version: Version = { id: `v${seq}`, name: "Original", recording: rec.id, styles: style ? [style] : [], ...vextra };
   track.versions = [version];
-  return { track, version };
+  return { track, version, rec };
 }
 
 const ids = (rs: Row[]) => rs.map((r) => r.version.id);

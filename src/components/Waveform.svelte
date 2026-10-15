@@ -3,7 +3,7 @@
   import { api } from "../lib/api";
 
   interface Props {
-    trackId: string | null;
+    recordingId: string | null;
     durationMs: number;
     positionMs?: number;
     startMs?: number;
@@ -24,7 +24,7 @@
     seekHint?: string;
   }
   let {
-    trackId, durationMs, positionMs = 0, startMs = 0, endMs = null, fadeAtMs = null, accent = "var(--accent)",
+    recordingId, durationMs, positionMs = 0, startMs = 0, endMs = null, fadeAtMs = null, accent = "var(--accent)",
     height = 56, onseek = null, seekHint = "", revision = null, onscrub = null, cueMs = null, hotCues = [],
   }: Props = $props();
   let dragging = $state(false);
@@ -38,7 +38,7 @@
   const cache = new Map<string, number[]>();
 
   $effect(() => {
-    const id = trackId;
+    const id = recordingId;
     void revision;
     if (!id) {
       data = [];
@@ -51,7 +51,7 @@
     data = [];
     api.waveform(id).then((w) => {
       if (w.length) cache.set(id, w);
-      if (trackId === id) data = w;
+      if (recordingId === id) data = w;
     });
   });
 

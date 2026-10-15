@@ -136,14 +136,14 @@ impl App {
         }
     }
 
-    fn deck_track(&self, deck: usize) -> Option<Track> {
-        self.decks[deck].track_id().and_then(|id| self.store.track(&id).ok())
+    fn deck_recording(&self, deck: usize) -> Option<Recording> {
+        self.decks[deck].recording_id().and_then(|id| self.store.recording(&id).ok())
     }
 
     /// Hot cue pad: jump to it if set, otherwise set it at the current position.
     pub fn deck_hotcue(&self, deck: usize, slot: u8) -> Result<()> {
         self.require_loaded(deck)?;
-        let t = self.deck_track(deck).ok_or_else(|| anyhow!("no track"))?;
+        let t = self.deck_recording(deck).ok_or_else(|| anyhow!("no recording"))?;
         match t.rec.hot_cues.iter().find(|c| c.slot == slot) {
             Some(c) => {
                 if self.protected(deck) {
@@ -154,16 +154,16 @@ impl App {
             None => {
                 let ms = (self.decks[deck].position_secs() * 1000.0).round() as i64;
                 self.store.set_hot_cue(&t.rec.id, slot, Some(ms))?;
-                emit(&self.handle, "library-changed", vec![t.rec.id.clone()]);
+                emit(&self.handle, "library-changed", self.store.songs_for_recording(&t.rec.id));
             }
         }
         Ok(())
     }
 
     pub fn deck_hotcue_clear(&self, deck: usize, slot: u8) -> Result<()> {
-        let t = self.deck_track(deck).ok_or_else(|| anyhow!("Deck is empty"))?;
+        let t = self.deck_recording(deck).ok_or_else(|| anyhow!("Deck is empty"))?;
         self.store.set_hot_cue(&t.rec.id, slot, None)?;
-        emit(&self.handle, "library-changed", vec![t.rec.id.clone()]);
+        emit(&self.handle, "library-changed", self.store.songs_for_recording(&t.rec.id));
         Ok(())
     }
 
@@ -275,8 +275,8 @@ impl App {
     /// Resets the tempo to the version's (or setlist entry's) target.
     pub fn deck_tempo_reset(&self, deck: usize) {
         let d = &self.decks[deck];
-        if let (Some(tid), Some(vid)) = (d.track_id(), d.version_id()) {
-            if let (Ok(t), Ok((v, _))) = (self.store.track(&tid), self.store.version(&vid)) {
+        if let Some(vid) = d.version_id() {
+            if let Ok((v, t)) = self.store.version_recording(&vid) {
                 let e = d.entry_id().and_then(|id| self.store.entry(&id).ok()).map(|(e, _)| e);
                 let target = Self::resolve_settings(&v, e.as_ref()).target_bpm;
                 let tempo = match (target, t.rec.bpm) {
@@ -291,13 +291,13 @@ impl App {
 
     // ------------------------------------------------------------ stems
 
-    /// Queues stem separation for tracks with a local file.
-    pub fn prepare_stems(&self, track_ids: &[Id]) -> Result<usize> {
+    /// Queues stem separation for recordings with a local file.
+    pub fn prepare_stems(&self, rec_ids: &[Id]) -> Result<usize> {
         let mut queued = 0;
-        for id in track_ids {
-            let t = self.store.track(id)?;
+        for id in rec_ids {
+            let t = self.store.recording(id)?;
             let Some(path) = crate::library::resolve_path(&self.store, &t.rec.id) else {
-                if track_ids.len() == 1 {
+                if rec_ids.len() == 1 {
                     return Err(anyhow!("Stems need a local file; “{}” is only on Spotify.", t.rec.title));
                 }
                 continue;
@@ -317,7 +317,7 @@ impl App {
             d.set_stem(index, !d.stem_on(index));
             return Ok(());
         }
-        let tid = d.track_id().ok_or_else(|| anyhow!("Deck is empty"))?;
+        let tid = d.recording_id().ok_or_else(|| anyhow!("Deck is empty"))?;
         if matches!(self.stems.job(&tid), Some(crate::stems::JobStatus::Queued | crate::stems::JobStatus::Running { .. })) {
             return Err(anyhow!("Stems for this song are still being prepared."));
         }
@@ -326,12 +326,12 @@ impl App {
             return Err(anyhow!("Stems need the separation model (about 210 MB). Download it in Settings → Stems."));
         }
         self.prepare_stems(&[tid.clone()])?;
-        let title = self.store.track(&tid).map(|t| t.rec.title).unwrap_or_default();
+        let title = d.track_id().and_then(|t| self.store.track(&t).ok()).map(|t| t.rec.title).unwrap_or_default();
         emit(&self.handle, "toast-info", format!("Preparing stems for “{title}” (about a minute)…"));
         Ok(())
     }
 
-    /// Called when a stem job or the model changes state.
+    /// Called when a stem job (for a recording) or the model changes state.
     pub fn on_stems_changed(&self, track: Option<Id>) {
         emit(&self.handle, "stems-status", self.stems.status());
         let Some(tid) = track else { return };
@@ -341,13 +341,13 @@ impl App {
         // Newly ready: switch decks with this song onto its stems, unless the room hears them.
         for deck in 0..2 {
             let d = &self.decks[deck];
-            if d.track_id().as_deref() == Some(&tid) && !d.has_stems() && !self.audible(deck) {
+            if d.recording_id().as_deref() == Some(&tid) && !d.has_stems() && !self.audible(deck) {
                 if let Err(e) = self.reload_deck(deck) {
                     log::warn!("reloading deck with stems: {e:#}");
                 }
             }
         }
-        emit(&self.handle, "library-changed", vec![tid]);
+        emit(&self.handle, "library-changed", self.store.songs_for_recording(&tid));
     }
 
     /// Reloads a deck's song in place (position, play state, tempo and cue kept).
@@ -552,9 +552,9 @@ impl App {
                 loaded && snap.status != "playing" && (snap.position_ms - snap.cue_ms).abs() < 60,
             );
             let cues = snap
-                .track_id
+                .recording_id
                 .as_ref()
-                .and_then(|id| self.store.track(id).ok())
+                .and_then(|id| self.store.recording(id).ok())
                 .map(|t| t.rec.hot_cues)
                 .unwrap_or_default();
             for n in 1..=4u8 {
@@ -562,7 +562,7 @@ impl App {
             }
             // Stem pads: lit while the stem is on; blinking while stems are prepared.
             let preparing = snap
-                .track_id
+                .recording_id
                 .as_ref()
                 .map(|t| matches!(self.stems.job(t), Some(crate::stems::JobStatus::Queued | crate::stems::JobStatus::Running { .. })))
                 .unwrap_or(false);

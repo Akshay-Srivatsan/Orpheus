@@ -124,6 +124,9 @@
     <button class="item" class:sel={is({ kind: "history" })} onclick={() => go({ kind: "history" })}>
       <Icon name="history" size={14} /> History
     </button>
+    <button class="item" class:sel={is({ kind: "recordings" })} onclick={() => go({ kind: "recordings" })} title="Every recording, including hidden ones (played by no song)">
+      <Icon name="disc" size={14} /> Recordings
+    </button>
     {#if missing}
       <button class="item warn" class:sel={is({ kind: "missing" })} onclick={() => go({ kind: "missing" })}>
         <Icon name="warning" size={14} /> Missing Files <span class="count">{missing}</span>

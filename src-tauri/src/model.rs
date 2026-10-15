@@ -61,7 +61,7 @@ fn is_zero(f: &f64) -> bool {
     *f == 0.0
 }
 
-/// Where a track's audio can come from.
+/// Where a recording's audio can come from.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceRef {
@@ -90,12 +90,16 @@ pub struct Overrides {
     pub stems: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
-/// A playable configuration of a track (style, tempo, cue points, ...).
+/// A playable version of a song: the recording it plays, and how (styles,
+/// tempo, cue points, ...).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Version {
     pub id: Id,
     pub name: String,
+    /// The recording it plays (empty in older files: the song's own).
+    #[serde(default)]
+    pub recording: Id,
     /// Shown to dancers instead of the style names, e.g. the name of a
     /// particular line dance (a setlist entry's label overrides it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -119,6 +123,8 @@ pub struct Version {
 #[serde(rename_all = "camelCase")]
 pub struct VersionPatch {
     pub name: Option<String>,
+    /// Plays another recording.
+    pub recording: Option<Id>,
     #[serde(default, with = "double_option")]
     pub display_name: Option<Option<String>>,
     /// Replaces the version's styles.
@@ -224,7 +230,7 @@ pub struct Pronunciation {
     pub say: String,
 }
 
-/// A saved cue point (hot cue) on a track; shared by all its versions.
+/// A saved cue point (hot cue) on a recording; shared by every version playing it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct HotCue {
@@ -233,11 +239,15 @@ pub struct HotCue {
     pub ms: i64,
 }
 
-/// A track as stored in `tracks/<id>.json`.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// A recording: a piece of audio, as stored in `recordings/<id>.json`. Its
+/// sources (files by content hash, Spotify tracks) are the same audio. Songs'
+/// versions play recordings; several songs can use one (a song that works for
+/// two line dances), and one no song uses is hidden.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
-pub struct TrackRecord {
+pub struct RecordingRecord {
     pub id: Id,
+    /// From the file's tags or Spotify: the title etc. of a song made from it.
     pub title: String,
     pub artist: String,
     pub album: String,
@@ -254,7 +264,7 @@ pub struct TrackRecord {
     /// BPM from the file's tags or Spotify metadata, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tag_bpm: Option<f64>,
-    /// Beats per bar used for the song (3 = triple, e.g. waltzes; 4 = duple).
+    /// Beats per bar (3 = triple, e.g. waltzes; 4 = duple).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub beats_per_bar: Option<u8>,
     /// `detected` or `user`.
@@ -263,18 +273,15 @@ pub struct TrackRecord {
     /// Last meter found by analysis.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detected_meter: Option<u8>,
-    pub rating: Option<i64>,
     #[serde(skip_serializing_if = "is_zero")]
     pub gain_db: f64,
     pub loudness_db: Option<f64>,
     pub audio_start_ms: Option<i64>,
     pub audio_end_ms: Option<i64>,
-    /// Chromaprint fingerprint (text form): identifies this version of the
-    /// song in any audio format (see `fingerprint.rs`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Chromaprint fingerprint (text form): identifies this recording in any
+    /// audio format (see `fingerprint.rs`).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub fingerprint: Option<String>,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub notes: String,
     pub analyzed: bool,
     /// Version of the analysis that ran (see `analysis::VERSION`); older
     /// results are redone in the background.
@@ -287,10 +294,46 @@ pub struct TrackRecord {
     pub artwork_url: Option<String>,
     pub added_at: i64,
     pub sources: Vec<SourceRef>,
-    pub versions: Vec<Version>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub hot_cues: Vec<HotCue>,
-    /// IDs of tracks merged into this one (keeps history references valid).
+    /// IDs of recordings merged into this one (keeps references valid).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<Id>,
+}
+
+/// A recording as sent to the UI: the record plus machine-local/derived state.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Recording {
+    #[serde(flatten)]
+    pub rec: RecordingRecord,
+    /// Known paths of this recording's files on this machine.
+    pub files: Vec<String>,
+    /// No playable source (files missing and no Spotify link).
+    pub missing: bool,
+    /// Songs whose versions play it (none: hidden).
+    pub songs: Vec<Id>,
+}
+
+/// A song as stored in `tracks/<id>.json`: what the DJ thinks of as one song,
+/// with versions to play. Versions may play different recordings (several
+/// people's edits for one line dance; edits of different songs for one
+/// choreography).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct TrackRecord {
+    pub id: Id,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub genre: String,
+    pub rating: Option<i64>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub notes: String,
+    pub added_at: i64,
+    pub versions: Vec<Version>,
+    /// IDs of songs combined into this one (keeps history references valid).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<Id>,
     /// `false` for songs used only in setlists (e.g. a Spotify song added
@@ -298,23 +341,97 @@ pub struct TrackRecord {
     /// no setlist or crate uses them.
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub in_library: bool,
+    /// Older files kept the recording in the song: read, then moved to
+    /// `recordings/` (see `Store::reload`).
+    #[serde(flatten, skip_serializing)]
+    pub legacy: LegacyAudio,
 }
 
-/// A track as sent to the UI: the record plus machine-local/derived state.
+/// The audio fields older song files had (now a `RecordingRecord`).
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct LegacyAudio {
+    pub duration_ms: i64,
+    pub bpm: Option<f64>,
+    pub bpm_source: Option<String>,
+    pub detected_bpm: Option<f64>,
+    pub tag_bpm: Option<f64>,
+    pub beats_per_bar: Option<u8>,
+    pub meter_source: Option<String>,
+    pub detected_meter: Option<u8>,
+    pub gain_db: f64,
+    pub loudness_db: Option<f64>,
+    pub audio_start_ms: Option<i64>,
+    pub audio_end_ms: Option<i64>,
+    pub fingerprint: Option<String>,
+    pub analyzed: bool,
+    pub analysis_version: u32,
+    pub preferred_source: Option<String>,
+    pub artwork_url: Option<String>,
+    pub sources: Vec<SourceRef>,
+    pub hot_cues: Vec<HotCue>,
+}
+
+impl TrackRecord {
+    /// The recording an older file kept inside the song (`None` if it had none).
+    pub fn take_legacy_recording(&mut self) -> Option<RecordingRecord> {
+        let l = std::mem::take(&mut self.legacy);
+        if l.sources.is_empty() {
+            return None;
+        }
+        Some(RecordingRecord {
+            id: self.id.clone(),
+            title: self.title.clone(),
+            artist: self.artist.clone(),
+            album: self.album.clone(),
+            genre: self.genre.clone(),
+            duration_ms: l.duration_ms,
+            bpm: l.bpm,
+            bpm_source: l.bpm_source,
+            detected_bpm: l.detected_bpm,
+            tag_bpm: l.tag_bpm,
+            beats_per_bar: l.beats_per_bar,
+            meter_source: l.meter_source,
+            detected_meter: l.detected_meter,
+            gain_db: l.gain_db,
+            loudness_db: l.loudness_db,
+            audio_start_ms: l.audio_start_ms,
+            audio_end_ms: l.audio_end_ms,
+            fingerprint: l.fingerprint,
+            analyzed: l.analyzed,
+            analysis_version: l.analysis_version,
+            preferred_source: l.preferred_source,
+            artwork_url: l.artwork_url,
+            added_at: self.added_at,
+            sources: l.sources,
+            hot_cues: l.hot_cues,
+            aliases: self.aliases.clone(),
+        })
+    }
+}
+
+/// A song as sent to the UI: the record, the recordings its versions play, and play stats.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Track {
     #[serde(flatten)]
     pub rec: TrackRecord,
-    /// Known paths of this track's files on this machine.
-    pub files: Vec<String>,
-    /// No playable source (files missing and no Spotify link).
+    pub recordings: Vec<Recording>,
+    /// No version has a playable source.
     pub missing: bool,
     pub play_count: i64,
     pub last_played_at: Option<i64>,
 }
 
-/// Partial update for a track. Missing fields are left alone; `null` clears.
+impl Track {
+    /// The recording a version of this song plays.
+    pub fn recording_of(&self, version_id: &str) -> Option<&Recording> {
+        let v = self.rec.versions.iter().find(|v| v.id == version_id)?;
+        self.recordings.iter().find(|r| r.rec.id == v.recording)
+    }
+}
+
+/// Partial update for a song. Missing fields are left alone; `null` clears.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackPatch {
@@ -323,15 +440,21 @@ pub struct TrackPatch {
     pub album: Option<String>,
     pub genre: Option<String>,
     #[serde(default, with = "double_option")]
+    pub rating: Option<Option<i64>>,
+    pub notes: Option<String>,
+}
+
+/// Partial update for a recording. Missing fields are left alone; `null` clears.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingPatch {
+    #[serde(default, with = "double_option")]
     pub bpm: Option<Option<f64>>,
     pub bpm_source: Option<String>,
     /// Beats per bar set by the DJ (`null` = use the detected meter).
     #[serde(default, with = "double_option")]
     pub beats_per_bar: Option<Option<u8>>,
-    #[serde(default, with = "double_option")]
-    pub rating: Option<Option<i64>>,
     pub gain_db: Option<f64>,
-    pub notes: Option<String>,
     #[serde(default, with = "double_option")]
     pub preferred_source: Option<Option<String>>,
 }

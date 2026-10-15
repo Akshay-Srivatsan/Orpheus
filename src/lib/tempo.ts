@@ -1,6 +1,6 @@
 // Tempo and duration helpers.
 
-import type { Overrides, SetlistEntry, StyleDef, Track, Version } from "./types";
+import { recordingOf, type Overrides, type SetlistEntry, type StyleDef, type Track, type Version } from "./types";
 
 /** The club style (with its tempo ranges) a song is danced as; see `styles.ts`. */
 export type ClubStyleOf = (track: Track | undefined, version: Version | undefined, entry: Partial<SetlistEntry> | null | undefined) => StyleDef | null;
@@ -53,12 +53,13 @@ export interface Playback {
 /** How a version will be played (optionally within a setlist entry). Mirrors the backend's load_request. */
 export function playback(track: Track | undefined, version: Version | undefined, entry: Partial<SetlistEntry> | null, clubStyleOf: ClubStyleOf): Playback {
   const target = resolveSettings(version, entry).targetBpm ?? null;
-  if (!track?.bpm) return { base: null, target, rate: 1 };
+  const bpm = recordingOf(track, version)?.bpm;
+  if (!bpm) return { base: null, target, rate: 1 };
   if (target) {
-    const base = foldBpm(track.bpm, target);
+    const base = foldBpm(bpm, target);
     return { base, target, rate: Math.min(2, Math.max(0.5, target / base)) };
   }
-  const base = bpmForStyle(track.bpm, clubStyleOf(track, version, entry) ?? undefined);
+  const base = bpmForStyle(bpm, clubStyleOf(track, version, entry) ?? undefined);
   return { base, target: base, rate: 1 };
 }
 
@@ -70,11 +71,12 @@ export function playedDurationMs(
   rate: number,
   opts: { fadeSeconds?: number; trimSilence?: boolean } = {},
 ): number {
-  if (!track) return 0;
+  const rec = recordingOf(track, version);
+  if (!rec) return 0;
   const r = resolveSettings(version, entry);
   const trim = opts.trimSilence ?? true;
-  const start = r.cueInMs ?? (trim ? track.audioStartMs : null) ?? 0;
-  let end = r.cueOutMs ?? (trim ? track.audioEndMs : null) ?? track.durationMs;
+  const start = r.cueInMs ?? (trim ? rec.audioStartMs : null) ?? 0;
+  let end = r.cueOutMs ?? (trim ? rec.audioEndMs : null) ?? rec.durationMs;
   if (r.fadeOutMs != null) end = Math.min(end, r.fadeOutMs + (opts.fadeSeconds ?? 5) * 1000);
   return Math.max(0, end - start) / (rate || 1);
 }

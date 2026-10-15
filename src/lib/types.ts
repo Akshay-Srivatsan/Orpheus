@@ -19,10 +19,12 @@ export interface Overrides {
   stems?: Record<string, boolean> | null;
 }
 
-/** A playable configuration of a track: styles, tempo, cue points, comments. */
+/** A playable version of a song: the recording it plays, and how (styles, tempo, cue points, comments). */
 export interface Version extends Overrides {
   id: Id;
   name: string;
+  /** The recording it plays. */
+  recording: Id;
   /** Shown to dancers instead of the style names (e.g. a line dance's name). */
   displayName?: string | null;
   /** Your dance styles (keys into styles.json) this version can be danced as. */
@@ -32,8 +34,14 @@ export interface Version extends Overrides {
   tags?: string[];
 }
 
-export interface Track {
+/**
+ * A recording: a piece of audio (its sources are the same audio) and its
+ * analysis. Songs' versions play recordings; several songs can share one, and
+ * one no song uses is hidden.
+ */
+export interface Recording {
   id: Id;
+  /** From the file's tags or Spotify (a song made from it is named after them). */
   title: string;
   artist: string;
   album: string;
@@ -50,46 +58,80 @@ export interface Track {
   /** "detected" or "user". */
   meterSource?: string | null;
   detectedMeter?: number | null;
-  rating: number | null;
   gainDb?: number;
   loudnessDb: number | null;
   audioStartMs: number | null;
   audioEndMs: number | null;
   /** Chromaprint fingerprint (text form), from analysis. */
   fingerprint?: string | null;
-  notes?: string;
   analyzed: boolean;
   preferredSource?: "file" | "spotify" | null;
   artworkUrl?: string | null;
   addedAt: number;
   sources: SourceRef[];
+  aliases?: Id[];
+  /** Saved cue points (pads 1–4), shared by every version playing it. */
+  hotCues?: { slot: number; ms: number }[];
+  /** Paths of its files on this machine. */
+  files: string[];
+  missing: boolean;
+  /** Songs whose versions play it (none: hidden). */
+  songs: Id[];
+}
+
+/** A song: what the DJ thinks of as one song, with versions to play (which may play different recordings). */
+export interface Track {
+  id: Id;
+  title: string;
+  artist: string;
+  album: string;
+  genre?: string;
+  rating: number | null;
+  notes?: string;
+  addedAt: number;
   versions: Version[];
   aliases?: Id[];
-  /** Saved cue points (pads 1–4), shared by all versions. */
-  hotCues?: { slot: number; ms: number }[];
   /** false = used only in setlists (e.g. a Spotify song added straight to a set). Absent = true. */
   inLibrary?: boolean;
-  /** Paths of this track's files on this machine. */
-  files: string[];
+  /** The recordings its versions play. */
+  recordings: Recording[];
+  /** No version has a playable source. */
   missing: boolean;
   playCount: number;
   lastPlayedAt: number | null;
 }
 
-export type TrackPatch = Partial<
-  Pick<
-    Track,
-    | "title" | "artist" | "album" | "genre" | "bpm" | "bpmSource" | "beatsPerBar" | "rating"
-    | "gainDb" | "notes" | "preferredSource"
-  >
->;
+export type TrackPatch = Partial<Pick<Track, "title" | "artist" | "album" | "genre" | "rating" | "notes">>;
+
+export type RecordingPatch = Partial<Pick<Recording, "bpm" | "bpmSource" | "beatsPerBar" | "gainDb" | "preferredSource">>;
+
+/** The recording a version of a song plays. */
+export function recordingOf(track: Track | undefined, version: Version | undefined): Recording | undefined {
+  if (!track || !version) return undefined;
+  return track.recordings.find((r) => r.id === version.recording);
+}
+
+/** Stands in for a recording that isn't in the library (e.g. deleted elsewhere): nothing to play. */
+export function missingRecording(id: Id, track: Track): Recording {
+  return {
+    id, title: track.title, artist: track.artist, album: track.album, durationMs: 0, bpm: null, bpmSource: null,
+    loudnessDb: null, audioStartMs: null, audioEndMs: null, analyzed: false, addedAt: track.addedAt, sources: [],
+    files: [], missing: true, songs: [track.id],
+  };
+}
+
+/** A song's rows: each version with the recording it plays. */
+export function rowsOf(track: Track): Row[] {
+  return track.versions.map((v) => ({ track, version: v, rec: recordingOf(track, v) ?? missingRecording(v.recording, track) }));
+}
 
 export type VersionPatch = Partial<Omit<Version, "id">>;
 
-/** A library row: one version of a track. */
+/** A library row: one version of a song, and the recording it plays. */
 export interface Row {
   track: Track;
   version: Version;
+  rec: Recording;
 }
 
 /**
@@ -400,6 +442,8 @@ export interface DeckState {
   deck: 0 | 1;
   status: DeckStatus;
   trackId: Id | null;
+  /** The recording it plays (waveform, hot cues, artwork). */
+  recordingId: Id | null;
   versionId: Id | null;
   entryId: Id | null;
   positionMs: number;
@@ -466,6 +510,8 @@ export interface ProjEntry {
   id: Id;
   kind?: "song" | "pause";
   trackId: Id | null;
+  /** For cover art. */
+  recordingId?: Id | null;
   title: string;
   artist: string;
   /** Your style keys; the page shows club styles via `club` and `styleLibrary`. */

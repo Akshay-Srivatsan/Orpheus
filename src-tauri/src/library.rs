@@ -110,16 +110,18 @@ fn image_mime(p: &Path) -> Option<&'static str> {
     }
 }
 
-/// Imports (or re-links) one file. Returns the track id and whether it is new.
-fn import_candidate(store: &Store, c: &Candidate, hash: &str, tags: Option<NewTrack>) -> Result<(Id, bool)> {
+/// Imports (or re-links) one file. Returns the songs playing its recording
+/// and whether it is new (new audio gets a song; known audio, even a hidden
+/// recording, gets none).
+fn import_candidate(store: &Store, c: &Candidate, hash: &str, tags: Option<NewTrack>) -> Result<(Vec<Id>, bool)> {
     let path_s = c.path.to_string_lossy().to_string();
     store.upsert_file(&path_s, FileEntry { hash: hash.to_string(), size: c.size, mtime: c.mtime, root: c.root.clone() });
     let src = SourceRef { kind: "file".into(), key: hash.to_string() };
-    if let Some(tid) = store.track_for_source(&src) {
-        return Ok((tid, false));
+    if let Some(rid) = store.recording_for_source(&src) {
+        return Ok((store.songs_for_recording(&rid), false));
     }
     let nt = tags.unwrap_or_else(|| read_tags(&c.path));
-    Ok((store.insert_track(&nt, src)?, true))
+    Ok((vec![store.insert_track(&nt, src)?], true))
 }
 
 /// Low-priority threads for scanning, so a big import never disturbs playback.
@@ -157,13 +159,13 @@ fn process_candidates(db: &Store, cands: Vec<Candidate>, progress: &dyn Fn(&Scan
                 Ok(h) => {
                     let had_path = db.file_info(&c.path.to_string_lossy()).is_some();
                     match import_candidate(db, c, &h, tags) {
-                        Ok((id, new)) => {
+                        Ok((ids, new)) => {
                             if new {
                                 p.added += 1;
                             } else if !had_path {
                                 p.relinked += 1;
                             }
-                            touched.push(id);
+                            touched.extend(ids);
                         }
                         Err(e) => log::warn!("import {}: {e:#}", c.path.display()),
                     }
@@ -243,15 +245,15 @@ pub fn import_paths(db: &Store, paths: &[String], progress: &dyn Fn(&ScanProgres
     Ok(ids)
 }
 
-/// Finds a readable file for a track, if any of its known paths still exist.
-pub fn resolve_path(db: &Store, track_id: &str) -> Option<PathBuf> {
-    db.track_file_paths(track_id).into_iter().map(PathBuf::from).find(|p| p.exists())
+/// Finds a readable file for a recording, if any of its known paths still exist.
+pub fn resolve_path(db: &Store, rec_id: &str) -> Option<PathBuf> {
+    db.recording_file_paths(rec_id).into_iter().map(PathBuf::from).find(|p| p.exists())
 }
 
-pub fn analyze_track(db: &Store, track_id: &str) -> Result<()> {
-    let path = resolve_path(db, track_id).ok_or_else(|| anyhow::anyhow!("file missing"))?;
+pub fn analyze_recording(db: &Store, rec_id: &str) -> Result<()> {
+    let path = resolve_path(db, rec_id).ok_or_else(|| anyhow::anyhow!("file missing"))?;
     let (mono, sr) = decode::decode_mono(&path)?;
-    let a = crate::analysis::analyze(&mono, sr, db.known_bpm(track_id));
-    db.set_analysis(track_id, &a)?;
+    let a = crate::analysis::analyze(&mono, sr, db.known_bpm(rec_id));
+    db.set_analysis(rec_id, &a)?;
     Ok(())
 }

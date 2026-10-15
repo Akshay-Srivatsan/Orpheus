@@ -164,6 +164,7 @@ export function mockDeck(): DeckState {
     deck: 0,
     status: "playing",
     trackId: "t1",
+    recordingId: "t1",
     versionId: "v1",
     entryId: "e11",
     positionMs: 74000,

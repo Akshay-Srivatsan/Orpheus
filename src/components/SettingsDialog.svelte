@@ -337,7 +337,7 @@
             <span class="row">
               <button disabled={st?.model.state !== "ready" || !app.current}
                 onclick={async () => {
-                  const ids = [...new Set((app.current?.entries ?? []).map((e) => (e.versionId ? app.versionMap.get(e.versionId)?.track.id : undefined)).filter(Boolean) as string[])];
+                  const ids = [...new Set((app.current?.entries ?? []).map((e) => (e.versionId ? app.versionMap.get(e.versionId)?.rec.id : undefined)).filter(Boolean) as string[])];
                   const n = await app.run(api.stemsPrepare(ids.filter((id) => !app.stemsReady.has(id))));
                   if (n != null) app.toast(`Preparing stems for ${n} song(s) in “${app.current?.name}”`, "info");
                 }}>Prepare Stems for the Current Set</button>
@@ -345,7 +345,7 @@
             {#if jobs.length}
               <span class="small">{jobs.filter(([, j]) => j.state !== "failed").length} song(s) in progress</span>
               {#each jobs.filter(([, j]) => j.state === "failed") as [id, j]}
-                <span class="err small">{app.trackMap.get(id)?.title ?? id}: {j.state === "failed" ? j.message : ""}</span>
+                <span class="err small">{app.recordingMap.get(id)?.title ?? id}: {j.state === "failed" ? j.message : ""}</span>
               {/each}
             {/if}
             <span class="faint small">Separation uses a lot of CPU; Orpheus runs it at low priority, but preparing ahead of an event is best.</span>

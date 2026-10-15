@@ -1,10 +1,10 @@
 <script lang="ts">
-  // Info tab: the selected track (recording), its versions, and — when a set
-  // entry is selected — that entry's per-setlist overrides.
+  // Info tab: the selected song, its versions and the recordings they play,
+  // and — when a set entry is selected — that entry's per-setlist overrides.
   import { api } from "../lib/api";
   import { app, audition, confirmAction } from "../lib/state.svelte";
-  import { fmtBpm, fmtTime, foldBpm, playback, rateToFit, resolveSettings, styleCenter } from "../lib/tempo";
-  import type { Id, Overrides, SetlistEntry, Track, Version } from "../lib/types";
+  import { fmtBpm, fmtTime, foldBpm, playback, playedDurationMs, rateToFit, resolveSettings, styleCenter } from "../lib/tempo";
+  import { recordingOf, type Id, type Overrides, type Recording, type RecordingPatch, type SetlistEntry, type SourceRef, type Track, type Version } from "../lib/types";
   import Icon from "./Icon.svelte";
   import StyleChips from "./StyleChips.svelte";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
@@ -39,6 +39,28 @@
     return { shown, fit: cand, other: ids.filter((id) => !cand.includes(id)) };
   }
 
+  /**
+   * Plays another version of the song in this entry (e.g. another edit of a
+   * line dance). Settings tied to the old audio (tempo, start/end, fade) are
+   * dropped, and the club's tempo rule is applied afresh.
+   */
+  async function switchVersion(e: SetlistEntry, versionId: Id) {
+    const { targetBpm: _t, cueInMs: _i, cueOutMs: _o, fadeOutMs: _f, ...keep } = e.overrides ?? {};
+    const [next] = await app.withClubTempo([{ versionId, styles: e.styles, clubStyles: e.clubStyles, overrides: keep }], app.current?.club);
+    await app.run(api.updateEntry(e.id, { versionId, overrides: next.overrides ?? {} }));
+  }
+
+  /** How a version would play in an entry: tempo, length, and whether it fits the entry's styles. */
+  function versionChoice(t: Track, v: Version, e: SetlistEntry): string {
+    const at = { ...e, versionId: v.id, overrides: {} };
+    const pb = playback(t, v, at, app.clubStyleOf);
+    const shown = app.shownFor(t, v, at);
+    const rec = recordingOf(t, v);
+    const len = rec ? fmtTime(playedDurationMs(t, v, at, pb.rate, { fadeSeconds: app.fadeSeconds, trimSilence: app.settings?.trimSilence })) : "";
+    const warn = shown.some((x) => x.problems.length) ? " ⚠" : "";
+    return `${v.name} — ${fmtBpm(pb.target ?? rec?.bpm)} BPM, ${len}${warn}`;
+  }
+
   function setClubStyles(entryId: Id, ids: string[]) {
     api.updateEntry(entryId, { clubStyles: ids.length ? ids : null });
   }
@@ -69,6 +91,10 @@
     if (track) app.run(api.updateTrack(track.id, patch));
   }
 
+  function patchRecording(rec: Recording, patch: RecordingPatch) {
+    app.run(api.updateRecording(rec.id, patch));
+  }
+
   function patchVersion(v: Version, patch: Partial<Version>) {
     app.run(api.updateVersion(v.id, patch));
   }
@@ -80,20 +106,36 @@
     app.run(api.updateEntry(entry.id, { overrides: next }));
   }
 
-  function tap() {
+  function tap(rec: Recording) {
     const now = performance.now();
     const recent = [...taps.filter((t) => now - t < 2500), now].slice(-9);
     taps = recent;
     if (recent.length >= 4) {
       const iv = (recent[recent.length - 1] - recent[0]) / (recent.length - 1);
       const bpm = Math.round((60000 / iv) * 10) / 10;
-      patchTrack({ bpm, bpmSource: "tap" });
+      patchRecording(rec, { bpm, bpmSource: "tap" });
     }
   }
 
-  function scaleBpm(f: number) {
-    if (track?.bpm) patchTrack({ bpm: Math.round(track.bpm * f * 10) / 10, bpmSource: "user" });
+  function scaleBpm(rec: Recording, f: number) {
+    if (rec.bpm) patchRecording(rec, { bpm: Math.round(rec.bpm * f * 10) / 10, bpmSource: "user" });
   }
+
+  /** Splitting a source off a recording (undoes "Same Recording"): what then plays it. */
+  function splitMenu(ev: MouseEvent, rec: Recording, src: SourceRef) {
+    const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+    const playing = (track?.versions ?? []).filter((v) => v.recording === rec.id);
+    const split = (versions: Id[]) => app.run(api.splitSource(rec.id, src, versions));
+    const items: MenuItem[] = [
+      { label: "Split Off as a Song of Its Own", action: async () => { const n = await split([]); if (n) await app.run(api.songFromRecording(n.id)); } },
+      ...playing.map((v) => ({ label: `Split Off for Version “${v.name}”`, action: () => split([v.id]) })),
+      { label: "Split Off, Hidden (see Recordings)", action: () => split([]) },
+    ];
+    clubMenu = { x: r.left, y: r.bottom + 2, items };
+  }
+
+  /** Other songs playing a recording. */
+  const otherSongs = (rec: Recording) => rec.songs.filter((id) => id !== track?.id).map((id) => app.trackMap.get(id)).filter(Boolean) as Track[];
 
   async function newVersion() {
     if (!track) return;
@@ -114,10 +156,11 @@
 
   function fitToStyle(v: Version) {
     const s = app.clubStyleOf(track, v, null);
-    if (!track?.bpm || !s) return;
+    const bpm = recordingOf(track, v)?.bpm;
+    if (!bpm || !s) return;
     const c = styleCenter(s);
     if (!c) return;
-    const base = foldBpm(track.bpm, c);
+    const base = foldBpm(bpm, c);
     const rate = rateToFit(base, s);
     patchVersion(v, { targetBpm: rate === 1 ? null : Math.round(base * rate * 10) / 10 });
   }
@@ -128,7 +171,6 @@
     return d ? d.positionMs : null;
   }
 
-  const preferred = $derived(track?.preferredSource ?? "");
 </script>
 
 <div class="insp">
@@ -145,6 +187,12 @@
       <section class="box entrybox">
         <div class="section-title">{isPause ? "Pause in this set" : "In this set"}</div>
         <div class="grid">
+          {#if !isPause && track && entryVersion && track.versions.length > 1}
+            <span class="lbl" title="Which version of the song plays (e.g. which edit of a line dance)">Version</span>
+            <select value={entryVersion.id} onchange={(e) => switchVersion(entry, e.currentTarget.value)}>
+              {#each track.versions as v (v.id)}<option value={v.id}>{versionChoice(track, v, entry)}</option>{/each}
+            </select>
+          {/if}
           {#if isPause}
             <span class="lbl">Name</span>
             <input type="text" value={entry.label ?? ""} placeholder="Pause (e.g. Break, Lesson)"
@@ -259,54 +307,15 @@
         <input class="big" type="text" value={track.title} onchange={(e) => patchTrack({ title: e.currentTarget.value })} aria-label="Title" />
         <input type="text" value={track.artist} placeholder="Artist" onchange={(e) => patchTrack({ artist: e.currentTarget.value })} />
         <input type="text" value={track.album} placeholder="Album" onchange={(e) => patchTrack({ album: e.currentTarget.value })} />
-        <div class="grid">
-          <span class="lbl">BPM</span>
-          <span class="row">
-            <input type="number" step="0.1" value={track.bpm ?? ""} onchange={(e) => patchTrack({ bpm: e.currentTarget.value ? +e.currentTarget.value : null })} />
-            <button class="small" onclick={tap} title="Tap along to the beat (4+ taps)">Tap</button>
-            <span class="mult">
-              <button class="plain small" onclick={() => scaleBpm(0.5)} title="Half">½</button>
-              <button class="plain small" onclick={() => scaleBpm(2 / 3)} title="×⅔ (triple meter)">⅔</button>
-              <button class="plain small" onclick={() => scaleBpm(1.5)} title="×1.5 (triple meter)">1½</button>
-              <button class="plain small" onclick={() => scaleBpm(2)} title="Double">2×</button>
-            </span>
-          </span>
-          <span></span>
-          <span class="row">
-            {#if track.bpmSource !== "detected"}
-              <button class="plain small" title="Use the BPM found by analysis"
-                onclick={() => app.run(api.resetBpm(track.id, "detected"))}>
-                ↺ Analysed{track.detectedBpm != null ? ` (${fmtBpm(track.detectedBpm)})` : ""}
-              </button>
-            {/if}
-            {#if track.bpmSource !== "tag" && (track.tagBpm != null || track.files.length)}
-              <button class="plain small" title="Use the BPM stored in the file's tags"
-                onclick={() => app.run(api.resetBpm(track.id, "tag"))}>
-                ↺ File tag{track.tagBpm != null ? ` (${fmtBpm(track.tagBpm)})` : ""}
-              </button>
-            {/if}
-          </span>
-          <span></span>
-          <span class="faint small">{track.bpmSource ? `from ${{ detected: "analysis", tag: "file tag", tap: "tapping", user: "you" }[track.bpmSource] ?? track.bpmSource}` : track.analyzed ? "not detected" : "analysing…"}{#if track.loudnessDb != null}{" · "}{track.loudnessDb.toFixed(1)} LUFS{/if} · {fmtTime(track.durationMs)}</span>
-          <span class="lbl" title="Beats per bar. Detected from the audio, on the beat grid of the BPM above (fix the BPM first if it's off)">Meter</span>
-          <span class="row">
-            <select value={track.meterSource === "user" ? String(track.beatsPerBar ?? "") : "auto"}
-              onchange={(e) => { const v = e.currentTarget.value; patchTrack({ beatsPerBar: v === "auto" ? null : +v }); }}>
-              <option value="auto">Detected{track.detectedMeter ? `: ${meterName(track.detectedMeter)}` : track.analyzed ? ": unclear" : ""}</option>
-              <option value="3">Triple (3/4, 6/8)</option>
-              <option value="4">Duple (2/4, 4/4)</option>
-            </select>
-          </span>
-          <span class="lbl">Gain</span>
-          <span class="row"><input type="number" step="0.5" value={track.gainDb ?? 0} onchange={(e) => patchTrack({ gainDb: +e.currentTarget.value })} /> dB</span>
-        </div>
         <textarea rows="2" placeholder="Notes" value={track.notes ?? ""} onchange={(e) => patchTrack({ notes: e.currentTarget.value })}></textarea>
+        <div class="row small faint">played {track.playCount}×</div>
       </section>
 
       <section class="box">
         <div class="section-title row">Versions <button class="plain small" onclick={newVersion}><Icon name="plus" size={12} /> New</button></div>
         {#each track.versions as v (v.id)}
           {@const pb = playback(track, v, null, app.clubStyleOf)}
+          {@const vrec = recordingOf(track, v)}
           <div class="version" class:hl={app.selected.includes(v.id) || entry?.versionId === v.id} style:--c={app.styleColor(v.styles?.[0])}>
             <div class="vhead">
               <input type="text" class="vname" value={v.name} onchange={(e) => patchVersion(v, { name: e.currentTarget.value })} />
@@ -316,6 +325,12 @@
                 onclick={() => confirmAction(`Delete version “${v.name}”?`).then((ok) => { if (ok) app.run(api.deleteVersion(v.id)); })}><Icon name="trash" size={13} /></button>
             </div>
             <div class="grid">
+              {#if track.recordings.length > 1}
+                <span class="lbl" title="The audio this version plays">Recording</span>
+                <select value={v.recording} onchange={(e) => patchVersion(v, { recording: e.currentTarget.value })}>
+                  {#each track.recordings as r (r.id)}<option value={r.id}>{r.title}{r.artist ? ` — ${r.artist}` : ""} ({fmtTime(r.durationMs)}{r.bpm ? `, ${fmtBpm(r.bpm)} BPM` : ""})</option>{/each}
+                </select>
+              {/if}
               <span class="lbl">Styles</span>
               <StyleChips value={v.styles ?? []} bpm={pb.target} onchange={(keys) => patchVersion(v, { styles: keys })} />
               <span class="lbl" title="Shown to dancers instead of the style names, e.g. the name of a line dance">Shown as</span>
@@ -349,10 +364,10 @@
                 {/if}
               </span>
               <span class="lbl">Gain</span>
-              <span class="row"><input type="number" step="0.5" placeholder="song" value={v.gainDb ?? ""}
+              <span class="row"><input type="number" step="0.5" placeholder="recording" value={v.gainDb ?? ""}
                 onchange={(e) => patchVersion(v, { gainDb: e.currentTarget.value ? +e.currentTarget.value : null })} /> dB</span>
             </div>
-            {#if app.stemsReady.has(track.id)}
+            {#if vrec && app.stemsReady.has(vrec.id)}
               <div class="row small">
                 <span class="lbl">Stems</span>
                 {#each ["vocals", "drums", "bass", "other"] as stem}
@@ -369,80 +384,147 @@
             {/if}
             <textarea rows="1" placeholder="Comment (e.g. slowed for teaching)" value={v.comment ?? ""}
               onchange={(e) => patchVersion(v, { comment: e.currentTarget.value })}></textarea>
+            <div class="row small">
+              <button class="plain small" title="To suggest this version in a club's file: the song's title with this recording's fingerprint, length and sources"
+                onclick={async () => copy(await app.run(api.clubSongText(v.id)), "Song entry")}><Icon name="copy" size={11} /> Club-file entry</button>
+              {#if track.versions.length > 1}
+                <button class="plain small" title="Make this version a song of its own (undoes Combine into One Song)"
+                  onclick={() => app.run(api.separateVersions([v.id]))}>Separate into Its Own Song</button>
+              {/if}
+            </div>
           </div>
         {/each}
       </section>
 
-      <section class="box">
-        <div class="section-title">Sources</div>
-        {#each track.sources as s}
-          <div class="source">
-            <Icon name={s.kind === "spotify" ? "spotify" : "music"} size={13} />
-            {#if s.kind === "file"}
-              {@const paths = track.files}
-              <div class="src-body">
-                {#if paths.length}
-                  {#each paths as p}<div class="path" title={p}>{p}</div>{/each}
-                {:else}
-                  <div class="warn small">File not found on this computer (content id {s.key.slice(0, 10)}…). Add its folder to your library to relink it.</div>
-                {/if}
-              </div>
-            {:else}
-              <div class="src-body path" title={s.key}>{s.key}</div>
-            {/if}
-            {#if track.sources.length > 1}
-              <button class="plain icon" title="Remove source" onclick={() => app.run(api.removeSource(track.id, s))}><Icon name="x" size={12} /></button>
-            {/if}
+      {#each track.recordings as rec (rec.id)}
+        {@const preferred = rec.preferredSource ?? ""}
+        {@const job = app.stems?.jobs[rec.id]}
+        {@const others = otherSongs(rec)}
+        <section class="box">
+          <div class="section-title">
+            Recording{#if track.recordings.length > 1}: {rec.title}{/if}
           </div>
-        {/each}
-        {#if !track.sources.some((s) => s.kind === "spotify")}
-          <div class="row">
-            <input type="text" placeholder="Link a Spotify track (URL or URI)" bind:value={linkInput} style="flex:1" />
-            <button class="small" disabled={!linkInput.trim()} onclick={async () => { if (await app.run(api.linkSpotify(track.id, linkInput))) linkInput = ""; }}>
-              <Icon name="link" size={12} /> Link
-            </button>
-          </div>
-        {/if}
-        {#if track.sources.length > 1}
-          <div class="row small">
-            Play from
-            <div class="segmented">
-              <button class:on={preferred !== "spotify"} onclick={() => patchTrack({ preferredSource: null })}>File</button>
-              <button class:on={preferred === "spotify"} onclick={() => patchTrack({ preferredSource: "spotify" })}>Spotify</button>
+          {#if track.recordings.length > 1 || others.length}
+            <div class="small faint">
+              {#if track.recordings.length > 1}Played by {track.versions.filter((v) => v.recording === rec.id).map((v) => v.name).join(", ")}.{/if}
+              {#if others.length}
+                Also used by
+                {#each others as o, i (o.id)}{i ? ", " : ""}<button class="plain link small" onclick={() => (app.inspectTrack = o.id)}>{o.title}</button>{/each}.
+              {/if}
             </div>
+          {/if}
+          <div class="grid">
+            <span class="lbl">BPM</span>
+            <span class="row">
+              <input type="number" step="0.1" value={rec.bpm ?? ""} onchange={(e) => patchRecording(rec, { bpm: e.currentTarget.value ? +e.currentTarget.value : null })} />
+              <button class="small" onclick={() => tap(rec)} title="Tap along to the beat (4+ taps)">Tap</button>
+              <span class="mult">
+                <button class="plain small" onclick={() => scaleBpm(rec, 0.5)} title="Half">½</button>
+                <button class="plain small" onclick={() => scaleBpm(rec, 2 / 3)} title="×⅔ (triple meter)">⅔</button>
+                <button class="plain small" onclick={() => scaleBpm(rec, 1.5)} title="×1.5 (triple meter)">1½</button>
+                <button class="plain small" onclick={() => scaleBpm(rec, 2)} title="Double">2×</button>
+              </span>
+            </span>
+            <span></span>
+            <span class="row">
+              {#if rec.bpmSource !== "detected"}
+                <button class="plain small" title="Use the BPM found by analysis"
+                  onclick={() => app.run(api.resetBpm(rec.id, "detected"))}>
+                  ↺ Analysed{rec.detectedBpm != null ? ` (${fmtBpm(rec.detectedBpm)})` : ""}
+                </button>
+              {/if}
+              {#if rec.bpmSource !== "tag" && (rec.tagBpm != null || rec.files.length)}
+                <button class="plain small" title="Use the BPM stored in the file's tags"
+                  onclick={() => app.run(api.resetBpm(rec.id, "tag"))}>
+                  ↺ File tag{rec.tagBpm != null ? ` (${fmtBpm(rec.tagBpm)})` : ""}
+                </button>
+              {/if}
+            </span>
+            <span></span>
+            <span class="faint small">{rec.bpmSource ? `from ${({ detected: "analysis", tag: "file tag", tap: "tapping", user: "you" } as Record<string, string>)[rec.bpmSource] ?? rec.bpmSource}` : rec.analyzed ? "not detected" : "analysing…"}{#if rec.loudnessDb != null}{" · "}{rec.loudnessDb.toFixed(1)} LUFS{/if} · {fmtTime(rec.durationMs)}</span>
+            <span class="lbl" title="Beats per bar. Detected from the audio, on the beat grid of the BPM above (fix the BPM first if it's off)">Meter</span>
+            <span class="row">
+              <select value={rec.meterSource === "user" ? String(rec.beatsPerBar ?? "") : "auto"}
+                onchange={(e) => { const v = e.currentTarget.value; patchRecording(rec, { beatsPerBar: v === "auto" ? null : +v }); }}>
+                <option value="auto">Detected{rec.detectedMeter ? `: ${meterName(rec.detectedMeter)}` : rec.analyzed ? ": unclear" : ""}</option>
+                <option value="3">Triple (3/4, 6/8)</option>
+                <option value="4">Duple (2/4, 4/4)</option>
+              </select>
+            </span>
+            <span class="lbl">Gain</span>
+            <span class="row"><input type="number" step="0.5" value={rec.gainDb ?? 0} onchange={(e) => patchRecording(rec, { gainDb: +e.currentTarget.value })} /> dB</span>
           </div>
-        {/if}
-        {#if track.files.length}
-          {@const job = app.stems?.jobs[track.id]}
-          <div class="row small">
-            {#if app.stemsReady.has(track.id)}
-              Stems ready
-              <button class="plain small" onclick={() => app.run(api.stemsDelete(track.id))}>Delete stems</button>
-            {:else if job && job.state !== "failed"}
-              <span class="num">Preparing stems… {job.state === "running" ? `${Math.round(job.percent)}%` : "(queued)"}</span>
-            {:else}
-              <button class="small" onclick={() => app.run(api.stemsPrepare([track.id]))}>Prepare Stems</button>
-              {#if job?.state === "failed"}<span class="warn">{job.message}</span>{/if}
+          <div class="section-title sub">Sources</div>
+          {#each rec.sources as s}
+            <div class="source">
+              <Icon name={s.kind === "spotify" ? "spotify" : "music"} size={13} />
+              {#if s.kind === "file"}
+                <div class="src-body">
+                  {#if rec.files.length}
+                    {#each rec.files as p}<div class="path" title={p}>{p}</div>{/each}
+                  {:else}
+                    <div class="warn small">File not found on this computer (content id {s.key.slice(0, 10)}…). Add its folder to your library to relink it.</div>
+                  {/if}
+                </div>
+              {:else}
+                <div class="src-body path" title={s.key}>{s.key}</div>
+              {/if}
+              {#if rec.sources.length > 1}
+                <button class="plain small" title="This source is different audio: make it a recording of its own (undoes Same Recording)"
+                  onclick={(ev) => splitMenu(ev, rec, s)}>Split off…</button>
+                <button class="plain icon" title="Remove source" onclick={() => app.run(api.removeSource(rec.id, s))}><Icon name="x" size={12} /></button>
+              {/if}
+            </div>
+          {/each}
+          {#if !rec.sources.some((s) => s.kind === "spotify")}
+            <div class="row">
+              <input type="text" placeholder="Link a Spotify track (URL or URI) of this audio" bind:value={linkInput} style="flex:1" />
+              <button class="small" disabled={!linkInput.trim()} onclick={async () => { if (await app.run(api.linkSpotify(rec.id, linkInput))) linkInput = ""; }}>
+                <Icon name="link" size={12} /> Link
+              </button>
+            </div>
+          {/if}
+          {#if rec.sources.length > 1}
+            <div class="row small">
+              Play from
+              <div class="segmented">
+                <button class:on={preferred !== "spotify"} onclick={() => patchRecording(rec, { preferredSource: null })}>File</button>
+                <button class:on={preferred === "spotify"} onclick={() => patchRecording(rec, { preferredSource: "spotify" })}>Spotify</button>
+              </div>
+            </div>
+          {/if}
+          {#if rec.files.length}
+            <div class="row small">
+              {#if app.stemsReady.has(rec.id)}
+                Stems ready
+                <button class="plain small" onclick={() => app.run(api.stemsDelete(rec.id))}>Delete stems</button>
+              {:else if job && job.state !== "failed"}
+                <span class="num">Preparing stems… {job.state === "running" ? `${Math.round(job.percent)}%` : "(queued)"}</span>
+              {:else}
+                <button class="small" onclick={() => app.run(api.stemsPrepare([rec.id]))}>Prepare Stems</button>
+                {#if job?.state === "failed"}<span class="warn">{job.message}</span>{/if}
+              {/if}
+            </div>
+          {/if}
+          <div class="row small faint">
+            {rec.analyzed ? "Analysed" : "Not analysed yet"}
+            <button class="plain small" onclick={() => api.analyze([rec.id])}><Icon name="reload" size={11} /> Re-analyse</button>
+            <button class="plain small" title="A new song (in your library) playing this recording, e.g. for another line dance"
+              onclick={() => app.run(api.songFromRecording(rec.id)).then((t) => { if (t) app.inspectTrack = t.id; })}>Make a Song from It</button>
+          </div>
+          <div class="row small" title="To suggest it in a club's file: the fingerprint recognises this recording in any audio format; the hash, exactly this file">
+            <span class="faint">For a club file:</span>
+            <button class="plain small" disabled={!rec.fingerprint} title={rec.fingerprint ? "" : "Analyse it first"}
+              onclick={() => copy(rec.fingerprint, "Fingerprint")}>Fingerprint</button>
+            {#if rec.sources.find((x) => x.kind === "file")}
+              <button class="plain small" onclick={() => copy(rec.sources.find((x) => x.kind === "file")?.key, "File hash")}>Hash</button>
+            {/if}
+            {#if app.songMatches[rec.id]?.length && app.club}
+              <span class="ok" title="{app.club.name} suggests this recording">★ {app.songMatches[rec.id].map((id) => app.club?.style[id]?.name ?? id).join(", ")}</span>
             {/if}
           </div>
-        {/if}
-        <div class="row small faint">
-          {track.analyzed ? "Analysed" : "Not analysed yet"} · played {track.playCount}×
-          <button class="plain small" onclick={() => api.analyze([track.id])}><Icon name="reload" size={11} /> Re-analyse</button>
-        </div>
-        <div class="row small" title="To suggest this song in a club's file: the fingerprint recognises this version in any audio format; the hash, exactly this file">
-          <span class="faint">For a club file:</span>
-          <button class="plain small" onclick={async () => copy(await app.run(api.clubSongText(track.id)), "Song entry")}><Icon name="copy" size={11} /> Song entry</button>
-          <button class="plain small" disabled={!track.fingerprint} title={track.fingerprint ? "" : "Analyse the song first"}
-            onclick={() => copy(track.fingerprint, "Fingerprint")}>Fingerprint</button>
-          {#if track.sources.find((x) => x.kind === "file")}
-            <button class="plain small" onclick={() => copy(track.sources.find((x) => x.kind === "file")?.key, "File hash")}>Hash</button>
-          {/if}
-          {#if app.songMatches[track.id]?.length && app.club}
-            <span class="ok" title="{app.club.name} suggests this song">★ {app.songMatches[track.id].map((id) => app.club?.style[id]?.name ?? id).join(", ")}</span>
-          {/if}
-        </div>
-      </section>
+        </section>
+      {/each}
     {/if}
   {/if}
 </div>
@@ -450,14 +532,16 @@
 {#if clubMenu}<ContextMenu x={clubMenu.x} y={clubMenu.y} items={clubMenu.items} onclose={() => (clubMenu = null)} />{/if}
 
 <style>
-  .insp { overflow-y: auto; height: 100%; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+  .insp { overflow-y: auto; overflow-x: hidden; height: 100%; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+  .insp > * { min-width: 0; }
   .box { display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: var(--radius); }
   .setonly { flex-direction: row; align-items: center; justify-content: space-between; font-size: var(--fs-sm); color: var(--text-dim); }
   .entrybox { border-color: color-mix(in srgb, var(--main) 40%, var(--border)); }
   .section-title.sub { margin-top: 6px; }
   .col { display: flex; flex-direction: column; gap: 4px; }
   .section-title.row { display: flex; justify-content: space-between; align-items: center; }
-  .grid { display: grid; grid-template-columns: 74px 1fr; gap: 5px 8px; align-items: center; }
+  .grid { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 5px 8px; align-items: center; }
+  .grid select { min-width: 0; width: 100%; }
   .lbl { color: var(--text-dim); font-size: var(--fs-sm); }
   .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .big { font-weight: 600; font-size: var(--fs-md); height: 30px; }
@@ -481,6 +565,7 @@
   .src-body { flex: 1; min-width: 0; }
   .path { font-size: var(--fs-xs); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
   .warn { color: var(--yellow); }
+  .link { padding: 0; height: auto; color: var(--blue); display: inline; }
   .danger { color: var(--red); }
   textarea { width: 100%; }
 </style>

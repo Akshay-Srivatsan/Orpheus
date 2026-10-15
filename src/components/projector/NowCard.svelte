@@ -19,9 +19,9 @@
   const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
   let art = $state<string | null>(null);
   $effect(() => {
-    const id = !revealNext && s.showArtwork && inTauri ? entry?.trackId : null;
+    const id = !revealNext && s.showArtwork && inTauri ? entry?.recordingId : null;
     art = null;
-    if (id) artwork(id).then((a) => { if (entry?.trackId === id) art = a; });
+    if (id) artwork(id).then((a) => { if (entry?.recordingId === id) art = a; });
   });
   const key = $derived(`${revealNext ? "next" : gap ? "past" : "now"}:${entry?.id ?? ""}`);
 
