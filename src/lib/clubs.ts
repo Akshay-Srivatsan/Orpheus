@@ -11,11 +11,11 @@
 //    one the song doesn't match, with a warning);
 // 2. the styles the club suggests this very song for (its listed songs, found
 //    by fingerprint, Spotify track or file hash);
-// 3. the club styles it matches. When it matches several, your mapping
-//    (Settings → Styles & Tags) picks which of them show by default: those
-//    ticked for your styles on the song, or all of them if none is. The
-//    mapping never adds a style the song doesn't match, and doesn't matter
-//    when only one matches.
+// 3. the club styles it matches. When it matches several, your styles pick
+//    which of them show by default: those your styles on the song are called
+//    at the club (your rules in Settings → Styles & Tags, or the same name),
+//    or all of them if none is. This never adds a style the song doesn't
+//    match, and doesn't matter when only one matches.
 //
 // This module is the only implementation: the main window and the projector
 // both use it.
@@ -306,7 +306,7 @@ export interface ClubShown {
  * The club styles a song (or slot) shows.
  * @param chosen the entry's chosen club styles (`clubStyles`), if any
  * @param myKeys your styles on the song
- * @param mapping your mapping for this club: your style key → club style ids
+ * @param mapping what your styles are called at this club: your style key → club style ids
  */
 export function clubShown(
   club: Club,

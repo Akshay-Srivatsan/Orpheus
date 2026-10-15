@@ -293,7 +293,10 @@ impl Store {
         let styles_path = library_dir.join("styles.json");
         if styles_path.exists() {
             match read_json::<StyleLibrary>(&styles_path) {
-                Ok(s) => inner.styles = Some(s),
+                Ok(mut s) => {
+                    s.upgrade();
+                    inner.styles = Some(s);
+                }
                 Err(e) => errors.push(format!("{e:#}")),
             }
         }

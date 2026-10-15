@@ -84,11 +84,28 @@ export function clubStyleShown(club: Club, id: string, fit: Assessment | undefin
   return { key: id, name: def.name, short: def.short, color: def.color, club: def, unmapped: false, fit: fit?.fit ?? null, problems: fit?.problems ?? [], rate: fit?.rate ?? 1, auto: false };
 }
 
+/** Names are the same when they differ only in case and spacing. */
+export const sameName = (a: string, b: string) => a.trim().replace(/\s+/g, " ").toLowerCase() === b.trim().replace(/\s+/g, " ").toLowerCase();
+
+/** The club styles each of your styles may be called at a club: your rules, and those with the same name. */
+export function clubNames(club: Club, clubId: string | null | undefined, lib: StyleLibrary | null): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  const add = (mine: string, id: string) => {
+    const ids = (out[mine] ??= []);
+    if (id in club.style && !ids.includes(id)) ids.push(id);
+  };
+  for (const r of (clubId && lib?.clubRules?.[clubId]) || []) add(r.mine, r.club);
+  for (const mine of lib?.styles ?? []) {
+    for (const [id, s] of Object.entries(club.style)) if (sameName(styleDef(id, s).name, mine.name)) add(mine.key, id);
+  }
+  return out;
+}
+
 /** The club a set is planned with, and what matching needs alongside it. */
 export interface ClubContext {
   club: Club;
-  /** Your mapping for this club (your style key → club style ids). */
-  mapping: Record<string, string[]> | undefined;
+  /** Your styles' names at this club (your style key → club style ids): rules and same names. */
+  mapping: Record<string, string[]>;
   tempoChange: TempoChange;
 }
 
@@ -96,7 +113,7 @@ export function clubContext(club: Club | null, clubId: string | null | undefined
   if (!club) return null;
   return {
     club,
-    mapping: clubId ? lib?.clubMappings?.[clubId] : undefined,
+    mapping: clubNames(club, clubId, lib),
     tempoChange: club.set.tempo_change ?? { faster: defaultChangePct, slower: defaultChangePct },
   };
 }

@@ -13,8 +13,12 @@ const club: Club = {
   style: { rotary: style("Rotary Waltz", [3], [135, 160]), "cross-step": style("Cross-Step Waltz", [3], [105, 125]), polka: style("Polka", [2], [105, 130]) },
 };
 const lib: StyleLibrary = {
-  styles: [{ key: "waltz", name: "Waltz", short: "W", color: "#111111" }, { key: "kizomba", name: "Kizomba", short: "K", color: "#222222" }],
-  clubMappings: { club: { waltz: ["rotary", "cross-step"] } },
+  styles: [
+    { key: "waltz", name: "Waltz", short: "W", color: "#111111" },
+    { key: "kizomba", name: "Kizomba", short: "K", color: "#222222" },
+    { key: "my-polka", name: "polka", short: "", color: "#333333" },
+  ],
+  clubRules: { club: [{ mine: "waltz", club: "rotary" }, { mine: "waltz", club: "cross-step" }] },
 };
 const track = (bpm: number, meter: number): Track => ({
   id: "t", title: "Song", artist: "", album: "", durationMs: 180_000, bpm, bpmSource: "detected", beatsPerBar: meter, meterSource: "detected",
@@ -39,6 +43,12 @@ describe("what songs show", () => {
   it("unmapped styles show every match", () => {
     expect(names(track(118, 4), version(["kizomba"]))).toEqual(["Polka"]);
     expect(names(track(118, 4), version([]))).toEqual(["Polka"]);
+  });
+
+  it("same names need no rule", () => {
+    expect(ctx?.mapping["my-polka"]).toEqual(["polka"]);
+    expect(ctx?.mapping.waltz).toEqual(["rotary", "cross-step"]);
+    expect(ctx?.mapping.kizomba).toBeUndefined();
   });
 
   it("a slot shows its chosen style", () => {

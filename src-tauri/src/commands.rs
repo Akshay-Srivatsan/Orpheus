@@ -503,7 +503,8 @@ pub async fn styles_get(app: S<'_>) -> Res<StylesInfo> {
 }
 
 #[tauri::command]
-pub async fn styles_save(app: S<'_>, library: StyleLibrary) -> Res<()> {
+pub async fn styles_save(app: S<'_>, mut library: StyleLibrary) -> Res<()> {
+    library.upgrade();
     app.store.save_style_library(library).map_err(ae)?;
     crate::app::emit(&app.handle, "styles-changed", ());
     app.emit_perform();
@@ -522,17 +523,16 @@ pub async fn styles_rekey(app: S<'_>, from: String, to: Option<String>) -> Res<(
         Some(t) => lib.styles.iter_mut().filter(|s| s.key == from).for_each(|s| s.key = t.to_string()),
         None => lib.styles.retain(|s| s.key != from),
     }
-    for rows in lib.club_mappings.values_mut() {
-        if let Some(row) = rows.remove(&from) {
-            if let Some(t) = to.as_deref() {
-                // Merging onto an existing style: the union of both rows.
-                let merged = rows.entry(t.to_string()).or_default();
-                for c in row {
-                    if !merged.contains(&c) {
-                        merged.push(c);
-                    }
+    // Rules for the style follow it (merging keeps both styles' rules), or go with it.
+    for (club, rules) in std::mem::take(&mut lib.club_rules) {
+        for mut r in rules {
+            if r.mine == from {
+                match to.as_deref() {
+                    Some(t) => r.mine = t.to_string(),
+                    None => continue,
                 }
             }
+            lib.add_rule(&club, r);
         }
     }
     app.store.save_style_library(lib).map_err(ae)?;

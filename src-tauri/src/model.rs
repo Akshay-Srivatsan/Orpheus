@@ -140,7 +140,7 @@ pub struct VersionPatch {
 }
 
 /// One of *your* dance styles: what versions in your library are tagged with.
-/// Club profiles have their own styles; `StyleLibrary::mappings` connects them.
+/// Club profiles have their own styles; `StyleLibrary::club_rules` connects them.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct LibraryStyle {
@@ -163,22 +163,55 @@ pub struct LibraryTag {
 }
 
 /// `styles.json` in the library folder: your styles and tags, and for each club
-/// profile id the rules mapping them onto the club's styles. Without a
-/// matching rule, a club style with the same key or name is used.
+/// profile id the rules relating them to the club's styles. A club style with
+/// the same name as one of yours needs no rule.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct StyleLibrary {
     pub styles: Vec<LibraryStyle>,
-    /// Per club id: which of the club's styles each of your styles may show
-    /// as (a matrix: your style key → club style ids). A song shows those of
-    /// them it matches (`src/lib/clubs.ts`).
+    /// Per club id: "what I call `mine`, the club may call `club`". When a
+    /// song fits several of the club's styles, it shows those its styles lead
+    /// to (`src/lib/clubs.ts`).
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub club_rules: std::collections::BTreeMap<String, Vec<ClubRule>>,
+    /// The same as a table (your style key → club style ids), from older
+    /// files: read, then saved as `club_rules` (see `upgrade`).
+    #[serde(skip_serializing)]
     pub club_mappings: std::collections::BTreeMap<String, std::collections::BTreeMap<String, Vec<String>>>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<LibraryTag>,
     /// How announcements say words (dance names etc.).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub pronunciations: Vec<Pronunciation>,
+}
+
+/// "What I call `mine` (your style key), the club may call `club` (its style id)."
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(default)]
+pub struct ClubRule {
+    pub mine: String,
+    pub club: String,
+}
+
+impl StyleLibrary {
+    /// Turns an older file's table into rules.
+    pub fn upgrade(&mut self) {
+        for (club, rows) in std::mem::take(&mut self.club_mappings) {
+            for (mine, ids) in rows {
+                for id in ids {
+                    self.add_rule(&club, ClubRule { mine: mine.clone(), club: id });
+                }
+            }
+        }
+    }
+
+    /// Adds a rule unless it's already there.
+    pub fn add_rule(&mut self, club: &str, rule: ClubRule) {
+        let rules = self.club_rules.entry(club.to_string()).or_default();
+        if !rules.contains(&rule) {
+            rules.push(rule);
+        }
+    }
 }
 
 /// An announcement pronunciation: `word` (or phrase, whole words, any case)
@@ -575,3 +608,20 @@ impl SetlistEntry {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn older_style_tables_become_rules() {
+        let mut lib: StyleLibrary =
+            serde_json::from_str(r#"{"styles":[],"clubMappings":{"club":{"waltz":["rotary","cross-step"]}}}"#).unwrap();
+        lib.upgrade();
+        lib.upgrade();
+        let rule = |m: &str, c: &str| ClubRule { mine: m.into(), club: c.into() };
+        assert_eq!(lib.club_rules["club"], vec![rule("waltz", "rotary"), rule("waltz", "cross-step")]);
+        let saved = serde_json::to_string(&lib).unwrap();
+        assert!(saved.contains("clubRules") && !saved.contains("clubMappings"), "{saved}");
+    }
+}

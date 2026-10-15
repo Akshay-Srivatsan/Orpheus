@@ -188,11 +188,17 @@ export interface LibraryTag {
 /** styles.json: your styles and tags and, per club profile id, the mapping rules. */
 export interface StyleLibrary {
   styles: LibraryStyle[];
-  /** Per club id: which club styles each of your styles may show as (your key → club style ids). */
-  clubMappings?: Record<string, Record<string, string[]>>;
+  /** Per club id: "what I call `mine`, the club may call `club`" (same names need no rule). */
+  clubRules?: Record<string, ClubRule[]>;
   tags?: LibraryTag[];
   /** How announcements say words: a respelling, or phonemes between slashes. */
   pronunciations?: Pronunciation[];
+}
+
+/** "What I call `mine` (your style key), the club may call `club` (its style id)." */
+export interface ClubRule {
+  mine: string;
+  club: string;
 }
 
 export interface Pronunciation {
