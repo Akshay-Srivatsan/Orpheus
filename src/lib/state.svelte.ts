@@ -188,10 +188,19 @@ class AppState {
     trimSilence: this.settings?.trimSilence ?? true,
   });
 
+  private toastTimers = new Map<number, ReturnType<typeof setTimeout>>();
+
   toast(text: string, kind: Toast["kind"] = "error") {
-    const id = Date.now() + Math.random();
-    this.toasts.push({ id, text, kind });
-    setTimeout(() => (this.toasts = this.toasts.filter((t) => t.id !== id)), kind === "error" ? 6000 : 3500);
+    const ms = kind === "error" ? 6000 : 3500;
+    // The same message again (e.g. from a controller held down): keep one, show it longer.
+    const same = this.toasts.find((t) => t.text === text && t.kind === kind);
+    const id = same?.id ?? Date.now() + Math.random();
+    if (!same) this.toasts.push({ id, text, kind });
+    clearTimeout(this.toastTimers.get(id));
+    this.toastTimers.set(id, setTimeout(() => {
+      this.toasts = this.toasts.filter((t) => t.id !== id);
+      this.toastTimers.delete(id);
+    }, ms));
   }
 
   /** Runs an API call, showing errors as toasts. */

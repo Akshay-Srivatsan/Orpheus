@@ -778,15 +778,16 @@ pub async fn deck_jump(app: S<'_>, deck: usize, secs: f64) -> Res<()> {
 
 /// Scrub to a position (waveform drag); plays snippets when paused.
 #[tauri::command]
-pub async fn deck_scrub(app: S<'_>, deck: usize, ms: f64) -> Res<()> {
-    app.deck_scrub_to(deck.min(1), ms / 1000.0).map_err(ae)
+pub async fn deck_scrub(app: S<'_>, deck: usize, ms: f64, force: Option<bool>) -> Res<()> {
+    app.deck_scrub_to(deck.min(1), ms / 1000.0, force.unwrap_or(false)).map_err(ae)
 }
 
-/// Seek without protection checks beyond the UI's own (click on waveform).
+/// Seek (click on the waveform). `force` (⌥ / Alt held) overrides the
+/// on-air protection.
 #[tauri::command]
-pub async fn deck_seek(app: S<'_>, deck: usize, ms: i64) -> Res<()> {
+pub async fn deck_seek(app: S<'_>, deck: usize, ms: i64, force: Option<bool>) -> Res<()> {
     let deck = deck.min(1);
-    if app.protected(deck) {
+    if app.protected(deck) && !force.unwrap_or(false) {
         return Err("Seeking is disabled on the on-air deck while it plays (Settings → General)".into());
     }
     app.decks[deck].seek(ms as f64 / 1000.0);

@@ -94,7 +94,8 @@ export const api = {
   deckCue: (deck: 0 | 1, down: boolean) => call<void>("deck_cue", { deck, down }),
   deckHotcue: (deck: 0 | 1, slot: number, action: "trigger" | "clear") => call<void>("deck_hotcue", { deck, slot, action }),
   deckJump: (deck: 0 | 1, secs: number) => call<void>("deck_jump", { deck, secs }),
-  deckScrub: (deck: 0 | 1, ms: number) => call<void>("deck_scrub", { deck, ms }),
+  /** `force`: override the on-air protection (⌥ / Alt held). */
+  deckScrub: (deck: 0 | 1, ms: number, force = false) => call<void>("deck_scrub", { deck, ms, force }),
   deckGoLive: (deck: 0 | 1) => call<string>("deck_go_live", { deck }),
   deckSetPoint: (deck: 0 | 1, kind: "start" | "end" | "fade" | "clear") => call<void>("deck_set_point", { deck, kind }),
   deckTempoReset: (deck: 0 | 1) => call<void>("deck_tempo_reset", { deck }),
@@ -110,7 +111,8 @@ export const api = {
   stemsRemoveModel: () => call<void>("stems_remove_model"),
   spotifyCacheBytes: () => call<number>("spotify_cache_bytes"),
   spotifyClearCache: () => call<number>("spotify_clear_cache"),
-  deckSeek: (deck: 0 | 1, ms: number) => call<void>("deck_seek", { deck, ms: Math.round(ms) }),
+  /** `force`: override the on-air protection (⌥ / Alt held). */
+  deckSeek: (deck: 0 | 1, ms: number, force = false) => call<void>("deck_seek", { deck, ms: Math.round(ms), force }),
   deckSet: (deck: 0 | 1, o: { tempo?: number; trimDb?: number; pfl?: boolean; fadeAtMs?: number | null }) =>
     call<void>("deck_set", {
       deck,

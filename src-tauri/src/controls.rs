@@ -166,19 +166,20 @@ impl App {
 
     /// Moves the playhead by `secs` (coalesced; plays a snippet when paused).
     pub fn deck_nudge_position(&self, deck: usize, secs: f64) -> Result<()> {
-        self.scrub(deck, |base| base + secs)
+        self.scrub(deck, false, |base| base + secs)
     }
 
-    /// Scrub to an absolute position (waveform drag).
-    pub fn deck_scrub_to(&self, deck: usize, secs: f64) -> Result<()> {
-        self.scrub(deck, |_| secs)
+    /// Scrub to an absolute position (waveform drag). `force` (⌥ / Alt held)
+    /// overrides the on-air protection.
+    pub fn deck_scrub_to(&self, deck: usize, secs: f64, force: bool) -> Result<()> {
+        self.scrub(deck, force, |_| secs)
     }
 
     /// Sets the coalesced scrub target from the current scrub position.
-    fn scrub(&self, deck: usize, target: impl FnOnce(f64) -> f64) -> Result<()> {
+    fn scrub(&self, deck: usize, force: bool, target: impl FnOnce(f64) -> f64) -> Result<()> {
         let d = &self.decks[deck];
         self.require_loaded(deck)?;
-        if self.protected(deck) {
+        if self.protected(deck) && !force {
             return Err(anyhow!("Scrubbing is disabled on the on-air deck while it plays."));
         }
         let mut cs = self.deck_ctl.lock();
@@ -451,8 +452,9 @@ impl App {
                 ("jogTouch", Value::Press) => self.deck_ctl.lock()[deck].jog_touch = true,
                 ("jogTouch", Value::Release) => self.deck_ctl.lock()[deck].jog_touch = false,
                 ("jog", Value::Rel(n)) => {
-                    // Silently ignored when protected: jog wheels get bumped.
-                    if !self.protected(deck) {
+                    // Silently ignored when protected (jog wheels get bumped)
+                    // or when nothing is loaded.
+                    if d.loaded() && !self.protected(deck) {
                         result = self.deck_jog(deck, n);
                     }
                 }

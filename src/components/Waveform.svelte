@@ -14,9 +14,9 @@
     /** Changes when the waveform may have become available (e.g. analysis finished). */
     revision?: unknown;
     /** Called with a position when the user clicks (null = seeking disabled). */
-    onseek?: ((ms: number) => void) | null;
-    /** Called repeatedly while dragging across the waveform. */
-    onscrub?: ((ms: number) => void) | null;
+    onseek?: ((ms: number, alt: boolean) => void) | null;
+    /** Called repeatedly while dragging across the waveform; `alt`: ⌥ / Alt was held when the drag began. */
+    onscrub?: ((ms: number, alt: boolean) => void) | null;
     /** Main cue point. */
     cueMs?: number | null;
     /** Hot cues (pad number + position). */
@@ -137,11 +137,14 @@
   }
 
   let lastScrub = 0;
+  /** ⌥ / Alt held when the current drag began (read from the pointer, not the keyboard). */
+  let dragAlt = false;
   function down(e: PointerEvent) {
     if (!onseek || durationMs <= 0 || e.button !== 0) return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     dragging = true;
-    onseek(at(e));
+    dragAlt = e.altKey;
+    onseek(at(e), dragAlt);
   }
   function move(e: PointerEvent) {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -150,10 +153,10 @@
     const now = performance.now();
     if (now - lastScrub < 40) return;
     lastScrub = now;
-    onscrub(at(e));
+    onscrub(at(e), dragAlt || e.altKey);
   }
   function up(e: PointerEvent) {
-    if (dragging && onscrub) onscrub(at(e));
+    if (dragging && onscrub) onscrub(at(e), dragAlt || e.altKey);
     dragging = false;
   }
 </script>

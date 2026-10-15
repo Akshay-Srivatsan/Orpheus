@@ -78,22 +78,25 @@
     api.deckSet(deck, { tempo: v });
   }
 
-  function guard(): boolean {
-    if (isProtected && !altDown) {
+  function guard(alt = false): boolean {
+    if (isProtected && !(alt || altDown)) {
       app.toast(`Deck ${name} is on air. Hold ⌥ Option / Alt to seek it anyway, or turn off protection in Settings → General.`, "info");
       return false;
     }
     return true;
   }
 
-  function seek(ms: number) {
-    if (!guard()) return;
-    app.run(isProtected ? api.deckSeek(deck, ms) : api.deckScrub(deck, ms));
+  function seek(ms: number, alt = false) {
+    if (!guard(alt)) return;
+    // Past the guard on a protected deck means ⌥ / Alt is held: override.
+    app.run(isProtected ? api.deckSeek(deck, ms, true) : api.deckScrub(deck, ms));
   }
 
-  function scrub(ms: number) {
-    if (isProtected && !altDown) return;
-    api.deckScrub(deck, ms).catch(() => {});
+  /** Dragging on the waveform; with ⌥ / Alt it also works on the on-air deck. */
+  function scrub(ms: number, alt = false) {
+    const force = alt || altDown;
+    if (isProtected && !force) return;
+    api.deckScrub(deck, ms, force).catch(() => {});
   }
 
   function pad(slot: number, e: MouseEvent) {
