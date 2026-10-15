@@ -1,0 +1,173 @@
+# Friday Night Waltz (Palo Alto): its published format, from the FAQ
+# (http://fridaynightwaltz.com/faq.shtml) and the "Would you like to DJ"
+# handout (http://fridaynightwaltz.com/handout.pdf), October 2026.
+#
+# FNW's actual playlist guideline isn't published: the handout says DJs get it
+# on request (Scott Gamble, scott.g@pway.com). Tempos here are Lucas Garron's,
+# which he based partly on DJing FNW; FNW doesn't publish tempos. Counts follow
+# the FAQ's "about"s and are not rules ("not hard rules, just typical").
+
+name = "Friday Night Waltz"
+description = """Friday Night Waltz, First United Methodist Church, Palo Alto: \
+the DJ dance from 9:00 to about 11:45 in four sets with short breaks between \
+them. Easier and slower dances in the first two sets, faster and harder ones in \
+the third and fourth. Usually a mixer in sets 1 and 3 and a choreographed waltz \
+in sets 2 and 4; the birthday jam is at the second break (about 10:30)."""
+website = "http://fridaynightwaltz.com/faq.shtml"
+
+[set]
+minutes = [165, 180]
+# FAQ: "45 to 50 dances in an evening"; the handout says 40 to 45.
+songs = [40, 50]
+
+[style.cross-step]
+name = "Cross-Step Waltz"
+short = "CSW"
+color = "#a78bfa"
+meter = 3
+tempo = [105, 130]
+preferred = [114, 122]
+
+[style.ballroom-waltz]
+name = "Ballroom Waltz"
+short = "BW"
+color = "#c4b5fd"
+meter = 3
+tempo = [80, 105]
+note = "Slow waltz. Tempo: Powers' slow American ballroom waltz."
+
+[style.rotary]
+name = "Rotary Waltz"
+short = "RW"
+color = "#f472b6"
+meter = 3
+tempo = [135, 170]
+preferred = [140, 160]
+
+[style.viennese]
+name = "Viennese Waltz"
+short = "VW"
+color = "#fb7185"
+meter = 3
+tempo = [160, 210]
+preferred = [170, 200]
+when = ["50%", "100%"]
+note = "Faster, harder dances in the third and fourth sets."
+
+[style.redowa]
+name = "Redowa"
+short = "RED"
+color = "#f9a8d4"
+meter = 3
+
+[style.hesitation]
+name = "Hesitation Waltz"
+short = "HW"
+color = "#e9d5ff"
+meter = 3
+
+[style.polka]
+name = "Polka"
+short = "PK"
+color = "#facc15"
+meter = 2
+tempo = [105, 140]
+preferred = [110, 125]
+count = [4, 8]
+note = "About 6; many of them fast, often to silly music."
+
+[style.tango]
+name = "Tango"
+short = "TAN"
+color = "#ef4444"
+meter = 4
+tempo = [115, 140]
+preferred = [120, 130]
+count = [3, 5]
+note = "About 4."
+
+[style.one-step]
+name = "One-Step"
+short = "OS"
+color = "#fde68a"
+meter = 2
+tempo = [110, 135]
+preferred = [115, 130]
+
+[style.swing]
+name = "Swing"
+short = "SW"
+color = "#fbbf24"
+meter = 4
+tempo = [115, 180]
+note = "Lindy Hop or 4-count swing."
+
+[style.wcs]
+name = "West Coast Swing"
+short = "WCS"
+color = "#34d399"
+meter = 4
+tempo = [90, 130]
+preferred = [100, 120]
+
+[style.cha-cha]
+name = "Cha-Cha"
+short = "CHA"
+color = "#fdba74"
+meter = 4
+tempo = [110, 130]
+preferred = [115, 125]
+
+[style.salsa]
+name = "Salsa"
+short = "SAL"
+color = "#f97316"
+meter = 4
+tempo = [85, 110]
+preferred = [90, 100]
+
+[style.zweifacher]
+name = "Zweifacher"
+short = "ZW"
+color = "#a3e635"
+meter = [2, 3]
+note = "Alternates between 2/4 and 3/4."
+
+[style.blues]
+name = "Blues"
+short = "BLU"
+color = "#6366f1"
+meter = 4
+
+[style.mixer]
+name = "Mixer"
+short = "MIX"
+color = "#4ade80"
+count = [1, 2]
+note = "Usually in the first and third sets, e.g. the Cross-Step Waltz Mixer."
+
+[style.choreography]
+name = "Choreographed Waltz"
+short = "CHOR"
+color = "#38bdf8"
+meter = 3
+count = [1, 2]
+note = "Usually in the second and fourth sets, e.g. Congress of Vienna (about 4:30). Use the standard music."
+
+[style.line-dance]
+name = "Line Dance"
+short = "LINE"
+color = "#2dd4bf"
+note = "e.g. Tokyo Polka, the Madison."
+
+[group.waltzes]
+name = "Waltzes"
+styles = ["cross-step", "ballroom-waltz", "rotary", "viennese", "redowa", "hesitation", "choreography"]
+share = ["40%", "60%"]
+note = "About half the dances are waltzes, from the very slow to the very fast."
+
+[tag.birthday-jam]
+name = "Birthday Jam"
+color = "#fde047"
+announce = true
+note = "A waltz at the second break: friends cut in every 4 to 8 measures, then the pivots."

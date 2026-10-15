@@ -1,0 +1,254 @@
+# Stanford Dancebreak: DJ guidelines for its socials.
+# From https://dancebreak.stanford.edu/info/djing/ (October 2026). Tempos are
+# beats per minute. Meters are each dance's standard meter (the page doesn't
+# list them).
+
+name = "Dancebreak"
+description = """Stanford Dancebreak socials (Roble 113): a 2-hour set of about 30–35 songs. \
+The minimum counts here are for an evening whose lesson isn't waltz or swing; \
+add the lesson's style (7 songs after a waltz or swing lesson, 5 otherwise, \
+2 of them in the first 5 songs, one of them the Dance with a Stranger)."""
+website = "https://dancebreak.stanford.edu/info/djing/"
+announcements = [
+  "No street shoes on the dance floor: dance shoes or socks only.",
+  "Remember to sign in on the piano!",
+]
+
+[set]
+minutes = 120
+songs = [30, 35]
+pause = { target = 8, min = 5, max = 10 }
+# Not stated; Audacity is suggested for tempo changes under 10 %.
+tempo_change = { faster = 10, slower = 10 }
+
+[style.cross-step]
+name = "Cross-Step Waltz"
+short = "CSW"
+color = "#a78bfa"
+meter = 3
+tempo = [105, 125]
+preferred = [110, 120]
+count = { min = 8 }
+note = "Includes one Jam in the second half."
+
+[style.rotary]
+name = "Rotary Waltz"
+short = "RW"
+color = "#f472b6"
+meter = 3
+tempo = [135, 160]
+preferred = [140, 155]
+last = true
+note = "The final song of the main set is always a rotary waltz."
+
+[style.fast-waltz]
+name = "Fast Waltz"
+short = "FW"
+color = "#fb7185"
+meter = 3
+tempo = [170, 200]
+count = { max = 3 }
+note = "Fast or accelerating rotary waltz; counts toward the rotary waltzes."
+
+[style.lindy]
+name = "Lindy Hop"
+short = "LH"
+color = "#fbbf24"
+meter = 4
+tempo = [125, 160]
+preferred = [130, 150]
+count = { min = 3 }
+
+[style.wcs]
+name = "West Coast Swing"
+short = "WCS"
+color = "#34d399"
+meter = 4
+tempo = [90, 110]
+preferred = [95, 105]
+count = { min = 3 }
+
+[style.polka]
+name = "Polka"
+short = "PK"
+color = "#facc15"
+meter = 2
+tempo = [105, 130]
+preferred = [110, 125]
+count = { min = 1 }
+
+[style.fusion]
+name = "Fusion"
+short = "FUS"
+color = "#818cf8"
+count = { min = 1 }
+
+# Latin, line dance, mixer and choreography: one of each at least. Tempos for
+# styles without one on the page are Garron's (the page refers to them).
+[style.salsa]
+name = "Salsa"
+short = "SAL"
+color = "#f97316"
+meter = 4
+tempo = [85, 110]
+preferred = [90, 100]
+
+[style.bachata]
+name = "Bachata"
+short = "BCH"
+color = "#fb923c"
+meter = 4
+
+[style.cha-cha]
+name = "Cha Cha"
+short = "CHA"
+color = "#fdba74"
+meter = 4
+tempo = [110, 130]
+preferred = [115, 125]
+
+[style.merengue]
+name = "Merengue"
+short = "MER"
+color = "#ea580c"
+meter = 2
+tempo = [110, 135]
+preferred = [115, 130]
+
+[style.line-dance]
+name = "Line Dance"
+short = "LINE"
+color = "#2dd4bf"
+count = { min = 1 }
+note = "Teach uncommon line dances."
+
+[style.mixer]
+name = "Mixer"
+short = "MIX"
+color = "#4ade80"
+count = { min = 1 }
+note = "Teach the mixer."
+
+[style.choreography]
+name = "Choreography"
+short = "CHOR"
+color = "#38bdf8"
+count = { min = 1 }
+note = "BNP etc."
+
+[style.solo-jazz]
+name = "Solo Jazz Routine"
+short = "JAZZ"
+color = "#60a5fa"
+note = "Optional closer after the last rotary waltz, e.g. Mama's Stew or Big Apple."
+
+[style.nc2s]
+name = "Night Club Two-Step"
+short = "NC2S"
+color = "#c084fc"
+meter = 4
+tempo = [75, 90]
+preferred = [80, 85]
+
+[style.tango]
+name = "Tango"
+short = "TAN"
+color = "#ef4444"
+meter = 4
+tempo = [115, 140]
+preferred = [120, 130]
+
+[style.hustle]
+name = "Hustle"
+short = "HUS"
+color = "#e879f9"
+meter = 4
+tempo = [110, 130]
+preferred = [115, 125]
+
+[style.ecs]
+name = "East Coast Swing"
+short = "ECS"
+color = "#fcd34d"
+meter = 4
+tempo = [160, 200]
+preferred = [176, 192]
+note = "Tempo from Richard Powers' fast East Coast Swing."
+
+[style.foxtrot]
+name = "Foxtrot"
+short = "FOX"
+color = "#94a3b8"
+meter = 4
+tempo = [130, 180]
+preferred = [135, 170]
+
+[style.blues]
+name = "Blues"
+short = "BLU"
+color = "#6366f1"
+meter = 4
+
+[group.rotary-waltzes]
+name = "Rotary waltzes (incl. fast)"
+styles = ["rotary", "fast-waltz"]
+count = { min = 6 }
+
+[group.latin]
+name = "Latin"
+styles = ["salsa", "bachata", "cha-cha", "merengue"]
+count = { min = 1 }
+
+[group.non-core]
+name = "Other styles"
+styles = ["solo-jazz", "nc2s", "tango", "hustle", "ecs", "foxtrot", "blues"]
+count = { max = 4 }
+
+[rule.first-ten]
+name = "First 10 songs"
+songs = [1, 10]
+length = { max = "3:30" }
+note = "With a strong downbeat."
+
+[rule.after-ten]
+name = "After the first 10"
+songs = { min = 11 }
+length = { max = "4:30" }
+
+[tag.stranger]
+name = "Dance with a Stranger"
+color = "#f0abfc"
+announce = true
+note = "One per set, the lesson's style, in the first half."
+
+[tag.jam]
+name = "Jam"
+color = "#fde047"
+announce = true
+note = "A cross-step waltz in the second half (leis: purple follow, orange lead, white switch)."
+
+[tag.snowball]
+name = "Snowball"
+color = "#e0f2fe"
+announce = true
+note = "Explain it when announcing the jam."
+
+[tag.last]
+name = "Last of style"
+color = "#fca5a5"
+announce = true
+note = "The set ends with the last WCS, Lindy Hop, cross-step and rotary waltz (rotary last)."
+
+[tag.teach]
+name = "Teach first"
+color = "#86efac"
+announce = true
+
+[tag.accelerating]
+name = "Accelerating"
+color = "#fdba74"
+
+[tag.after-party]
+name = "After-party"
+color = "#a3a3a3"
+note = "Songs after the 2 hours."

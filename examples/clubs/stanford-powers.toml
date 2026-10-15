@@ -1,0 +1,203 @@
+# Richard Powers, "How to Be a Better Dance DJ" (Stanford social dance).
+# From https://socialdance.stanford.edu/Syllabi/DJtips.htm (October 2026).
+# "These are mere suggestions… not absolute rules." Tempos are beats per
+# minute for average or mixed-level social dancers; where he gives a second
+# count in parentheses (half or double time), the one a tempo detector usually
+# reports is used. Orpheus also matches songs at half or double these tempos.
+# Meters are each dance's standard meter.
+
+name = "Stanford (Richard Powers)"
+description = """Richard Powers' DJ suggestions for Stanford-style social dances: \
+about 3-minute songs, no two of the same dance in a row, no more than one or two \
+really fast tunes in a row, and the energy should suit the tempo."""
+website = "https://socialdance.stanford.edu/Syllabi/DJtips.htm"
+
+[set]
+# "Ten or twenty seconds" between tunes, though he advises watching the dancers.
+pause = { target = 10, min = 10, max = 20 }
+# "Keep the tempo within 10% (above or below) of the sweet spot."
+tempo_change = { faster = 10, slower = 10 }
+fade_out = 5
+# "Two tunes in a row for the same kind of dance, at the same tempo": avoid.
+max_in_a_row = 1
+
+[style.waltz]
+name = "Waltz"
+short = "W"
+color = "#f472b6"
+meter = 3
+tempo = [138, 160]
+preferred = 144
+length = { max = "3:30" }
+note = "Moderate (rotary / Viennese) waltz, intermediate level."
+
+[style.fast-viennese]
+name = "Fast Viennese Waltz"
+short = "FVW"
+color = "#fb7185"
+meter = 3
+tempo = [160, 190]
+preferred = 168
+length = { max = "3:00" }
+
+[style.cross-step]
+name = "Cross-Step Waltz"
+short = "CSW"
+color = "#a78bfa"
+meter = 3
+tempo = [108, 120]
+preferred = [114, 116]
+length = { max = "3:30" }
+
+[style.slow-waltz]
+name = "Slow Waltz"
+short = "SW"
+color = "#c4b5fd"
+meter = 3
+tempo = [80, 100]
+preferred = 88
+note = "Slow American ballroom waltz."
+
+[style.lindy]
+name = "Lindy Hop / Triple Swing"
+short = "LH"
+color = "#fbbf24"
+meter = 4
+tempo = [116, 164]
+preferred = 150
+length = { max = "3:30" }
+note = "He counts 75 (58–82); double time shown."
+
+[style.fast-ecs]
+name = "Fast East Coast Swing"
+short = "ECS"
+color = "#fcd34d"
+meter = 4
+tempo = [160, 200]
+preferred = 184
+
+[style.wcs]
+name = "West Coast Swing"
+short = "WCS"
+color = "#34d399"
+meter = 4
+tempo = [100, 120]
+preferred = 110
+note = "WCS groups may want longer songs."
+
+[style.street-swing]
+name = "Street Swing (Bugg)"
+short = "SS"
+color = "#a3e635"
+meter = 4
+tempo = [110, 150]
+preferred = 130
+
+[style.hustle]
+name = "Hustle"
+short = "HUS"
+color = "#e879f9"
+meter = 4
+tempo = [110, 125]
+preferred = 118
+
+[style.club-two-step]
+name = "Club Two-Step"
+short = "C2S"
+color = "#c084fc"
+meter = 4
+tempo = [76, 88]
+preferred = 82
+
+[style.cha-cha]
+name = "Cha Cha"
+short = "CHA"
+color = "#fdba74"
+meter = 4
+tempo = [112, 126]
+preferred = 118
+
+[style.salsa]
+name = "Salsa"
+short = "SAL"
+color = "#f97316"
+meter = 4
+tempo = [86, 100]
+preferred = 94
+note = "Salsa groups may want longer songs."
+
+[style.merengue]
+name = "Merengue"
+short = "MER"
+color = "#ea580c"
+meter = 2
+tempo = [112, 138]
+preferred = 120
+
+[style.rumba]
+name = "Rumba"
+short = "RUM"
+color = "#fda4af"
+meter = 4
+tempo = [58, 75]
+preferred = 68
+
+[style.tango]
+name = "Social Tango"
+short = "TAN"
+color = "#ef4444"
+meter = 2
+tempo = [60, 74]
+preferred = 66
+note = "Keep a definitive ending: cut a middle section rather than fade."
+
+[style.argentine-tango]
+name = "Tango Argentino"
+short = "AT"
+color = "#dc2626"
+meter = 4
+preferred = 62
+note = "A wide range of tempos."
+
+[style.polka]
+name = "Polka"
+short = "PK"
+color = "#facc15"
+meter = 2
+tempo = [104, 124]
+preferred = 114
+note = "Fast, tiring polkas can be shorter than 3 minutes."
+
+[style.one-step]
+name = "One-Step"
+short = "OS"
+color = "#fde68a"
+meter = 2
+tempo = [108, 132]
+preferred = 118
+
+[style.foxtrot]
+name = "Slow Foxtrot"
+short = "FOX"
+color = "#94a3b8"
+meter = 4
+tempo = [120, 152]
+preferred = 128
+note = "Box step. He counts 64 (60–76); double time shown."
+
+[style.fast-foxtrot]
+name = "Faster Foxtrot"
+short = "FFX"
+color = "#cbd5e1"
+meter = 4
+tempo = [136, 184]
+preferred = 156
+note = "Magic step. He counts 78 (68–92); double time shown."
+
+[style.quickstep]
+name = "Quickstep"
+short = "QS"
+color = "#7dd3fc"
+meter = 4
+tempo = [180, 220]
+preferred = 200

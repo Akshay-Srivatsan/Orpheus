@@ -61,6 +61,10 @@ misaki-rs = { version = "0.6", default-features = false }
 regex = "1"
 espeak-ng = { version = "0.2", default-features = false, features = ["bundled-data-en", "bundled-data-es", "bundled-data-fr", "bundled-data-it", "bundled-data-pt", "bundled-data-hi"] }
 open = "5"
+toml = { version = "1.1.8", features = ["preserve_order"] }
+indexmap = { version = "2.14.2", features = ["serde"] }
+jiff = "0.2.38"
+toml_edit = "0.25.17"
 
 # On Linux, ask RealtimeKit (over D-Bus) for real-time scheduling; works without root.
 [target.'cfg(target_os = "linux")'.dependencies]

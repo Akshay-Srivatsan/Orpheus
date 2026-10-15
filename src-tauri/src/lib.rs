@@ -2,6 +2,7 @@
 
 pub mod analysis;
 pub mod app;
+pub mod club;
 pub mod audio;
 pub mod commands;
 pub mod controls;
