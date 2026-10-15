@@ -616,10 +616,84 @@ impl Store {
             }
             Ok(())
         })?;
-        let mut inner = self.inner.write();
-        for o in &moved {
-            inner.tracks.remove(&o.id);
-            let _ = fs::remove_file(self.lib_path("tracks", &o.id));
+        {
+            let mut inner = self.inner.write();
+            for o in &moved {
+                inner.tracks.remove(&o.id);
+                let _ = fs::remove_file(self.lib_path("tracks", &o.id));
+            }
+        }
+        self.merge_identical_versions(&keep)
+    }
+
+    /// Merges a song's versions that differ only in name (same recording,
+    /// styles, tags, settings…), as combining can leave them: the first is
+    /// kept, and setlists and crates point to it instead.
+    fn merge_identical_versions(&self, song: &str) -> Result<()> {
+        let same = |a: &Version, b: &Version| {
+            let sorted = |v: &[String]| {
+                let mut v = v.to_vec();
+                v.sort();
+                v
+            };
+            a.recording == b.recording
+                && a.display_name == b.display_name
+                && a.settings == b.settings
+                && a.comment == b.comment
+                && sorted(&a.styles) == sorted(&b.styles)
+                && sorted(&a.tags) == sorted(&b.tags)
+        };
+        // Removed version id → the version it duplicates.
+        let mut into: HashMap<Id, Id> = HashMap::new();
+        self.with_track(song, |t| {
+            let mut kept: Vec<Version> = vec![];
+            for v in t.versions.drain(..) {
+                match kept.iter().find(|k| same(k, &v)) {
+                    Some(k) => {
+                        into.insert(v.id.clone(), k.id.clone());
+                    }
+                    None => kept.push(v),
+                }
+            }
+            t.versions = kept;
+            Ok(())
+        })?;
+        if into.is_empty() {
+            return Ok(());
+        }
+        let (setlists, crates) = {
+            let mut inner = self.inner.write();
+            for v in into.keys() {
+                inner.version_owner.remove(v);
+            }
+            let mut setlists = vec![];
+            for s in inner.setlists.values_mut() {
+                let mut hit = false;
+                for e in s.entries.iter_mut() {
+                    if let Some(k) = e.version_id.as_ref().and_then(|v| into.get(v)) {
+                        e.version_id = Some(k.clone());
+                        hit = true;
+                    }
+                }
+                if hit {
+                    setlists.push(s.clone());
+                }
+            }
+            let mut crates = vec![];
+            for c in inner.crates.values_mut() {
+                if c.version_ids.iter().any(|v| into.contains_key(v)) {
+                    let ids: Vec<Id> = c.version_ids.iter().map(|v| into.get(v).unwrap_or(v).clone()).collect();
+                    c.version_ids = dedup(&ids);
+                    crates.push(c.clone());
+                }
+            }
+            (setlists, crates)
+        };
+        for s in &setlists {
+            self.save_setlist(s)?;
+        }
+        for c in &crates {
+            self.save_crate(c)?;
         }
         Ok(())
     }
@@ -907,19 +981,25 @@ impl Store {
             let inner = self.inner.read();
             inner.tracks.values().filter(|t| t.versions.iter().any(|v| ids.contains(&&v.recording))).map(|t| t.id.clone()).collect()
         };
-        for sid in songs {
-            self.with_track(&sid, |t| {
+        for sid in &songs {
+            self.with_track(sid, |t| {
                 for v in t.versions.iter_mut().filter(|v| ids.contains(&&v.recording)) {
                     v.recording = keep.clone();
                 }
                 Ok(())
             })?;
         }
-        let mut inner = self.inner.write();
-        for o in &moved {
-            inner.recordings.remove(&o.id);
-            let _ = fs::remove_file(self.lib_path("recordings", &o.id));
-            let _ = fs::remove_file(self.waveform_path(&o.id));
+        {
+            let mut inner = self.inner.write();
+            for o in &moved {
+                inner.recordings.remove(&o.id);
+                let _ = fs::remove_file(self.lib_path("recordings", &o.id));
+                let _ = fs::remove_file(self.waveform_path(&o.id));
+            }
+        }
+        // A song's versions of the two files may now be the same version.
+        for sid in &songs {
+            self.merge_identical_versions(sid)?;
         }
         Ok(())
     }
@@ -1929,6 +2009,38 @@ mod tests {
         assert_eq!(t.rec.title, "Barbie (Lucas edit)");
         assert_eq!(t.recordings[0].rec.id, rb);
         assert_eq!(store.version(&vb).unwrap().1, back);
+        let _ = fs::remove_dir_all(lib.parent().unwrap());
+    }
+
+    #[test]
+    fn combining_the_same_recording_merges_identical_versions() {
+        let (lib, local) = temp_dirs();
+        let store = Store::open(&lib, &local).unwrap();
+        // The same audio as a FLAC and an MP3: two songs, two recordings.
+        let a = song(&store, "Blue Danube", file("flac"));
+        let b = song(&store, "Blue Danube", file("mp3"));
+        let (va, ra) = first(&store, &a);
+        let (vb, rb) = first(&store, &b);
+        let teaching = store
+            .version_create(&b, Version { id: String::new(), name: "Teaching".into(), recording: String::new(), display_name: None, styles: vec![], legacy_style: None, settings: Overrides { target_bpm: Some(100.0), ..Default::default() }, comment: String::new(), tags: vec![] })
+            .unwrap();
+        let sid = store.setlist_create("Set", "live", None, None).unwrap();
+        let eid = store.entries_insert(&sid, None, &[NewEntry { version_id: Some(vb.clone()), ..Default::default() }]).unwrap()[0].clone();
+        let cr = store.crate_create("C", None).unwrap();
+        store.crate_add(&cr, &[va.clone(), vb.clone()]).unwrap();
+
+        store.merge_recordings(&ra, &[rb]).unwrap();
+        store.combine_songs(&a, &[b]).unwrap();
+        // The MP3's "Original" is now the FLAC's in every way but its name: one version.
+        let t = store.track(&a).unwrap();
+        assert_eq!(t.rec.versions.iter().map(|v| v.name.as_str()).collect::<Vec<_>>(), ["Original", "Teaching"]);
+        assert_eq!(t.rec.versions[1].id, teaching.id, "a version with its own settings stays");
+        assert_eq!(store.entry(&eid).unwrap().0.version_id, Some(va.clone()), "the set follows");
+        assert_eq!(store.crates()[0].version_ids, vec![va.clone()]);
+        assert!(store.version(&vb).is_err());
+        let reloaded = Store::open(&lib, &local).unwrap();
+        assert_eq!(reloaded.track(&a).unwrap().rec.versions.len(), 2);
+        assert_eq!(reloaded.entry(&eid).unwrap().0.version_id, Some(va));
         let _ = fs::remove_dir_all(lib.parent().unwrap());
     }
 
