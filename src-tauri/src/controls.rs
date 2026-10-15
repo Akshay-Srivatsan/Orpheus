@@ -53,6 +53,8 @@ impl App {
     }
 
     /// Loads a version onto a deck. Refuses if the room is hearing that deck.
+    /// `play` (a preview) only starts it if the room can't hear the deck: with
+    /// the crossfader letting the room hear it, it's loaded paused.
     pub fn deck_load(&self, deck: usize, version_id: &str, entry_id: Option<&str>, play: bool) -> Result<()> {
         if self.audible(deck) {
             return Err(anyhow!(
@@ -60,6 +62,19 @@ impl App {
                 crate::perform::deck_name(deck)
             ));
         }
+        let play = if play && self.decks[deck].is_on_air() {
+            emit(
+                &self.handle,
+                "toast-info",
+                format!(
+                    "Loaded on deck {} without playing: the crossfader lets the room hear it. Press play to start it.",
+                    crate::perform::deck_name(deck)
+                ),
+            );
+            false
+        } else {
+            play
+        };
         let (version, track_id) = self.store.version(version_id)?;
         let track = self.store.track(&track_id)?;
         let entry = entry_id.and_then(|id| self.store.entry(id).ok()).map(|(e, _)| e);

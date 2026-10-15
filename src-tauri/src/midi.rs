@@ -70,7 +70,7 @@ pub fn actions() -> Vec<(String, String, String)> {
     add("cue.volume", "Headphone volume", "absolute");
     add("cue.crossfader", "Crossfader (deck A ↔ deck B in the room)", "absolute");
     add("browse.scroll", "Library: move selection", "relative");
-    add("browse.audition", "Library: audition selected song on the free deck", "button");
+    add("browse.audition", "Library: load the selected song onto the free deck (paused)", "button");
     add("browse.queueNext", "Library: play selected song next", "button");
     add("browse.queueEnd", "Library: add selected song to end of set", "button");
     for (d, name) in [(0, "A"), (1, "B")] {

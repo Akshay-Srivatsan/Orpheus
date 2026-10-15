@@ -230,7 +230,9 @@
     if (m.n === lastNav) return;
     lastNav = m.n;
     if (m.action === "browse.scroll") move(m.delta ?? 0);
-    else if (m.action === "browse.audition") { const r = selectedRow(); if (r) preview(r); }
+    // The knob's press loads (or fills the slot); it never plays, so selecting
+    // songs is silent even with the crossfader letting the room hear both decks.
+    else if (m.action === "browse.audition") { const r = selectedRow(); if (r) choose(r); }
     else if (m.action === "deck.load" && m.deck != null) { const r = selectedRow(); if (r) loadDeck(m.deck, r.version.id); }
     else if (m.action === "browse.queueNext" && app.selected.length) addToSet(app.selected, "next");
     else if (m.action === "browse.queueEnd" && app.selected.length) addToSet(app.selected, "end");

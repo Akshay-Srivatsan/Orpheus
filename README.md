@@ -125,7 +125,7 @@ Machine-specific state stays in the app data folder:
     | Crossfader | Crossfader |
     | Master / headphone knobs | Volumes |
     | LOAD A / B | Load the selected song |
-    | Browse knob | Scrolls; press auditions on the free deck |
+    | Browse knob | Scrolls; press loads the song onto the free deck, paused (or fills the slot you're choosing for) |
     | Jog wheels | Scrub (touch = fine, edge = fast) |
     | Pads, Cues mode | Hot cues (hold PAD MODE to clear) |
     | Pads, Sampler mode | Stems on/off: vocals / drums / bass / other |
@@ -142,8 +142,10 @@ Machine-specific state stays in the app data folder:
     real-time priority comes from RealtimeKit (as for PipeWire), or from
     SCHED_FIFO if your user may use it (e.g. the `audio` group). Without
     either, Orpheus logs a warning and runs at normal priority.
-- **Loading:** double-clicking a song loads it onto the off-air deck, paused;
-  the headphones button plays it there.
+- **Loading:** double-clicking a song (or pressing the browse knob) loads it
+  onto the off-air deck, paused; the headphones button plays it there. A
+  preview never plays if the crossfader lets the room hear that deck (e.g.
+  with the crossfader in the middle): the song is loaded paused instead.
 - **Tempo:** pitch is preserved while changing tempo. Four time-stretch
   engines (Settings → General): Signalsmith Stretch (default), Rubber Band
   R3 (highest quality, more CPU), SoundTouch (crisp rhythm) and Bungee. If
