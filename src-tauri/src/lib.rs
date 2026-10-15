@@ -163,6 +163,7 @@ pub fn run() {
             commands::projector_close,
             commands::spotify_status,
             commands::spotify_login,
+            commands::spotify_refresh,
             commands::spotify_web_login,
             commands::spotify_connect_cached,
             commands::spotify_logout,

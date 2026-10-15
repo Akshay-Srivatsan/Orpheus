@@ -174,6 +174,8 @@ export const api = {
   spotifyWebLogin: () => call<T.SpotifyStatus>("spotify_web_login"),
   spotifyConnectCached: () => call<T.SpotifyStatus>("spotify_connect_cached"),
   spotifyLogout: () => call<void>("spotify_logout"),
+  /** Reconnects and renews the tokens (Orpheus also reconnects by itself when Spotify drops the session). */
+  spotifyRefresh: () => call<T.SpotifyStatus>("spotify_refresh"),
   spotifySearch: (query: string) => call<T.SpotifyTrack[]>("spotify_search", { query }),
   spotifyPlaylists: () => call<T.SpotifyPlaylist[]>("spotify_playlists"),
   spotifyPlaylistTracks: (uri: string) => call<T.SpotifyTrack[]>("spotify_playlist_tracks", { uri }),

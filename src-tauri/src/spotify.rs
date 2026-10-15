@@ -310,6 +310,9 @@ pub struct Spotify {
     page_limit: Mutex<u32>,
 }
 
+/// How often the watchdog checks whether Spotify dropped the session.
+const SESSION_CHECK: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Page sizes to try, largest first.
 const PAGE_LIMITS: &[u32] = &[50, 20, 10, 5, 1];
 
@@ -383,6 +386,62 @@ impl Spotify {
 
     pub fn session(&self) -> Option<Session> {
         self.conn.lock().as_ref().map(|c| c.session.clone())
+    }
+
+    /// The session, reconnected with the saved login if Spotify dropped it
+    /// (it closes idle connections; network changes break them).
+    fn live_session(&self) -> Result<Session> {
+        self.ensure_connected()?;
+        self.session().ok_or_else(|| anyhow!("Spotify is not connected"))
+    }
+
+    /// Reconnects with the saved login when a session was open but dropped.
+    /// Call from outside the async runtime.
+    pub fn ensure_connected(&self) -> Result<()> {
+        let state = self.conn.lock().as_ref().map(|c| c.session.is_invalid());
+        match state {
+            None => Err(anyhow!("Spotify is not connected")),
+            Some(false) => Ok(()),
+            Some(true) => {
+                log::info!("Spotify session dropped; reconnecting");
+                // The deck players belong to the old session.
+                *self.conn.lock() = None;
+                self.connect_cached().map_err(|e| anyhow!("Spotify session expired and reconnecting failed ({e:#}); sign in again in Settings → Spotify"))
+            }
+        }
+    }
+
+    /// Reconnects now and renews the Web API token (e.g. just before a set).
+    pub fn refresh(&self) -> Result<()> {
+        *self.conn.lock() = None;
+        self.connect_cached()?;
+        let token = self.web_token.lock().clone();
+        if let Some(mut t) = token.filter(|t| !t.refresh_token.is_empty()) {
+            t.expires_at = 0;
+            *self.web_token.lock() = Some(t);
+            self.rt.block_on(self.web_token())?;
+        }
+        Ok(())
+    }
+
+    /// Checks the session every `SESSION_CHECK` and reconnects if it dropped,
+    /// so it's ready when a song is loaded; `changed` is told when it reconnects.
+    pub fn start_watchdog(self: &Arc<Self>, changed: impl Fn() + Send + 'static) {
+        let me = Arc::downgrade(self);
+        std::thread::Builder::new()
+            .name("spotify-watchdog".into())
+            .spawn(move || loop {
+                std::thread::sleep(SESSION_CHECK);
+                let Some(s) = me.upgrade() else { return };
+                if s.conn.lock().as_ref().is_some_and(|c| c.session.is_invalid()) {
+                    match s.ensure_connected() {
+                        Ok(()) => log::info!("Spotify reconnected"),
+                        Err(e) => log::warn!("{e:#}"),
+                    }
+                    changed();
+                }
+            })
+            .expect("spawn spotify watchdog");
     }
 
     pub fn is_connected(&self) -> bool {
@@ -512,11 +571,9 @@ impl Spotify {
     }
 
     pub fn deck_player(&self, deck: usize) -> Result<Arc<DeckPlayer>> {
+        self.ensure_connected()?;
         let mut conn = self.conn.lock();
         let c = conn.as_mut().ok_or_else(|| anyhow!("Spotify is not connected"))?;
-        if c.session.is_invalid() {
-            return Err(anyhow!("Spotify session expired; reconnect in Settings → Spotify"));
-        }
         if c.players[deck].is_none() {
             c.players[deck] = Some(DeckPlayer::new(c.session.clone(), &self.rt));
         }
@@ -524,7 +581,7 @@ impl Spotify {
     }
 
     pub fn track_metadata(&self, uri: &str) -> Result<SpotifyTrack> {
-        let session = self.session().ok_or_else(|| anyhow!("Spotify is not connected"))?;
+        let session = self.live_session()?;
         let id = SpotifyUri::from_uri(uri).map_err(|e| anyhow!("{e}"))?;
         self.rt.block_on(async { Self::fetch_track(&session, &id).await })
     }
@@ -543,7 +600,7 @@ impl Spotify {
 
     /// Resolves a track / album / playlist URL or URI into its tracks.
     pub fn resolve(&self, input: &str) -> Result<Vec<SpotifyTrack>> {
-        let session = self.session().ok_or_else(|| anyhow!("Spotify is not connected"))?;
+        let session = self.live_session()?;
         let uri = normalize_uri(input).ok_or_else(|| anyhow!("Not a Spotify link: {input}"))?;
         let id = SpotifyUri::from_uri(&uri).map_err(|e| anyhow!("{e}"))?;
         self.rt.block_on(async move {
@@ -751,7 +808,7 @@ impl Spotify {
     /// Decodes a Spotify track as fast as the network allows (not in real
     /// time) for BPM/waveform analysis. Audio is analysed in memory only.
     pub fn decode_for_analysis(&self, uri: &str) -> Result<(Vec<f32>, u32)> {
-        let session = self.session().ok_or_else(|| anyhow!("Spotify is not connected"))?;
+        let session = self.live_session()?;
         let id = SpotifyUri::from_uri(uri).map_err(|e| anyhow!("{e}"))?;
         let (tx, rx) = bounded::<Msg>(64);
         let gen = Arc::new(AtomicU64::new(1));

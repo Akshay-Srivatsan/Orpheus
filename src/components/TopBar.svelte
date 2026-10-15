@@ -140,7 +140,8 @@
       <span class="led" class:ok={midiConnected.length > 0}></span> MIDI
     </button>
     <button class="plain status" onclick={() => (app.settingsOpen = "spotify")}
-      title={app.spotify?.connected ? `Spotify: ${app.spotify.username}` : "Spotify not connected"}>
+      oncontextmenu={async (e) => { e.preventDefault(); if (app.spotify?.hasCachedCredentials && (await app.run(api.spotifyRefresh()))) app.toast("Spotify session refreshed.", "info"); }}
+      title={app.spotify?.connected ? `Spotify: ${app.spotify.username} (right-click: refresh the session)` : "Spotify not connected"}>
       <span class="led" class:ok={app.spotify?.connected} class:warn={app.spotify?.connecting}></span> Spotify
     </button>
     <button class="plain icon" title="Settings ({MOD},)" onclick={() => (app.settingsOpen = "general")}><Icon name="gear" /></button>

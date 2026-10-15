@@ -372,7 +372,11 @@
                 <span class="warn small">Sign in once more to enable Spotify search and your playlists.</span>
                 <span><button class="primary" onclick={() => app.run(api.spotifyLogin())}>Sign In Again…</button></span>
               {/if}
-              <span><button onclick={() => api.spotifyLogout()}>Disconnect</button></span>
+              <span class="row">
+                <button onclick={async () => { if (await app.run(api.spotifyRefresh())) app.toast("Spotify session refreshed.", "info"); }}
+                  title="Reconnect and renew the sign-in now (e.g. just before a set). Orpheus also reconnects by itself when Spotify drops the session.">Refresh Session</button>
+                <button onclick={() => api.spotifyLogout()}>Disconnect</button>
+              </span>
             {:else}
               <span class="row">
                 <button class="primary" disabled={app.spotify?.connecting} onclick={() => app.run(api.spotifyLogin())}>{app.spotify?.connecting ? "Waiting for browser…" : "Connect Spotify…"}</button>

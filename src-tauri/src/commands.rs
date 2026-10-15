@@ -1328,6 +1328,19 @@ pub async fn spotify_login(app: S<'_>) -> Res<SpotifyStatus> {
     r
 }
 
+/// Reconnects to Spotify and renews its tokens (e.g. right before a set).
+#[tauri::command]
+pub async fn spotify_refresh(app: S<'_>) -> Res<SpotifyStatus> {
+    let a = app.inner().clone();
+    let r = blocking(move || {
+        a.spotify.refresh()?;
+        Ok(a.spotify.status())
+    })
+    .await;
+    crate::app::emit(&app.handle, "spotify-status", app.spotify.status());
+    r
+}
+
 /// Sign-in with your own Spotify app, for search and playlists.
 #[tauri::command]
 pub async fn spotify_web_login(app: S<'_>) -> Res<SpotifyStatus> {

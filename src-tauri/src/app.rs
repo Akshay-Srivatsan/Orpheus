@@ -198,6 +198,11 @@ impl App {
                 app.perform.lock().setlist_id = Some(id);
             }
         }
+        // Reconnect Spotify by itself when it drops the session.
+        {
+            let (h, sp) = (app.handle.clone(), app.spotify.clone());
+            app.spotify.start_watchdog(move || emit(&h, "spotify-status", sp.status()));
+        }
         Ok(app)
     }
 
@@ -540,10 +545,17 @@ impl App {
         });
         let mut has_stems = false;
         let open: crate::audio::deck::SourceOpener = if kind == "spotify" {
-            let dp = self.spotify.deck_player(deck)?;
+            if !self.spotify.is_connected() {
+                return Err(anyhow!("Spotify is not connected"));
+            }
+            let spotify = self.spotify.clone();
             let dur = track.rec.duration_ms;
             let start = start_ms as f64 / 1000.0;
-            Box::new(move || Ok(Box::new(SpotifySource::open(dp, &key, dur, start)?) as Box<dyn Source>))
+            // On the deck's thread when the song opens: reconnects there if Spotify dropped the session.
+            Box::new(move || {
+                let dp = spotify.deck_player(deck)?;
+                Ok(Box::new(SpotifySource::open(dp, &key, dur, start)?) as Box<dyn Source>)
+            })
         } else {
             let stem_files = self.store.file_info(&key).and_then(|f| self.stems.files(&f.hash));
             let path = PathBuf::from(key);
