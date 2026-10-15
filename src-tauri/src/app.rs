@@ -135,7 +135,8 @@ impl App {
             tts,
             announcer,
             midi: OnceLock::new(),
-            perform: Mutex::new(Perform::default()),
+            // Crossfader centred: both decks in the room until a fade picks one.
+            perform: Mutex::new(Perform { crossfader: 0.5, ..Default::default() }),
             scan_progress: Mutex::new(Default::default()),
             analysis_tx,
             spotify_analysed: Mutex::new(Default::default()),

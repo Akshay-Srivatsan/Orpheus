@@ -67,7 +67,7 @@ pub struct Perform {
     pub armed_until: Option<Instant>,
     pub auto_advance_override: Option<bool>,
     pub message: Option<String>,
-    /// 0 = only deck A in the room, 1 = only deck B.
+    /// 0 = only deck A in the room, 1 = only deck B, 0.5 (the start) = both.
     pub crossfader: f64,
     /// The deck the room heard last (the "current" song's deck).
     pub live_deck: usize,

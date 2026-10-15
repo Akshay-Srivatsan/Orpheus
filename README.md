@@ -22,7 +22,8 @@ Runs on macOS, Linux and Windows (Tauri 2, Rust and Svelte).
   which deck the room hears; the other deck is the *free deck*, for cueing in
   headphones. **Play Next** and **Go Live** move the crossfader for you once
   the previous song has faded, so songs don't overlap unless you crossfade
-  by hand.
+  by hand. It starts in the middle, so the room hears whichever deck you
+  play first.
 - **The next song in the set is loaded onto the free deck automatically**,
   paused at its start, so you can check it in headphones. Play Next always
   starts it from its cue point.

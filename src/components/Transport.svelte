@@ -18,7 +18,7 @@
   /** Something is audible in the room. */
   const playing = $derived(app.decks.some((d) => d.onAir && (d.status === "playing" || d.status === "loading")));
   const nextDeck = $derived(app.decks.find((d) => d.entryId && d.entryId === p?.nextEntryId));
-  const xf = $derived(p?.crossfader ?? 0);
+  const xf = $derived(p?.crossfader ?? 0.5);
   const next = $derived(app.entryRow(p?.nextEntryId));
   const nextPb = $derived(next?.row ? playback(next.row.track, next.row.version, next.entry, app.clubStyleOf) : null);
   const nextShown = $derived(next ? app.shownFor(next.row?.version, next.entry, nextPb?.target ?? null) : []);
