@@ -56,6 +56,8 @@ pub struct App {
     pub perform: Mutex<Perform>,
     /// Parsed club guidelines by club and version (see `club`).
     club_cache: Mutex<HashMap<ClubRef, Arc<Club>>>,
+    /// Fingerprint comparisons already made: (track fingerprint, club song fingerprint) → same version.
+    fingerprint_matches: Mutex<HashMap<(u64, u64), bool>>,
     pub scan_progress: Mutex<crate::library::ScanProgress>,
     analysis_tx: Sender<(Id, bool)>,
     /// Spotify songs already queued for analysis this session (each is
@@ -144,6 +146,7 @@ impl App {
             // Crossfader centered: the room hears both decks until the DJ moves it.
             perform: Mutex::new(Perform { crossfader: crate::perform::CENTER, ..Default::default() }),
             club_cache: Mutex::new(HashMap::new()),
+            fingerprint_matches: Mutex::new(HashMap::new()),
             scan_progress: Mutex::new(Default::default()),
             analysis_tx,
             spotify_analysed: Mutex::new(Default::default()),
@@ -287,6 +290,80 @@ impl App {
 
     pub fn forget_clubs(&self) {
         self.club_cache.lock().clear();
+    }
+
+    /// Which library songs are songs a club lists for its styles (e.g. a
+    /// choreography's accepted edits): track id → style ids. A song is one
+    /// of them if its file hash, its Spotify track or its fingerprint (the
+    /// same version, in any audio format) agrees.
+    pub fn club_song_matches(&self, r: &ClubRef) -> HashMap<Id, Vec<String>> {
+        let mut out: HashMap<Id, Vec<String>> = HashMap::new();
+        let Some(club) = self.club(r) else { return out };
+        let key = |s: &str| {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            s.hash(&mut h);
+            h.finish()
+        };
+        // The club's songs, with their fingerprints read once.
+        struct Wanted<'a> {
+            style: &'a str,
+            song: &'a crate::club::ClubSong,
+            fp: Option<(u64, Vec<u32>)>,
+            spotify: Option<String>,
+        }
+        let wanted: Vec<Wanted> = club
+            .styles
+            .iter()
+            .flat_map(|(id, st)| st.songs.iter().map(move |song| (id, song)))
+            .map(|(id, song)| Wanted {
+                style: id,
+                song,
+                fp: club.fingerprint_of(song).and_then(|f| Some((key(f), crate::fingerprint::decode(f).ok()?))),
+                spotify: song.spotify_id(),
+            })
+            .collect();
+        if wanted.is_empty() {
+            return out;
+        }
+        let item = crate::fingerprint::item_secs();
+        for t in self.store.all_tracks() {
+            let files: Vec<&str> = t.rec.sources.iter().filter(|s| s.kind == "file").map(|s| s.key.as_str()).collect();
+            let spotify: Vec<String> =
+                t.rec.sources.iter().filter(|s| s.kind == "spotify").filter_map(|s| crate::club::spotify_id(&s.key)).collect();
+            let mut fp: Option<(u64, Vec<u32>)> = None;
+            let secs = t.rec.duration_ms as f64 / 1000.0;
+            for w in &wanted {
+                let by_id = w.song.hash.as_deref().is_some_and(|h| files.contains(&h)) || w.spotify.as_ref().is_some_and(|s| spotify.contains(s));
+                let by_fp = !by_id
+                    && match (&w.fp, t.rec.fingerprint.as_deref()) {
+                        (Some((wk, wfp)), Some(tf)) => {
+                            // Different lengths can't be the same version: skip the comparison.
+                            let wsecs = w.song.length.unwrap_or(wfp.len() as f64 * item);
+                            if (wsecs - secs).abs() > crate::fingerprint::SAME_VERSION_LENGTH_SECS + 1.0 {
+                                false
+                            } else {
+                                let tk = key(tf);
+                                let known = self.fingerprint_matches.lock().get(&(tk, *wk)).copied();
+                                known.unwrap_or_else(|| {
+                                    let tfp = &fp.get_or_insert_with(|| (tk, crate::fingerprint::decode(tf).unwrap_or_default())).1;
+                                    let same = crate::fingerprint::same_version(tfp, wfp);
+                                    self.fingerprint_matches.lock().insert((tk, *wk), same);
+                                    same
+                                })
+                            }
+                        }
+                        _ => false,
+                    };
+                if by_id || by_fp {
+                    let styles = out.entry(t.rec.id.clone()).or_default();
+                    if !styles.iter().any(|s| s == w.style) {
+                        styles.push(w.style.to_string());
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// The club (and version) new sets get: the default club's latest.

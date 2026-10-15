@@ -685,7 +685,9 @@ pub async fn club_usage(app: S<'_>, club_id: String) -> Res<HashMap<String, usiz
 #[tauri::command]
 pub async fn club_import_file(app: S<'_>, path: String) -> Res<Imported> {
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
-    let r = app.clubs().add(&text, &path, None, now_ms()).map_err(ae)?;
+    let c = club::parse(&text).map_err(ae)?;
+    let fps = club::fetch_fingerprints(&c, &path, &HashMap::new()).await.map_err(ae)?;
+    let r = app.clubs().add(&text, &path, &path, None, &fps, now_ms()).map_err(ae)?;
     clubs_changed(&app);
     Ok(r)
 }
@@ -695,7 +697,9 @@ pub async fn club_import_file(app: S<'_>, path: String) -> Res<Imported> {
 pub async fn club_import_url(app: S<'_>, url: String) -> Res<Imported> {
     let url = url.trim().to_string();
     let text = club::fetch(&url).await.map_err(ae)?;
-    let r = app.clubs().add(&text, &url, None, now_ms()).map_err(ae)?;
+    let c = club::parse(&text).map_err(ae)?;
+    let fps = club::fetch_fingerprints(&c, &url, &HashMap::new()).await.map_err(ae)?;
+    let r = app.clubs().add(&text, &url, &url, None, &fps, now_ms()).map_err(ae)?;
     clubs_changed(&app);
     Ok(r)
 }
@@ -709,7 +713,9 @@ pub async fn club_update(app: S<'_>, club_id: String) -> Res<Imported> {
         .update_url(&club_id)
         .ok_or_else(|| "This club has no web address to update from (url = \"https://…\" in its file).".to_string())?;
     let text = club::fetch(&url).await.map_err(ae)?;
-    let r = app.clubs().add(&text, &url, Some(&club_id), now_ms()).map_err(ae)?;
+    let c = club::parse(&text).map_err(ae)?;
+    let fps = club::fetch_fingerprints(&c, &url, &HashMap::new()).await.map_err(ae)?;
+    let r = app.clubs().add(&text, &url, &url, Some(&club_id), &fps, now_ms()).map_err(ae)?;
     clubs_changed(&app);
     Ok(r)
 }
@@ -721,7 +727,11 @@ pub async fn club_save(app: S<'_>, club_id: String, version_id: String, text: St
     let clubs = app.clubs();
     let used = app.store.setlists().iter().any(|s| s.club.as_ref().is_some_and(|c| c.id == club_id && c.version == version_id));
     let in_place = !used && clubs.latest(&club_id).as_deref() == Some(version_id.as_str());
-    let r = clubs.save(&club_id, &version_id, &text, in_place, now_ms()).map_err(ae)?;
+    // Fingerprints it refers to: those already fetched, and any new ones.
+    let c = club::parse(&text).map_err(ae)?;
+    let base = clubs.base(&club_id, &version_id);
+    let fps = club::fetch_fingerprints(&c, &base, &clubs.fingerprints(&club_id, &version_id)).await.map_err(ae)?;
+    let r = clubs.save(&club_id, &version_id, &text, in_place, &fps, now_ms()).map_err(ae)?;
     clubs_changed(&app);
     Ok(r)
 }
@@ -738,16 +748,47 @@ pub async fn club_examples() -> Res<Vec<(String, String, String)>> {
 #[tauri::command]
 pub async fn club_import_example(app: S<'_>, id: String) -> Res<Imported> {
     let (_, text) = club::EXAMPLES.iter().find(|(e, _)| *e == id).ok_or_else(|| format!("no example club \"{id}\""))?;
-    let r = app.clubs().add(text, "example", None, now_ms()).map_err(ae)?;
+    let c = club::parse(text).map_err(ae)?;
+    let fps = club::fetch_fingerprints(&c, club::EXAMPLE_BASE, &HashMap::new()).await.map_err(ae)?;
+    let r = app.clubs().add(text, "example", club::EXAMPLE_BASE, None, &fps, now_ms()).map_err(ae)?;
     clubs_changed(&app);
     Ok(r)
+}
+
+/// Library songs that are songs the club lists for its styles: track id → style ids.
+#[tauri::command]
+pub async fn club_song_matches(app: S<'_>, club_id: String, version_id: String) -> Res<HashMap<Id, Vec<String>>> {
+    let a = app.inner().clone();
+    blocking(move || Ok(a.club_song_matches(&ClubRef { id: club_id, version: version_id }))).await
+}
+
+/// A club-file song entry for one of your songs (to accept it for a style).
+#[tauri::command]
+pub async fn club_song_for_track(app: S<'_>, track_id: Id) -> Res<club::ClubSong> {
+    let t = app.store.track(&track_id).map_err(ae)?;
+    Ok(club::ClubSong {
+        title: Some(t.rec.title.clone()).filter(|s| !s.is_empty()),
+        artist: Some(t.rec.artist.clone()).filter(|s| !s.is_empty()),
+        length: (t.rec.duration_ms > 0).then(|| (t.rec.duration_ms as f64 / 1000.0).round()),
+        fingerprint: t.rec.fingerprint.clone(),
+        spotify: t.rec.sources.iter().find(|s| s.kind == "spotify").map(|s| s.key.clone()),
+        hash: t.rec.sources.iter().find(|s| s.kind == "file").map(|s| s.key.clone()),
+        ..Default::default()
+    })
+}
+
+/// The same entry as club-file text (Info → Copy for a club file).
+#[tauri::command]
+pub async fn club_song_text(app: S<'_>, track_id: Id) -> Res<String> {
+    let song = club_song_for_track(app, track_id).await?;
+    Ok(club::song_toml(&song))
 }
 
 /// A new club with nothing but a name.
 #[tauri::command]
 pub async fn club_new(app: S<'_>, name: String) -> Res<Imported> {
     let text = club::to_toml(&Club { name: name.trim().to_string(), ..Default::default() });
-    let r = app.clubs().add(&text, "new", None, now_ms()).map_err(ae)?;
+    let r = app.clubs().add(&text, "new", "", None, &HashMap::new(), now_ms()).map_err(ae)?;
     clubs_changed(&app);
     Ok(r)
 }

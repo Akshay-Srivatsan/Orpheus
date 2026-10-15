@@ -3,6 +3,7 @@
 pub mod analysis;
 pub mod app;
 pub mod club;
+pub mod fingerprint;
 pub mod audio;
 pub mod commands;
 pub mod controls;
@@ -112,6 +113,9 @@ pub fn run() {
             commands::club_delete,
             commands::club_export,
             commands::club_examples,
+            commands::club_song_matches,
+            commands::club_song_for_track,
+            commands::club_song_text,
             commands::club_import_example,
             commands::settings_get,
             commands::settings_set,

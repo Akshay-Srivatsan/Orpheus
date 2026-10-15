@@ -16,6 +16,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------- definition
@@ -48,6 +49,110 @@ pub struct Club {
     pub rules: IndexMap<String, Rule>,
     /// Reminders the DJ can announce (Announce menu).
     pub announcements: Vec<String>,
+    /// Fingerprints songs refer to by file or web address, as fetched when
+    /// the version was imported (reference as written → fingerprint).
+    #[serde(skip)]
+    pub fingerprints: HashMap<String, String>,
+}
+
+impl Club {
+    /// A song's fingerprint text: written in the file, or fetched from where it points.
+    pub fn fingerprint_of<'a>(&'a self, song: &'a ClubSong) -> Option<&'a str> {
+        let f = song.fingerprint.as_deref()?;
+        if is_fingerprint_ref(f) {
+            self.fingerprints.get(f).map(|s| s.as_str())
+        } else {
+            Some(f)
+        }
+    }
+
+    /// Fingerprint references (file paths or web addresses) its songs use.
+    pub fn fingerprint_refs(&self) -> Vec<String> {
+        let mut out: Vec<String> = self
+            .styles
+            .values()
+            .flat_map(|s| &s.songs)
+            .filter_map(|s| s.fingerprint.clone())
+            .filter(|f| is_fingerprint_ref(f))
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+}
+
+/// A fingerprint value that points elsewhere (fingerprint text itself is
+/// letters, digits, `-` and `_` only).
+pub fn is_fingerprint_ref(s: &str) -> bool {
+    s.contains(['/', ':', '.'])
+}
+
+/// The fingerprint in a referenced file: just the fingerprint, or `fpcalc`'s
+/// output (`FINGERPRINT=…`).
+pub fn read_fingerprint_file(text: &str) -> Result<String> {
+    let fp = text
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("FINGERPRINT="))
+        .unwrap_or(text)
+        .trim()
+        .to_string();
+    crate::fingerprint::decode(&fp)?;
+    Ok(fp)
+}
+
+/// A fingerprint file bundled with the example clubs.
+pub fn bundled_fingerprint(r: &str) -> Result<String> {
+    EXAMPLE_FINGERPRINTS
+        .iter()
+        .find(|(name, _)| r.trim_start_matches("./") == *name)
+        .map(|(_, t)| t.to_string())
+        .ok_or_else(|| anyhow!("no bundled fingerprint \"{r}\""))
+}
+
+/// Where a reference points: a web address as is; a relative one against
+/// where the club file came from (its web address or its folder).
+pub fn resolve_ref(base: &str, r: &str) -> String {
+    if r.starts_with("https://") || r.starts_with("http://") {
+        return r.to_string();
+    }
+    if base.starts_with("https://") || base.starts_with("http://") {
+        if let Ok(u) = reqwest::Url::parse(base).and_then(|b| b.join(r)) {
+            return u.to_string();
+        }
+    }
+    let p = Path::new(r);
+    if p.is_absolute() {
+        return r.to_string();
+    }
+    Path::new(base).parent().map(|d| d.join(p).to_string_lossy().into_owned()).unwrap_or_else(|| r.to_string())
+}
+
+/// Fetches the fingerprints a club refers to (those not already in `known`).
+pub async fn fetch_fingerprints(club: &Club, base: &str, known: &HashMap<String, String>) -> Result<HashMap<String, String>> {
+    let mut out = HashMap::new();
+    for r in club.fingerprint_refs() {
+        if let Some(k) = known.get(&r) {
+            out.insert(r, k.clone());
+            continue;
+        }
+        let text = if base == EXAMPLE_BASE {
+            bundled_fingerprint(&r)?
+        } else {
+            let at = resolve_ref(base, &r);
+            if at.starts_with("https://") || at.starts_with("http://") {
+                let resp = reqwest::get(&at).await.with_context(|| format!("fetching {at}"))?;
+                if !resp.status().is_success() {
+                    bail!("{at}: {}", resp.status());
+                }
+                resp.text().await?
+            } else {
+                std::fs::read_to_string(&at).with_context(|| format!("reading the fingerprint {at}"))?
+            }
+        };
+        let fp = read_fingerprint_file(&text).with_context(|| format!("fingerprint \"{r}\""))?;
+        out.insert(r, fp);
+    }
+    Ok(out)
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -127,6 +232,68 @@ pub struct Style {
     pub max_in_a_row: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// `[[style.<id>.song]]`: the songs (often a particular edit) this style
+    /// is danced to, e.g. a choreography's or a line dance's. A style with
+    /// songs matches only those songs.
+    #[serde(rename = "song", skip_serializing_if = "Vec::is_empty")]
+    pub songs: Vec<ClubSong>,
+}
+
+/// A song a club accepts for a style. Any one of `fingerprint`, `spotify` and
+/// `hash` identifies it; the rest is for people (and redundancy).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct ClubSong {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artist: Option<String>,
+    /// Length (seconds; `"2:35"` in the file).
+    #[serde(deserialize_with = "duration_opt", skip_serializing_if = "Option::is_none")]
+    pub length: Option<f64>,
+    /// Chromaprint fingerprint (as Orpheus copies it, or `fpcalc` prints it),
+    /// or where to find it: a file next to the club file or a web address.
+    /// Recognises this version in any audio format, and tells edits apart.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>,
+    /// A Spotify track (`spotify:track:…`, a link, or its id).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spotify: Option<String>,
+    /// Orpheus's hash of a particular audio file (exactly that file).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hash: Option<String>,
+    /// Where to download the file (several links allowed; needs `hash`, which
+    /// the download must match).
+    #[serde(deserialize_with = "strings", skip_serializing_if = "Vec::is_empty")]
+    pub download: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+impl ClubSong {
+    /// The Spotify track id, from a URI, a link or a bare id.
+    pub fn spotify_id(&self) -> Option<String> {
+        spotify_id(self.spotify.as_deref()?)
+    }
+}
+
+/// Orpheus's file hashes (`decode::content_hash`): `a` or `f` and 32 hex digits.
+pub fn valid_hash(h: &str) -> bool {
+    let mut c = h.chars();
+    matches!(c.next(), Some('a' | 'f')) && h.len() == 33 && c.all(|c| c.is_ascii_hexdigit())
+}
+
+/// `spotify:track:ID`, `https://open.spotify.com/track/ID?si=…` or `ID` → `ID`.
+pub fn spotify_id(s: &str) -> Option<String> {
+    let s = s.trim();
+    let id = if let Some(rest) = s.strip_prefix("spotify:track:") {
+        rest
+    } else if let Some(i) = s.find("/track/") {
+        s[i + 7..].split(['?', '/', '#']).next().unwrap_or("")
+    } else {
+        s
+    };
+    (id.len() == 22 && id.chars().all(|c| c.is_ascii_alphanumeric())).then(|| id.to_string())
 }
 
 /// Several styles counted together.
@@ -297,6 +464,24 @@ fn percent_ranges<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Range>, D::Erro
     }
 }
 
+fn duration_opt<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    parse_duration(NumOrTextPub(NumOrText::deserialize(d)?)).map(Some).map_err(serde::de::Error::custom)
+}
+
+/// One string or a list of them.
+fn strings<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum S {
+        One(String),
+        Many(Vec<String>),
+    }
+    Ok(match S::deserialize(d)? {
+        S::One(v) => vec![v],
+        S::Many(v) => v,
+    })
+}
+
 fn percent_range_opt<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Range>, D::Error> {
     let r = RawRange::<NumOrText>::deserialize(d)?;
     raw_to_range(r, parse_percent).map(Some).map_err(serde::de::Error::custom)
@@ -407,6 +592,28 @@ pub fn parse(text: &str) -> Result<Club> {
             }
         }
         check_percents(&s.when, s.share.as_ref(), &s.name)?;
+        for (i, song) in s.songs.iter().enumerate() {
+            let what = format!("{}: song {} ({})", s.name, i + 1, song.title.as_deref().unwrap_or("untitled"));
+            if song.fingerprint.is_none() && song.spotify.is_none() && song.hash.is_none() {
+                bail!("{what}: give a fingerprint, a Spotify track or a file hash to say which song it is");
+            }
+            if let Some(f) = song.fingerprint.as_deref().filter(|f| !is_fingerprint_ref(f)) {
+                crate::fingerprint::decode(f).with_context(|| format!("{what}: fingerprint"))?;
+            }
+            if !song.download.is_empty() && song.hash.is_none() {
+                bail!("{what}: a download needs the file's hash, so Orpheus can check it got the right file");
+            }
+            if let Some(h) = &song.hash {
+                if !valid_hash(h) {
+                    bail!("{what}: \"{h}\" isn't an Orpheus file hash (copy it from the song's Info)");
+                }
+            }
+            if let Some(sp) = &song.spotify {
+                if spotify_id(sp).is_none() {
+                    bail!("{what}: \"{sp}\" isn't a Spotify track (spotify:track:…, or its link)");
+                }
+            }
+        }
         if let Some(c) = &s.color {
             check_color(c).with_context(|| format!("{}: color", s.name))?;
         }
@@ -632,6 +839,10 @@ pub fn to_toml(club: &Club) -> String {
             t.insert("max_in_a_row".into(), Value::Integer(n as i64));
         }
         put_text(&mut t, "note", &st.note);
+        if !st.songs.is_empty() {
+            let songs = st.songs.iter().map(|song| Value::Table(song_table(song))).collect();
+            t.insert("song".into(), Value::Array(songs));
+        }
         styles.insert(id.clone(), Value::Table(t));
     }
     let mut groups = Table::new();
@@ -681,6 +892,49 @@ pub fn to_toml(club: &Club) -> String {
     tidy(&toml::to_string(&root).unwrap_or_default())
 }
 
+/// A song entry's fields, in the order people read them (the long
+/// fingerprint last).
+fn song_table(song: &ClubSong) -> toml::Table {
+    use toml::Value;
+    let mut x = toml::Table::new();
+    let mut text = |k: &str, v: &Option<String>| {
+        if let Some(v) = v {
+            x.insert(k.into(), Value::String(v.clone()));
+        }
+    };
+    text("title", &song.title);
+    text("artist", &song.artist);
+    if let Some(l) = song.length {
+        x.insert("length".into(), duration_text(l));
+    }
+    let mut text = |k: &str, v: &Option<String>| {
+        if let Some(v) = v {
+            x.insert(k.into(), Value::String(v.clone()));
+        }
+    };
+    text("spotify", &song.spotify);
+    text("hash", &song.hash);
+    text("note", &song.note);
+    if !song.download.is_empty() {
+        x.insert("download".into(), Value::Array(song.download.iter().cloned().map(Value::String).collect()));
+    }
+    if let Some(f) = &song.fingerprint {
+        x.insert("fingerprint".into(), Value::String(f.clone()));
+    }
+    x
+}
+
+/// One song entry as club-file text, to paste under a style.
+pub fn song_toml(song: &ClubSong) -> String {
+    let mut style = toml::Table::new();
+    style.insert("song".into(), toml::Value::Array(vec![toml::Value::Table(song_table(song))]));
+    let mut styles = toml::Table::new();
+    styles.insert("your-style-id".into(), toml::Value::Table(style));
+    let mut root = toml::Table::new();
+    root.insert("style".into(), toml::Value::Table(styles));
+    tidy(&toml::to_string(&root).unwrap_or_default())
+}
+
 /// Hand-written style: small tables (`pause`, `count = { min = 3 }`) inline,
 /// arrays on one line, and each style and tag in its own section.
 fn tidy(text: &str) -> String {
@@ -724,6 +978,17 @@ pub struct VersionMeta {
     /// Where it came from: a URL, a file path, or "edited".
     #[serde(skip_serializing_if = "String::is_empty")]
     pub from: String,
+    /// What fingerprint references resolve against: the club file's web
+    /// address or path (edited versions keep their original's).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub base: String,
+}
+
+/// Fingerprints fetched for a version (`<version>.fingerprints.toml`).
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+struct FingerprintsFile {
+    fingerprints: IndexMap<String, String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -854,9 +1119,42 @@ impl Clubs {
         self.versions(id).ok()?.versions.keys().last().cloned()
     }
 
+    /// The fingerprints fetched for a version.
+    pub fn fingerprints(&self, id: &str, version: &str) -> HashMap<String, String> {
+        let Ok(dir) = self.club_dir(id) else { return HashMap::new() };
+        std::fs::read_to_string(dir.join(format!("{version}.fingerprints.toml")))
+            .ok()
+            .and_then(|t| toml::from_str::<FingerprintsFile>(&t).ok())
+            .map(|f| f.fingerprints.into_iter().collect())
+            .unwrap_or_default()
+    }
+
+    fn save_fingerprints(&self, id: &str, version: &str, fps: &HashMap<String, String>) -> Result<()> {
+        let p = self.club_dir(id)?.join(format!("{version}.fingerprints.toml"));
+        if fps.is_empty() {
+            let _ = std::fs::remove_file(p);
+            return Ok(());
+        }
+        let mut sorted: Vec<_> = fps.iter().collect();
+        sorted.sort();
+        let file = FingerprintsFile { fingerprints: sorted.into_iter().map(|(k, v)| (k.clone(), v.clone())).collect() };
+        crate::store::write_atomic(&p, toml::to_string_pretty(&file)?.as_bytes())
+    }
+
+    /// What a version's fingerprint references resolve against.
+    pub fn base(&self, id: &str, version: &str) -> String {
+        self.versions(id).ok().and_then(|v| v.versions.get(version).map(|m| m.base.clone())).unwrap_or_default()
+    }
+
+    fn parse_version(&self, id: &str, version: &str, text: &str) -> Result<Club> {
+        let mut c = parse(text)?;
+        c.fingerprints = self.fingerprints(id, version);
+        Ok(c)
+    }
+
     pub fn get(&self, id: &str, version: &str) -> Result<ClubVersion> {
         let text = self.read_text(id, version)?;
-        let (club, error) = match parse(&text) {
+        let (club, error) = match self.parse_version(id, version, &text) {
             Ok(c) => (Some(c), None),
             Err(e) => (None, Some(format!("{e:#}"))),
         };
@@ -869,7 +1167,7 @@ impl Clubs {
             Some(v) => v.to_string(),
             None => self.latest(id).ok_or_else(|| anyhow!("no club \"{id}\""))?,
         };
-        parse(&self.read_text(id, &v)?)
+        self.parse_version(id, &v, &self.read_text(id, &v)?)
     }
 
     /// A new version id from the time (unique within the club).
@@ -887,8 +1185,9 @@ impl Clubs {
     }
 
     /// Stores `text` as a new version (of the club its id or name names, or
-    /// `into` if given). Identical to the latest version: nothing is stored.
-    pub fn add(&self, text: &str, from: &str, into: Option<&str>, now_ms: i64) -> Result<Imported> {
+    /// `into` if given), with the fingerprints it refers to (fetched from
+    /// `base`). Identical to the latest version: nothing is stored.
+    pub fn add(&self, text: &str, from: &str, base: &str, into: Option<&str>, fps: &HashMap<String, String>, now_ms: i64) -> Result<Imported> {
         let club = parse(text)?;
         let id = match into {
             Some(i) => i.to_string(),
@@ -903,22 +1202,25 @@ impl Clubs {
         std::fs::create_dir_all(&dir)?;
         let vid = self.new_version_id(&id, now_ms)?;
         crate::store::write_atomic(&dir.join(format!("{vid}.toml")), text.as_bytes())?;
+        self.save_fingerprints(&id, &vid, fps)?;
         let mut vf = self.versions(&id)?;
-        vf.versions.insert(vid.clone(), VersionMeta { name: String::new(), imported: now_ms, from: from.into() });
+        vf.versions.insert(vid.clone(), VersionMeta { name: String::new(), imported: now_ms, from: from.into(), base: base.into() });
         self.save_versions(&id, &vf)?;
         Ok(Imported { club_id: id, version_id: vid, unchanged: false })
     }
 
     /// Saves edits to `version`: in place if `in_place` (a version no set
     /// uses yet), else as a new version.
-    pub fn save(&self, id: &str, version: &str, text: &str, in_place: bool, now_ms: i64) -> Result<Imported> {
+    pub fn save(&self, id: &str, version: &str, text: &str, in_place: bool, fps: &HashMap<String, String>, now_ms: i64) -> Result<Imported> {
         parse(text)?;
         if in_place {
             let dir = self.club_dir(id)?;
             crate::store::write_atomic(&dir.join(format!("{version}.toml")), text.as_bytes())?;
+            self.save_fingerprints(id, version, fps)?;
             return Ok(Imported { club_id: id.into(), version_id: version.into(), unchanged: false });
         }
-        self.add(text, "edited", Some(id), now_ms)
+        let base = self.base(id, version);
+        self.add(text, "edited", &base, Some(id), fps, now_ms)
     }
 
     pub fn rename_version(&self, id: &str, version: &str, name: &str) -> Result<()> {
@@ -958,6 +1260,12 @@ impl Clubs {
         vf.versions.values().rev().map(|m| m.from.clone()).find(|f| f.starts_with("http://") || f.starts_with("https://"))
     }
 }
+
+/// `base` of the bundled example clubs: their fingerprints are built in.
+pub const EXAMPLE_BASE: &str = "example";
+
+/// Fingerprint files the example clubs refer to (`examples/clubs/fingerprints/`).
+pub const EXAMPLE_FINGERPRINTS: &[(&str, &str)] = &include!("../../examples/clubs/fingerprints/list.rs");
 
 /// The example clubs shipped with Orpheus (`examples/clubs/`): (file name, text).
 pub const EXAMPLES: &[(&str, &str)] = &[
@@ -1017,6 +1325,13 @@ meter = [2, 4]
 tempo = 120
 when = ["25%", "75%"]
 
+[[style.polka.song]]
+title = "A Polka"
+length = "2:30"
+spotify = "https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC?si=x"
+hash = "a1798743518a3a1c753c8dbe831f48f39"
+download = ["https://example.org/a.mp3", "https://mirror.example.org/a.mp3"]
+
 [style.salsa]
 meter = 4
 tempo = [86, 100]
@@ -1057,6 +1372,10 @@ announce = true
         assert_eq!(pk.when, vec![Range { min: Some(25.0), max: Some(75.0) }], "a pair is one range");
         assert!(c.tags["snowball"].announce);
         assert_eq!(c.set.max_in_a_row, Some(2));
+        let song = &c.styles["polka"].songs[0];
+        assert_eq!(song.length, Some(150.0));
+        assert_eq!(song.spotify_id().as_deref(), Some("4uLU6hMCjMI75M1A2tKUQC"));
+        assert_eq!(song.download.len(), 2);
         assert_eq!(c.styles["salsa"].share, Some(Range { min: None, max: Some(10.0) }));
         assert_eq!(c.groups["latin"].styles, ["salsa", "polka"]);
         let r = &c.rules["short-start"];
@@ -1070,6 +1389,12 @@ announce = true
         assert!(e.contains("no style \"b\""), "{e}");
         let e = parse("name = \"X\"\n[rule.r]\nsongs = [1, 5]\n").unwrap_err().to_string();
         assert!(e.contains("say what the songs must be"), "{e}");
+        let e = parse("name = \"X\"\n[style.a]\n[[style.a.song]]\ntitle = \"T\"\n").unwrap_err().to_string();
+        assert!(e.contains("fingerprint, a Spotify track or a file hash"), "{e}");
+        let e = parse("name = \"X\"\n[style.a]\n[[style.a.song]]\nfingerprint = \"nope\"\n").unwrap_err().to_string();
+        assert!(e.contains("fingerprint"), "{e}");
+        let e = parse("name = \"X\"\n[style.a]\n[[style.a.song]]\nspotify = \"4uLU6hMCjMI75M1A2tKUQC\"\ndownload = \"https://x.org/a.mp3\"\n").unwrap_err().to_string();
+        assert!(e.contains("needs the file's hash"), "{e}");
     }
 
     #[test]
@@ -1098,12 +1423,12 @@ announce = true
         let dir = std::env::temp_dir().join(format!("orpheus-clubs-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let clubs = Clubs::new(&dir);
-        let a = clubs.add(SAMPLE, "file", None, 1_000_000_000_000).unwrap();
+        let a = clubs.add(SAMPLE, "file", "", None, &HashMap::new(), 1_000_000_000_000).unwrap();
         assert_eq!(a.club_id, "test-club");
         assert!(!a.unchanged);
-        let same = clubs.add(SAMPLE, "file", None, 1_000_000_060_000).unwrap();
+        let same = clubs.add(SAMPLE, "file", "", None, &HashMap::new(), 1_000_000_060_000).unwrap();
         assert!(same.unchanged, "identical file: no new version");
-        let b = clubs.add(&SAMPLE.replace("120\nsongs", "90\nsongs"), "file", None, 1_000_000_060_000).unwrap();
+        let b = clubs.add(&SAMPLE.replace("120\nsongs", "90\nsongs"), "file", "", None, &HashMap::new(), 1_000_000_060_000).unwrap();
         assert_ne!(a.version_id, b.version_id);
         let list = clubs.list();
         assert_eq!(list.len(), 1);
@@ -1133,10 +1458,31 @@ announce = true
             let text = std::fs::read_to_string(&p).unwrap();
             let c = parse(&text).unwrap_or_else(|e| panic!("{}: {e:#}", p.display()));
             assert!(!c.styles.is_empty(), "{}", p.display());
+            // Every fingerprint it refers to is bundled, and reads.
+            for r in c.fingerprint_refs() {
+                read_fingerprint_file(&bundled_fingerprint(&r).unwrap()).unwrap_or_else(|e| panic!("{r}: {e:#}"));
+            }
             assert_eq!(parse(&to_toml(&c)).unwrap(), c, "{}", p.display());
             n += 1;
         }
         assert_eq!(n, EXAMPLES.len(), "every example club is bundled");
+    }
+
+    #[test]
+    fn fingerprint_references() {
+        assert!(!is_fingerprint_ref("AQADtEmUSEk-_x"));
+        assert!(is_fingerprint_ref("fingerprints/bnp.txt"));
+        assert!(is_fingerprint_ref("https://club.org/fp/bnp.txt"));
+        // Relative to where the club file came from.
+        assert_eq!(resolve_ref("https://club.org/dj/club.toml", "fp/bnp.txt"), "https://club.org/dj/fp/bnp.txt");
+        assert_eq!(resolve_ref("/home/dj/clubs/club.toml", "fp/bnp.txt"), "/home/dj/clubs/fp/bnp.txt");
+        assert_eq!(resolve_ref("/home/dj/club.toml", "https://x.org/a.txt"), "https://x.org/a.txt");
+        // A plain fingerprint, or fpcalc's output.
+        let (_, fp) = EXAMPLE_FINGERPRINTS[0];
+        let fp = fp.trim();
+        assert_eq!(read_fingerprint_file(&format!("{fp}\n")).unwrap(), fp);
+        assert_eq!(read_fingerprint_file(&format!("DURATION=155\nFINGERPRINT={fp}\n")).unwrap(), fp);
+        assert!(read_fingerprint_file("<html>not found</html>").is_err());
     }
 
     #[test]

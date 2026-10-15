@@ -51,6 +51,7 @@ pub struct Analysis {
     pub audio_start_ms: Option<i64>,
     pub audio_end_ms: Option<i64>,
     pub waveform: Vec<u8>,
+    pub fingerprint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -533,6 +534,9 @@ impl Store {
             t.loudness_db = a.loudness_db.map(|l| (l * 10.0).round() / 10.0);
             t.audio_start_ms = a.audio_start_ms;
             t.audio_end_ms = a.audio_end_ms;
+            if a.fingerprint.is_some() {
+                t.fingerprint = a.fingerprint.clone();
+            }
             if a.duration_ms > 0 {
                 t.duration_ms = a.duration_ms;
             }

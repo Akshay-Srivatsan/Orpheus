@@ -236,6 +236,10 @@ pub struct TrackRecord {
     pub loudness_db: Option<f64>,
     pub audio_start_ms: Option<i64>,
     pub audio_end_ms: Option<i64>,
+    /// Chromaprint fingerprint (text form): identifies this version of the
+    /// song in any audio format (see `fingerprint.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub notes: String,
     pub analyzed: bool,

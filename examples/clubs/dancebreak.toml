@@ -47,8 +47,7 @@ short = "FW"
 color = "#fb7185"
 meter = 3
 tempo = [170, 200]
-count = { max = 3 }
-note = "Fast or accelerating rotary waltz; counts toward the rotary waltzes."
+note = "Fast rotary waltz; counts toward the rotary waltzes."
 
 [style.lindy]
 name = "Lindy Hop"
@@ -119,8 +118,7 @@ preferred = [115, 130]
 name = "Line Dance"
 short = "LINE"
 color = "#2dd4bf"
-count = { min = 1 }
-note = "Teach uncommon line dances."
+note = "Other line dances. Teach uncommon ones."
 
 [style.mixer]
 name = "Mixer"
@@ -133,8 +131,7 @@ note = "Teach the mixer."
 name = "Choreography"
 short = "CHOR"
 color = "#38bdf8"
-count = { min = 1 }
-note = "BNP etc."
+note = "Other choreographies."
 
 [style.solo-jazz]
 name = "Solo Jazz Routine"
@@ -191,8 +188,23 @@ meter = 4
 
 [group.rotary-waltzes]
 name = "Rotary waltzes (incl. fast)"
-styles = ["rotary", "fast-waltz"]
+styles = ["rotary", "fast-waltz", "accelerating-waltz"]
 count = { min = 6 }
+
+[group.fast-waltzes]
+name = "Fast or accelerating waltzes"
+styles = ["fast-waltz", "accelerating-waltz"]
+count = { max = 3 }
+
+[group.line-dances]
+name = "Line dances"
+styles = ["line-dance", "bus-stop", "barbie", "tokyo-polka"]
+count = { min = 1 }
+
+[group.choreographies]
+name = "Choreographies"
+styles = ["choreography", "bnp", "dawn-mazurka"]
+count = { min = 1 }
 
 [group.latin]
 name = "Latin"
@@ -252,3 +264,126 @@ color = "#fdba74"
 name = "After-party"
 color = "#a3a3a3"
 note = "Songs after the 2 hours."
+
+# ---------------------------------------------------------------- dances with their own music
+# Each matches only the songs listed (a fingerprint, Spotify track or file hash identifies a song).
+
+[style.bnp]
+name = "Bohemian National Polka"
+short = "BNP"
+color = "#38bdf8"
+note = "A choreography."
+
+[[style.bnp.song]]
+title = "Bohemian National Polka"
+artist = "Cincinnati Pops (Feuerfest Polka)"
+length = "2:39"
+hash = "a88fb3982d668cbe34ad2f88cfb369758"
+fingerprint = "fingerprints/bnp-bohemian-national-polka.txt"
+
+[[style.bnp.song]]
+title = "Bohemian National Polka"
+spotify = "spotify:track:1P0lq5uLZNy6j3p6AqfrCx"
+
+[style.bus-stop]
+name = "Bus Stop"
+short = "BUS"
+color = "#2dd4bf"
+note = "A line dance."
+
+[[style.bus-stop.song]]
+title = "Back in Time"
+artist = "Huey Lewis and the News"
+note = "Bus Stop edit at 121 BPM"
+length = "3:47"
+hash = "ac6a61bfc8e2b59bbe229af02c3da50fc"
+fingerprint = "fingerprints/bus-stop-back-in-time.txt"
+
+[[style.bus-stop.song]]
+title = "Play That Funky Music (Mike Edit)"
+artist = "Wild Cherry"
+length = "2:47"
+hash = "ac6dbcbe925c6c85e17501230fdd3c089"
+fingerprint = "fingerprints/bus-stop-play-that-funky-music-mike-edit.txt"
+
+[[style.bus-stop.song]]
+title = "Walk Like An Egyptian (Neonors Remix)"
+artist = "Bangles"
+note = "RP edit at 120 BPM"
+length = "3:21"
+hash = "ad274a29482ad58db6b9e75a3ad427b36"
+fingerprint = "fingerprints/bus-stop-walk-like-an-egyptian-neonors-remix.txt"
+
+[style.barbie]
+name = "Barbie Line Dance"
+short = "BARB"
+color = "#f472b6"
+note = "A line dance to edits of Dance The Night (Dua Lipa); the original doesn't fit."
+
+[[style.barbie.song]]
+title = "Dance The Night"
+artist = "Dua Lipa"
+note = "RP edit at 116 BPM"
+length = "2:24"
+hash = "afcff5ba1a55be7aa86a69ee5dccb687f"
+fingerprint = "fingerprints/barbie-rp-edit.txt"
+
+[[style.barbie.song]]
+title = "Dance The Night"
+artist = "Dua Lipa"
+note = "Lucas edit, 16-count intro"
+length = "2:35"
+hash = "abbe7029faa93bcba6e5ab00be4d07611"
+fingerprint = "fingerprints/barbie-lucas-edit.txt"
+
+[style.tokyo-polka]
+name = "Tokyo Polka"
+short = "TOK"
+color = "#a3e635"
+note = "A line dance."
+
+[[style.tokyo-polka.song]]
+title = "Ievan Polkka"
+artist = "Hatsune Miku"
+note = "Timmie Wong edit"
+length = "2:15"
+hash = "a3cabfa2ff1d30808e7fe7d4202f88908"
+fingerprint = "fingerprints/tokyo-polka-ievan-polkka.txt"
+
+[[style.tokyo-polka.song]]
+title = "Tokyo Polka"
+spotify = "spotify:track:1ny0kgUklOy5FUigvWWK0q"
+
+[style.dawn-mazurka]
+name = "Dawn Mazurka"
+short = "DAWN"
+color = "#c084fc"
+note = "Formerly called the Russian Mazurka Quadrille."
+
+[[style.dawn-mazurka.song]]
+title = "Russian Mazurka Quadrille"
+note = "at 168 BPM"
+length = "2:47"
+hash = "a82dabcc2bc2535d34ec71bd4a6a43dab"
+fingerprint = "fingerprints/dawn-mazurka-russian-mazurka-quadrille.txt"
+
+[[style.dawn-mazurka.song]]
+title = "Norwegian Pirate / An Epic Age"
+artist = "Thomas Bergersen, Aleksandar Dimitrijevic"
+note = "RP edit at 165 BPM"
+length = "2:45"
+hash = "ace09e23c46703d8dc2c64f58323574ed"
+fingerprint = "fingerprints/dawn-mazurka-norwegian-pirate-an-epic-age.txt"
+
+[style.accelerating-waltz]
+name = "Accelerating Waltz"
+short = "ACC"
+color = "#fb7185"
+meter = 3
+note = "A rotary waltz that speeds up."
+
+[[style.accelerating-waltz.song]]
+title = "Lullaby of Flame (Accelerating Version)"
+artist = "DDRKirby(ISQ)"
+length = "1:55"
+fingerprint = "fingerprints/accelerating-waltz-lullaby-of-flame-accelerating-version.txt"

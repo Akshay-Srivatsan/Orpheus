@@ -4,8 +4,8 @@ use crate::store::Analysis;
 use rustfft::{num_complex::Complex, FftPlanner};
 
 /// Bumped when analysis gains results (2: meter; 3: quieter silence
-/// threshold); older tracks are re-analysed.
-pub const VERSION: u32 = 3;
+/// threshold; 4: fingerprints); older tracks are re-analysed.
+pub const VERSION: u32 = 4;
 
 /// Number of waveform bins stored per track; each bin is 4 bytes:
 /// peak, low-band, mid-band, high-band (all 0..=255).
@@ -31,6 +31,13 @@ pub fn analyze(mono: &[f32], sr: u32, known_bpm: Option<f64>) -> Analysis {
         audio_start_ms: start,
         audio_end_ms: end,
         waveform: waveform(mono, sr),
+        fingerprint: match crate::fingerprint::compute(mono, sr) {
+            Ok(fp) => Some(crate::fingerprint::encode(&fp)),
+            Err(e) => {
+                log::warn!("fingerprint: {e:#}");
+                None
+            }
+        },
     }
 }
 

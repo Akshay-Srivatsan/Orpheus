@@ -65,6 +65,7 @@ toml = { version = "1.1.8", features = ["preserve_order"] }
 indexmap = { version = "2.14.2", features = ["serde"] }
 jiff = "0.2.38"
 toml_edit = "0.25.17"
+rusty-chromaprint = "0.3.0"
 
 # On Linux, ask RealtimeKit (over D-Bus) for real-time scheduling; works without root.
 [target.'cfg(target_os = "linux")'.dependencies]
