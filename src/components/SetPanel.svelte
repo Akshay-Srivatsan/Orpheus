@@ -275,11 +275,11 @@
     const spotify = JSON.parse(ev.dataTransfer?.getData("application/x-orpheus-spotify") || "[]");
     if (spotify.length) {
       const vids = await spotifyVersions(spotify, false);
-      await app.run(api.insertEntries(set.id, vids.map((v) => ({ versionId: v })), at));
+      await app.run(api.insertEntries(set.id, await app.withClubTempo(vids.map((v) => ({ versionId: v })), set.club), at));
       return;
     }
     const versions: Id[] = JSON.parse(ev.dataTransfer?.getData("application/x-orpheus-versions") || "[]");
-    if (versions.length) await app.run(api.insertEntries(set.id, versions.map((v) => ({ versionId: v })), at));
+    if (versions.length) await app.run(api.insertEntries(set.id, await app.withClubTempo(versions.map((v) => ({ versionId: v })), set.club), at));
   }
 
   /** A slot for one of your styles, or (in a club's set) one of the club's. */

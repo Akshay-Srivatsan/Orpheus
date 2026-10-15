@@ -58,7 +58,7 @@
     const vids = await spotifyVersions(results, false);
     const set = await app.run(api.createSetlist({ name: playlist.name, mode: "preset", clubId: app.settings?.defaultClub ?? "" }));
     if (!set) return;
-    await app.run(api.insertEntries(set.id, vids.map((versionId) => ({ versionId }))));
+    await app.run(api.insertEntries(set.id, await app.withClubTempo(vids.map((versionId) => ({ versionId })), set.club)));
     await app.run(api.performOpen(set.id));
     app.toast(`Created setlist “${playlist.name}” with ${vids.length} songs. Label their dance styles in the set panel.`, "info");
   }

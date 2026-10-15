@@ -4,11 +4,11 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { api, on, type Events } from "./api";
 import type {
   Crate, DeckState, Id, Levels, TtsStatus, LibraryInfo, StemsStatus, OutputStatus, PerformState, Row, ScanProgress, Setlist, Club, ClubInfo, ClubRef,
-  SetlistEntry, SetlistSummary, Settings, SpotifyStatus, StyleDef, StylesInfo, Track, Version,
+  NewEntry, SetlistEntry, SetlistSummary, Settings, SpotifyStatus, StyleDef, StylesInfo, Track, Version,
 } from "./types";
 import { NEUTRAL, clubContext, myStyle, mineShown, prettify, shownStyles, songFacts, styleDef, type ClubContext, type Shown } from "./styles";
 import { assess } from "./clubs";
-import type { ClubStyleOf } from "./tempo";
+import { resolveSettings, type ClubStyleOf } from "./tempo";
 import type { SmartContext } from "./smart";
 
 export type SourceView =
@@ -229,6 +229,26 @@ class AppState {
     return shownStyles(this.styleLib, this.clubCtx, this.factsFor(track, version, entry), version, entry);
   }
 
+  /**
+   * Songs about to go into a set planned with the club `ref`: one that fits
+   * the club's style only with a tempo change (within what the club allows)
+   * is set to the nearest tempo in the style's range. The DJ can undo it.
+   */
+  async withClubTempo<E extends NewEntry>(entries: E[], ref: ClubRef | null | undefined = this.clubRef): Promise<E[]> {
+    if (!ref) return entries;
+    await this.loadClub(ref);
+    const ctx = clubContext(this.clubCache[`${ref.id}/${ref.version}`] ?? null, ref.id, this.styleLib, this.settings?.tempoRangePct ?? 10);
+    if (!ctx) return entries;
+    return entries.map((e) => {
+      const r = e.versionId ? this.versionMap.get(e.versionId) : undefined;
+      if (!r || resolveSettings(r.version, e).targetBpm != null) return e;
+      // The best fit first: if it needs a change, so do the others shown.
+      const first = shownStyles(this.styleLib, ctx, this.factsFor(r.track, r.version, e), r.version, e)[0];
+      if (first?.fit !== "stretch" || first.bpm == null) return e;
+      return { ...e, overrides: { ...e.overrides, targetBpm: first.bpm } };
+    });
+  }
+
   /** The first club style an entry shows (for tempo ranges). */
   clubStyleOf: ClubStyleOf = (track, version, entry) => this.shownFor(track, version, entry).find((s) => s.club)?.club ?? null;
 
@@ -445,7 +465,7 @@ export async function addToSet(versionIds: Id[], where: "next" | "end" | number)
   // If a slot is selected and we're adding one song, fill the slot instead.
   const slot = set.entries.find((e) => app.selectedEntries.length === 1 && e.id === app.selectedEntries[0] && !e.versionId);
   if (slot && versionIds.length === 1 && where !== "end") {
-    await app.run(api.updateEntry(slot.id, { versionId: versionIds[0] }));
+    await fillSlot(versionIds[0], slot.id);
     return;
   }
   const f = app.filterStyle;
@@ -456,7 +476,7 @@ export async function addToSet(versionIds: Id[], where: "next" | "end" | number)
     const pick = f && (styles.length === 0 || (styles.length > 1 && styles.includes(f)));
     return { versionId: id, styles: pick ? [f] : undefined };
   });
-  await app.run(api.insertEntries(set.id, entries, position));
+  await app.run(api.insertEntries(set.id, await app.withClubTempo(entries, set.club), position));
 }
 
 /**
@@ -490,7 +510,9 @@ export function startFillingSlot(entry: SetlistEntry) {
 /** Puts a song into the slot being filled (or `slotId`). */
 export async function fillSlot(versionId: Id, slotId: Id | null = app.fillingSlot) {
   if (!slotId) return;
-  const ok = await app.run(api.updateEntry(slotId, { versionId }));
+  const slot = app.current?.entries.find((e) => e.id === slotId);
+  const [filled] = await app.withClubTempo([{ versionId, styles: slot?.styles, clubStyles: slot?.clubStyles, overrides: slot?.overrides }], app.current?.club);
+  const ok = await app.run(api.updateEntry(slotId, { versionId, ...(filled.overrides !== slot?.overrides ? { overrides: filled.overrides } : {}) }));
   if (ok !== undefined && app.fillingSlot === slotId) app.fillingSlot = null;
 }
 

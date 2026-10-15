@@ -157,7 +157,7 @@ export function rangeText(r: Range | null | undefined, fmt: (v: number) => strin
   return "";
 }
 
-function round1(v: number): number {
+export function round1(v: number): number {
   return Math.round(v * 10) / 10;
 }
 

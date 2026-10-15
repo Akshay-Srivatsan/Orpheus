@@ -6,7 +6,7 @@
 //
 // The main window and the projector both use these helpers.
 
-import { clubShown, type Assessment, type Club, type ClubStyle, type Fit, type Range, type SongFacts, type TempoChange } from "./clubs";
+import { clubShown, rangeText, round1, type Assessment, type Club, type ClubStyle, type Fit, type Range, type SongFacts, type TempoChange } from "./clubs";
 import { playedDurationMs, resolveSettings } from "./tempo";
 import type { LibraryStyle, ProjEntry, ProjectorPayload, SetlistEntry, StyleDef, StyleLibrary, Track, Version } from "./types";
 
@@ -38,6 +38,8 @@ export interface Shown {
   problems: string[];
   /** Playback rate the style needs (1 = as is). */
   rate: number;
+  /** Tempo it would be played at for this style (with that rate), in the style's counting. */
+  bpm: number | null;
   /** Shown because the song matches it (no mapping or choice narrowed it down). */
   auto: boolean;
 }
@@ -73,15 +75,27 @@ export function mineShown(lib: StyleLibrary | null, key: string): Shown {
     fit: null,
     problems: [],
     rate: 1,
+    bpm: null,
     auto: false,
   };
 }
 
-/** A club style as shown, with how the song fits it. */
-export function clubStyleShown(club: Club, id: string, fit: Assessment | undefined): Shown {
+/**
+ * A club style as shown, with how the song fits it. In a set (`inSet`), a song
+ * that would need a tempo change it isn't given plays out of the style's
+ * range: a warning.
+ */
+export function clubStyleShown(club: Club, id: string, fit: Assessment | undefined, inSet = false): Shown {
   const s = club.style[id];
   const def = styleDef(id, s);
-  return { key: id, name: def.name, short: def.short, color: def.color, club: def, unmapped: false, fit: fit?.fit ?? null, problems: fit?.problems ?? [], rate: fit?.rate ?? 1, auto: false };
+  const problems = [...(fit?.problems ?? [])];
+  if (inSet && fit?.fit === "stretch" && fit.bpm != null) {
+    const pct = (fit.rate - 1) * 100;
+    problems.push(
+      `plays at ${round1(fit.bpm / fit.rate)} BPM; ${def.name} is ${rangeText(s.tempo ?? s.preferred)} BPM (${pct > 0 ? "+" : "−"}${Math.abs(round1(pct))}% would fit)`,
+    );
+  }
+  return { key: id, name: def.name, short: def.short, color: def.color, club: def, unmapped: false, fit: fit?.fit ?? null, problems, rate: fit?.rate ?? 1, bpm: fit?.bpm ?? null, auto: false };
 }
 
 /** A name with case, accents, spaces, hyphens and punctuation left out ("Cross-step Waltz" → "crossstepwaltz"). */
@@ -156,7 +170,7 @@ export function shownStyles(
   const keys = entryStyleKeys(version, entry);
   if (!ctx) return keys.map((k) => mineShown(lib, k));
   const r = clubShown(ctx.club, facts, ctx.tempoChange, entry?.clubStyles, keys, ctx.mapping);
-  return r.ids.map((id) => ({ ...clubStyleShown(ctx.club, id, r.fits[id]), auto: r.source === "matches" }));
+  return r.ids.map((id) => ({ ...clubStyleShown(ctx.club, id, r.fits[id], entry != null), auto: r.source === "matches" }));
 }
 
 /** A custom label replacing style names: the entry's, else the version's display name. */

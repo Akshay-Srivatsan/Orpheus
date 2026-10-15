@@ -57,6 +57,20 @@ describe("what songs show", () => {
     expect(sameName("Rotary Waltz", "Waltz")).toBe(false);
   });
 
+  it("a song needing a tempo change it isn't given warns in a set", () => {
+    const v = version(["waltz"]);
+    const t = track(133, 3);
+    // Rotary needs +1.5%; Cross-Step would need −6%, more than the club's 5%.
+    const inSet = shownStyles(lib, ctx, songFacts(t, v, {}), v, {});
+    expect(inSet.map((s) => [s.name, s.fit, s.bpm])).toEqual([["Rotary Waltz", "stretch", 135]]);
+    expect(inSet[0].problems).toEqual(["plays at 133 BPM; Rotary Waltz is 135–160 BPM (+1.5% would fit)"]);
+    // In the library, it's just a fit.
+    expect(shownStyles(lib, ctx, songFacts(t, v, null), v, null)[0].problems).toEqual([]);
+    // Given the tempo, it fits.
+    const e = { overrides: { targetBpm: 135 } };
+    expect(shownStyles(lib, ctx, songFacts(t, v, e), v, e)[0].problems).toEqual([]);
+  });
+
   it("a slot shows its chosen style", () => {
     expect(shownStyles(lib, ctx, null, undefined, { clubStyles: ["polka"] }).map((s) => s.name)).toEqual(["Polka"]);
   });
