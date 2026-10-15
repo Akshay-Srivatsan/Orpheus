@@ -5,7 +5,7 @@
   // with; saving edits to a version that sets use makes a new version.
   import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api";
-  import { emptyClub, fmtSecs, hasCriteria, type Club, type ClubGroup, type ClubRule, type ClubStyle, type ClubTag, type Range } from "../lib/clubs";
+  import { allSongs, emptyClub, fmtSecs, hasCriteria, type Club, type ClubGroup, type ClubRule, type ClubStyle, type ClubTag, type Range } from "../lib/clubs";
   import { app, confirmAction, versionDate } from "../lib/state.svelte";
   import { NEUTRAL } from "../lib/styles";
   import type { ClubInfo, ClubVersionInfo } from "../lib/types";
@@ -132,6 +132,16 @@
   async function renameVersion(v: ClubVersionInfo) {
     const name = window.prompt("Name this version (empty: by its date)", v.name);
     if (name != null && sel) await app.run(api.clubRenameVersion(sel.id, v.id, name));
+  }
+
+  /** Older versions no set uses. */
+  const unusedOld = $derived((sel?.versions ?? []).slice(1).filter((v) => !usage[v.id]));
+
+  async function deleteUnused() {
+    if (!sel || !unusedOld.length) return;
+    if (!(await confirmAction(`Delete ${unusedOld.length} older version(s) of ${sel.name} that no set uses?`))) return;
+    for (const v of unusedOld) await app.run(api.clubDeleteVersion(sel.id, v.id));
+    versionId = "";
   }
 
   async function deleteVersion(v: ClubVersionInfo) {
@@ -301,6 +311,9 @@
           <Icon name="reload" size={12} /> {busy ? "Checking…" : "Check for Updates"}
         </button>
         <button class="small" onclick={exportVersion} title="Save this version as a file (to share or publish)">Export…</button>
+        {#if unusedOld.length}
+          <button class="small" onclick={deleteUnused} title="Delete the {unusedOld.length} older version(s) no set uses">Delete Unused Old Versions</button>
+        {/if}
       </div>
       {#if draft?.website}<a class="small" href={draft.website} target="_blank" rel="noreferrer">{draft.website}</a>{/if}
 
@@ -389,7 +402,7 @@
                 <td><RangeInput value={st.preferred} onchange={(r) => edit((d) => (d.style[id].preferred = r))} /></td>
                 <td><RangeInput value={st.count} onchange={(r) => edit((d) => (d.style[id].count = r))} /></td>
                 <td class="nowrap">
-                  <button class="plain icon" class:on={openStyle === id} title="More: length, share, where in the set, notes, suggested songs" onclick={() => (openStyle = openStyle === id ? null : id)}>{#if st.song?.length}<span class="nsongs">♪{st.song.length}</span>{:else}<Icon name="dots" size={12} />{/if}</button>
+                  <button class="plain icon" class:on={openStyle === id} title="More: length, share, where in the set, notes, suggested songs" onclick={() => (openStyle = openStyle === id ? null : id)}>{#if allSongs(st).length}<span class="nsongs">♪{allSongs(st).length}</span>{:else}<Icon name="dots" size={12} />{/if}</button>
                   <button class="plain icon danger" title="Remove" onclick={() => edit((d) => delete d.style[id])}><Icon name="x" size={12} /></button>
                 </td>
               </tr>
@@ -410,7 +423,8 @@
                     <input type="text" class="note" placeholder="Note" value={st.note ?? ""} onchange={(e) => edit((d) => (d.style[id].note = e.currentTarget.value || null))} />
                     <div class="songs">
                       <span class="faint">Suggested songs{#if !hasCriteria(st)}{" (this style has no meter, tempo or length: only these songs fit it)"}{/if}</span>
-                      {#each st.song ?? [] as song, i (i)}
+                      {#each allSongs(st) as song, i (i)}
+                        {@const own = i < (st.song?.length ?? 0)}
                         {@const have = entries[id]?.[i] ?? []}
                         <div class="song">
                           <span class="stitle">{song.title || "Untitled"}{#if song.artist}<span class="faint">{" — "}{song.artist}</span>{/if}{#if song.length}<span class="faint">{" · "}{fmtSecs(song.length)}</span>{/if}{#if song.note}<span class="faint">{" · "}{song.note}</span>{/if}</span>
@@ -424,9 +438,14 @@
                               <button class="plain small" disabled={busy || !song.hash} title={url} onclick={() => download(url, song.hash!)}>Download{(song.download?.length ?? 0) > 1 ? ` (${k + 1})` : ""}</button>
                             {/each}
                           {/if}
-                          <button class="plain icon danger" title="Remove" onclick={() => edit((d) => d.style[id].song!.splice(i, 1))}><Icon name="x" size={11} /></button>
-                          <textarea class="links" rows="1" placeholder="Download links, one per line (need the file's hash)" value={(song.download ?? []).join("\n")}
-                            onchange={(e) => edit((d) => (d.style[id].song![i].download = e.currentTarget.value.split("\n").map((l) => l.trim()).filter(Boolean)))}></textarea>
+                          {#if own}
+                            <button class="plain icon danger" title="Remove" onclick={() => edit((d) => d.style[id].song!.splice(i, 1))}><Icon name="x" size={11} /></button>
+                            <textarea class="links" rows="1" placeholder="Download links, one per line (need the file's hash)" value={(song.download ?? []).join("\n")}
+                              onchange={(e) => edit((d) => (d.style[id].song![i].download = e.currentTarget.value.split("\n").map((l) => l.trim()).filter(Boolean)))}></textarea>
+                          {:else}
+                            <span class="faint" title="From the club's song library ({c.song_library?.join(', ')})">song library: {song.id}</span>
+                            <button class="plain icon danger" title="Don't suggest it for this style" onclick={() => edit((d) => (d.style[id].suggested = (d.style[id].suggested ?? []).filter((x) => x !== song.id)))}><Icon name="x" size={11} /></button>
+                          {/if}
                         </div>
                       {/each}
                       <button class="small" onclick={() => addSelectedSong(id)} title="The song selected in the library (its fingerprint, file hash and Spotify link)"><Icon name="plus" size={11} /> Add the Selected Song</button>

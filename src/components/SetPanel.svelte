@@ -486,6 +486,15 @@
             {/each}
           </div>
         {/if}
+        {#each check.issues as i, n (n)}
+          <button class="plain issue {i.level}" disabled={!i.entries.length} onclick={() => (app.selectedEntries = i.entries)}>
+            <Icon name={i.level === "warn" ? "warning" : "info"} size={11} /> {i.text}
+          </button>
+        {:else}
+          <div class="ok small"><Icon name="check" size={12} /> Follows {app.club?.name}'s guidelines.</div>
+        {/each}
+      </div>
+    {/if}
     <div class="foot">
       <button class="small" onclick={slotMenu} title="Add a placeholder for a dance style; choose the song live"><Icon name="plus" size={12} /> Style slot</button>
       <button class="small" onclick={addPause} title="Add a pause without a song: for a break, an extra pause, an announcement or a stop for auto mode"><Icon name="pause" size={12} /> Pause</button>
@@ -498,15 +507,6 @@
       {/if}
       <span class="dim small num">{number.size} songs · {fmtTime(totalMs)}{#if remainingMs && app.perform?.startedAt}{" · "}{fmtTime(remainingMs)} left{/if}</span>
     </div>
-        {#each check.issues as i, n (n)}
-          <button class="plain issue {i.level}" disabled={!i.entries.length} onclick={() => (app.selectedEntries = i.entries)}>
-            <Icon name={i.level === "warn" ? "warning" : "info"} size={11} /> {i.text}
-          </button>
-        {:else}
-          <div class="ok small"><Icon name="check" size={12} /> Follows {app.club?.name}'s guidelines.</div>
-        {/each}
-      </div>
-    {/if}
   {/if}
 </div>
 
@@ -524,7 +524,8 @@
   .name-input { flex: 1; }
   .subhead { display: flex; gap: 6px; padding: 0 10px 8px; border-bottom: 1px solid var(--border); }
   .subhead select { flex: 1; min-width: 0; }
-  .entries { flex: 1; overflow-y: auto; padding: 4px 0; outline: none; }
+  /* min-height 0: the list scrolls instead of pushing the buttons below out of view. */
+  .entries { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0; outline: none; }
   .entry { display: grid; grid-template-columns: 24px 4px 1fr auto; align-items: center; gap: 6px; padding: 4px 8px 4px 4px; min-height: 40px; border-bottom: 1px solid rgba(255,255,255,0.03); }
   .entry:hover { background: var(--bg-hover); }
   .entry.sel { background: var(--bg-selected); }
@@ -572,7 +573,7 @@
     color: var(--yellow); border-top: 1px dashed color-mix(in srgb, var(--yellow) 60%, transparent); }
   .hold .x { padding: 0 3px; height: 14px; color: inherit; min-width: 0; }
   .drop-line { height: 2px; background: var(--blue); margin: -1px 8px; border-radius: 1px; }
-  .foot { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-top: 1px solid var(--border); }
+  .foot { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 8px; border-top: 1px solid var(--border); }
   .spacer { flex: 1; }
   .small { font-size: var(--fs-sm); }
   .empty { padding: 20px; }

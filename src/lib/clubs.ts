@@ -42,8 +42,17 @@ export interface ClubStyle {
   last: boolean;
   max_in_a_row?: number | null;
   note?: string | null;
-  /** Songs the club suggests for this style (often particular edits). */
+  /** Songs the club suggests for this style (often particular edits), written in the club file. */
   song?: ClubSong[];
+  /** Ids of songs suggested from the club's song libraries … */
+  suggested?: string[];
+  /** … and those songs, as fetched with this version. */
+  library_songs?: ClubSong[];
+}
+
+/** All the songs a style suggests: its own, then those from song libraries (the backend's order). */
+export function allSongs(s: ClubStyle): ClubSong[] {
+  return [...(s.song ?? []), ...(s.library_songs ?? [])];
 }
 
 /** A song a club suggests; any of fingerprint, spotify and hash identifies it. */
@@ -56,6 +65,8 @@ export interface ClubSong {
   hash?: string | null;
   download?: string[];
   note?: string | null;
+  /** Its id in a song library (library songs only). */
+  id?: string | null;
 }
 
 /** The style says what fits it (meter, tempo or length); without, only its suggested songs do (e.g. a choreography). */
@@ -112,6 +123,8 @@ export interface Club {
   rule: Record<string, ClubRule>;
   tag: Record<string, ClubTag>;
   announcements: string[];
+  /** Song libraries its styles suggest songs from (paths or web addresses). */
+  song_library?: string[];
 }
 
 /** A new, empty club (for the editor). */
@@ -216,7 +229,7 @@ export function assess(id: string, style: ClubStyle, f: SongFacts, tc: TempoChan
   // The club suggests this song for the style: it fits, whatever its tempo.
   if (f.listed?.includes(id)) return { id, ok: true, fit: "listed", rate: 1, bpm: null, problems: [] };
   // A style danced to particular songs only (no meter, tempo or length to go by).
-  if (style.song?.length && !hasCriteria(style)) {
+  if (allSongs(style).length && !hasCriteria(style)) {
     return { id, ok: false, fit: "unchecked", rate: 1, bpm: null, problems: [`not one of the songs suggested for ${style.name}`] };
   }
   const problems: string[] = [];

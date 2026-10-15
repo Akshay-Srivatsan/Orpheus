@@ -333,7 +333,7 @@ impl App {
         let wanted: Vec<Wanted> = club
             .styles
             .iter()
-            .flat_map(|(id, st)| st.songs.iter().enumerate().map(move |(i, song)| (id, i, song)))
+            .flat_map(|(id, st)| st.all_songs().enumerate().map(move |(i, song)| (id, i, song)))
             .map(|(id, index, song)| Wanted {
                 style: id,
                 index,
@@ -343,8 +343,9 @@ impl App {
             })
             .collect();
         for (id, st) in &club.styles {
-            if !st.songs.is_empty() {
-                out.insert(id.clone(), vec![vec![]; st.songs.len()]);
+            let n = st.all_songs().count();
+            if n > 0 {
+                out.insert(id.clone(), vec![vec![]; n]);
             }
         }
         if wanted.is_empty() {

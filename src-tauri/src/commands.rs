@@ -687,7 +687,8 @@ pub async fn club_import_file(app: S<'_>, path: String) -> Res<Imported> {
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
     let c = club::parse(&text).map_err(ae)?;
     let fps = club::fetch_fingerprints(&c, &path, &HashMap::new()).await.map_err(ae)?;
-    let r = app.clubs().add(&text, &path, &path, None, &fps, now_ms()).map_err(ae)?;
+    let songs = club::fetch_song_libraries(&c, &path).await.map_err(ae)?;
+    let r = app.clubs().add(&text, &path, &path, None, &fps, &songs, now_ms()).map_err(ae)?;
     clubs_changed(&app);
     Ok(r)
 }
@@ -699,7 +700,8 @@ pub async fn club_import_url(app: S<'_>, url: String) -> Res<Imported> {
     let text = club::fetch(&url).await.map_err(ae)?;
     let c = club::parse(&text).map_err(ae)?;
     let fps = club::fetch_fingerprints(&c, &url, &HashMap::new()).await.map_err(ae)?;
-    let r = app.clubs().add(&text, &url, &url, None, &fps, now_ms()).map_err(ae)?;
+    let songs = club::fetch_song_libraries(&c, &url).await.map_err(ae)?;
+    let r = app.clubs().add(&text, &url, &url, None, &fps, &songs, now_ms()).map_err(ae)?;
     clubs_changed(&app);
     Ok(r)
 }
@@ -715,7 +717,8 @@ pub async fn club_update(app: S<'_>, club_id: String) -> Res<Imported> {
     let text = club::fetch(&url).await.map_err(ae)?;
     let c = club::parse(&text).map_err(ae)?;
     let fps = club::fetch_fingerprints(&c, &url, &HashMap::new()).await.map_err(ae)?;
-    let r = app.clubs().add(&text, &url, &url, Some(&club_id), &fps, now_ms()).map_err(ae)?;
+    let songs = club::fetch_song_libraries(&c, &url).await.map_err(ae)?;
+    let r = app.clubs().add(&text, &url, &url, Some(&club_id), &fps, &songs, now_ms()).map_err(ae)?;
     clubs_changed(&app);
     Ok(r)
 }
@@ -731,7 +734,13 @@ pub async fn club_save(app: S<'_>, club_id: String, version_id: String, text: St
     let c = club::parse(&text).map_err(ae)?;
     let base = clubs.base(&club_id, &version_id);
     let fps = club::fetch_fingerprints(&c, &base, &clubs.fingerprints(&club_id, &version_id)).await.map_err(ae)?;
-    let r = clubs.save(&club_id, &version_id, &text, in_place, &fps, now_ms()).map_err(ae)?;
+    // The same song libraries as before: keep what was fetched (works offline).
+    let before = clubs.club(&club_id, Some(&version_id)).ok();
+    let songs = match before {
+        Some(b) if b.song_library == c.song_library => b.library,
+        _ => club::fetch_song_libraries(&c, &base).await.map_err(ae)?,
+    };
+    let r = clubs.save(&club_id, &version_id, &text, in_place, &fps, &songs, now_ms()).map_err(ae)?;
     clubs_changed(&app);
     Ok(r)
 }
@@ -750,7 +759,8 @@ pub async fn club_import_example(app: S<'_>, id: String) -> Res<Imported> {
     let (_, text) = club::EXAMPLES.iter().find(|(e, _)| *e == id).ok_or_else(|| format!("no example club \"{id}\""))?;
     let c = club::parse(text).map_err(ae)?;
     let fps = club::fetch_fingerprints(&c, club::EXAMPLE_BASE, &HashMap::new()).await.map_err(ae)?;
-    let r = app.clubs().add(text, "example", club::EXAMPLE_BASE, None, &fps, now_ms()).map_err(ae)?;
+    let songs = club::fetch_song_libraries(&c, club::EXAMPLE_BASE).await.map_err(ae)?;
+    let r = app.clubs().add(text, "example", club::EXAMPLE_BASE, None, &fps, &songs, now_ms()).map_err(ae)?;
     clubs_changed(&app);
     Ok(r)
 }
@@ -848,7 +858,7 @@ pub async fn club_song_text(app: S<'_>, track_id: Id) -> Res<String> {
 #[tauri::command]
 pub async fn club_new(app: S<'_>, name: String) -> Res<Imported> {
     let text = club::to_toml(&Club { name: name.trim().to_string(), ..Default::default() });
-    let r = app.clubs().add(&text, "new", "", None, &HashMap::new(), now_ms()).map_err(ae)?;
+    let r = app.clubs().add(&text, "new", "", None, &HashMap::new(), &Default::default(), now_ms()).map_err(ae)?;
     clubs_changed(&app);
     Ok(r)
 }

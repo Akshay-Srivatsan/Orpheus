@@ -11,10 +11,14 @@ name = "Friday Night Waltz"
 description = """Friday Night Waltz, with Lucas Garron's social dance tempos. Low in the extended range \
 should feel more mellow, high in it should have more energy."""
 website = "https://garron.net/dance/tempos/"
+song_library = "songs.toml"
+
+[set]
+# A Friday-evening dance: 2¾ to 3 hours.
+minutes = [165, 180]
 
 [style.cross-step]
 name = "Cross-Step Waltz"
-short = "CSW"
 color = "#a78bfa"
 meter = 3
 tempo = [105, 130]
@@ -22,7 +26,7 @@ preferred = [114, 122]
 
 [style.rotary]
 name = "Rotary Waltz"
-short = "RW"
+short = "Waltz"
 color = "#f472b6"
 meter = 3
 tempo = [135, 170]
@@ -30,7 +34,6 @@ preferred = [140, 160]
 
 [style.fast-waltz]
 name = "Fast Waltz"
-short = "FW"
 color = "#fb7185"
 meter = 3
 tempo = [160, 210]
@@ -38,7 +41,6 @@ preferred = [170, 200]
 
 [style.polka]
 name = "Polka"
-short = "PK"
 color = "#facc15"
 meter = 2
 tempo = [105, 140]
@@ -46,7 +48,6 @@ preferred = [110, 125]
 
 [style.schottische]
 name = "Schottische"
-short = "SCH"
 color = "#fde68a"
 meter = 4
 tempo = [145, 170]
@@ -54,7 +55,6 @@ preferred = [150, 165]
 
 [style.one-step]
 name = "One-Step"
-short = "OS"
 color = "#fef08a"
 meter = 2
 tempo = [110, 135]
@@ -62,7 +62,7 @@ preferred = [115, 130]
 
 [style.lindy]
 name = "Lindy Hop"
-short = "LH"
+short = "Swing"
 color = "#fbbf24"
 meter = 4
 tempo = [135, 180]
@@ -70,7 +70,6 @@ preferred = [140, 170]
 
 [style.sweet-lindy]
 name = "Sweet Lindy"
-short = "SL"
 color = "#fcd34d"
 meter = 4
 tempo = [110, 140]
@@ -78,7 +77,6 @@ preferred = [115, 135]
 
 [style.six-count-swing]
 name = "6-Count Swing"
-short = "6CS"
 color = "#fde047"
 meter = 4
 tempo = [80, 115]
@@ -86,7 +84,6 @@ preferred = [85, 105]
 
 [style.four-count-swing]
 name = "4-Count Swing"
-short = "4CS"
 color = "#facc15"
 meter = 4
 tempo = [115, 145]
@@ -102,7 +99,6 @@ preferred = [100, 120]
 
 [style.slow-jam]
 name = "Slow Jam"
-short = "SJ"
 color = "#6366f1"
 meter = 4
 tempo = [60, 100]
@@ -110,15 +106,14 @@ preferred = [65, 90]
 
 [style.hustle]
 name = "Hustle"
-short = "HUS"
 color = "#e879f9"
 meter = 4
 tempo = [110, 130]
 preferred = [115, 125]
 
 [style.club-two-step]
-name = "Club Two-Step"
-short = "C2S"
+name = "Nightclub Two-Step"
+short = "NC2S"
 color = "#c084fc"
 meter = 4
 tempo = [75, 90]
@@ -126,7 +121,6 @@ preferred = [80, 85]
 
 [style.salsa]
 name = "Salsa"
-short = "SAL"
 color = "#f97316"
 meter = 4
 tempo = [85, 110]
@@ -134,7 +128,6 @@ preferred = [90, 100]
 
 [style.cha-cha]
 name = "Cha-Cha"
-short = "CHA"
 color = "#fdba74"
 meter = 4
 tempo = [110, 130]
@@ -142,7 +135,6 @@ preferred = [115, 125]
 
 [style.tango]
 name = "Tango"
-short = "TAN"
 color = "#ef4444"
 meter = 4
 tempo = [115, 140]
@@ -150,7 +142,6 @@ preferred = [120, 130]
 
 [style.foxtrot]
 name = "Foxtrot"
-short = "FOX"
 color = "#94a3b8"
 meter = 4
 tempo = [130, 180]
@@ -158,7 +149,6 @@ preferred = [135, 170]
 
 [style.quickstep]
 name = "Quickstep"
-short = "QS"
 color = "#7dd3fc"
 meter = 4
 tempo = [85, 110]
@@ -167,131 +157,65 @@ note = "Counted in half time (full time about 180–210)."
 
 [style.merengue]
 name = "Merengue"
-short = "MER"
 color = "#ea580c"
 meter = 2
 tempo = [110, 135]
 preferred = [115, 130]
 
 # ---------------------------------------------------------------- dances with their own music
-# Each matches only the songs listed (a fingerprint, Spotify track or file hash identifies a song).
+# Each fits the songs it suggests (from songs.toml), found by fingerprint, Spotify track or file hash.
 
 [style.bnp]
 name = "Bohemian National Polka"
 short = "BNP"
 color = "#38bdf8"
 note = "A choreography."
+suggested = ["bnp-cincinnati-pops", "bnp-spotify"]
 
-[[style.bnp.song]]
-title = "Bohemian National Polka"
-artist = "Cincinnati Pops (Feuerfest Polka)"
-length = "2:39"
-hash = "a88fb3982d668cbe34ad2f88cfb369758"
-fingerprint = "fingerprints/bnp-bohemian-national-polka.txt"
 
-[[style.bnp.song]]
-title = "Bohemian National Polka"
-spotify = "spotify:track:1P0lq5uLZNy6j3p6AqfrCx"
 
 [style.bus-stop]
 name = "Bus Stop"
-short = "BUS"
 color = "#2dd4bf"
 note = "A line dance."
+suggested = ["bus-stop-back-in-time", "bus-stop-play-that-funky-music", "bus-stop-walk-like-an-egyptian"]
 
-[[style.bus-stop.song]]
-title = "Back in Time"
-artist = "Huey Lewis and the News"
-note = "Bus Stop edit at 121 BPM"
-length = "3:47"
-hash = "ac6a61bfc8e2b59bbe229af02c3da50fc"
-fingerprint = "fingerprints/bus-stop-back-in-time.txt"
 
-[[style.bus-stop.song]]
-title = "Play That Funky Music (Mike Edit)"
-artist = "Wild Cherry"
-length = "2:47"
-hash = "ac6dbcbe925c6c85e17501230fdd3c089"
-fingerprint = "fingerprints/bus-stop-play-that-funky-music-mike-edit.txt"
 
-[[style.bus-stop.song]]
-title = "Walk Like An Egyptian (Neonors Remix)"
-artist = "Bangles"
-note = "RP edit at 120 BPM"
-length = "3:21"
-hash = "ad274a29482ad58db6b9e75a3ad427b36"
-fingerprint = "fingerprints/bus-stop-walk-like-an-egyptian-neonors-remix.txt"
 
 [style.barbie]
 name = "Barbie Line Dance"
-short = "BARB"
 color = "#f472b6"
 note = "A line dance to edits of Dance The Night (Dua Lipa); the original doesn't fit."
+suggested = ["barbie-rp-edit", "barbie-lucas-edit"]
 
-[[style.barbie.song]]
-title = "Dance The Night"
-artist = "Dua Lipa"
-note = "RP edit at 116 BPM"
-length = "2:24"
-hash = "afcff5ba1a55be7aa86a69ee5dccb687f"
-fingerprint = "fingerprints/barbie-rp-edit.txt"
 
-[[style.barbie.song]]
-title = "Dance The Night"
-artist = "Dua Lipa"
-note = "Lucas edit, 16-count intro"
-length = "2:35"
-hash = "abbe7029faa93bcba6e5ab00be4d07611"
-fingerprint = "fingerprints/barbie-lucas-edit.txt"
 
 [style.tokyo-polka]
 name = "Tokyo Polka"
-short = "TOK"
 color = "#a3e635"
 note = "A line dance."
+suggested = ["tokyo-polka-ievan-polkka", "tokyo-polka-spotify"]
 
-[[style.tokyo-polka.song]]
-title = "Ievan Polkka"
-artist = "Hatsune Miku"
-note = "Timmie Wong edit"
-length = "2:15"
-hash = "a3cabfa2ff1d30808e7fe7d4202f88908"
-fingerprint = "fingerprints/tokyo-polka-ievan-polkka.txt"
 
-[[style.tokyo-polka.song]]
-title = "Tokyo Polka"
-spotify = "spotify:track:1ny0kgUklOy5FUigvWWK0q"
 
 [style.dawn-mazurka]
 name = "Dawn Mazurka"
-short = "DAWN"
 color = "#c084fc"
 note = "Formerly called the Russian Mazurka Quadrille."
+suggested = ["dawn-mazurka-168", "dawn-mazurka-epic-rp-edit"]
 
-[[style.dawn-mazurka.song]]
-title = "Russian Mazurka Quadrille"
-note = "at 168 BPM"
-length = "2:47"
-hash = "a82dabcc2bc2535d34ec71bd4a6a43dab"
-fingerprint = "fingerprints/dawn-mazurka-russian-mazurka-quadrille.txt"
 
-[[style.dawn-mazurka.song]]
-title = "Norwegian Pirate / An Epic Age"
-artist = "Thomas Bergersen, Aleksandar Dimitrijevic"
-note = "RP edit at 165 BPM"
-length = "2:45"
-hash = "ace09e23c46703d8dc2c64f58323574ed"
-fingerprint = "fingerprints/dawn-mazurka-norwegian-pirate-an-epic-age.txt"
 
 [style.accelerating-waltz]
 name = "Accelerating Waltz"
-short = "ACC"
 color = "#fb7185"
 meter = 3
 note = "A rotary waltz that speeds up."
+suggested = ["accelerating-waltz-lullaby-of-flame"]
 
-[[style.accelerating-waltz.song]]
-title = "Lullaby of Flame (Accelerating Version)"
-artist = "DDRKirby(ISQ)"
-length = "1:55"
-fingerprint = "fingerprints/accelerating-waltz-lullaby-of-flame-accelerating-version.txt"
+[style.romany-polka]
+name = "Romany Polka"
+color = "#fbbf24"
+note = "A choreography."
+suggested = ["romany-polka-rp-edit"]

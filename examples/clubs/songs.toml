@@ -1,0 +1,107 @@
+# Songs the example clubs suggest (choreographies and line dances), shared by
+# dancebreak.toml, jammix.toml and friday-night-waltz.toml (song_library = "songs.toml").
+# Each is identified by any of its fingerprint, Spotify track or file hash.
+
+name = "Stanford social dance songs"
+
+[song.bnp-cincinnati-pops]
+title = "Bohemian National Polka"
+artist = "Cincinnati Pops (Feuerfest Polka)"
+length = "2:39"
+hash = "a88fb3982d668cbe34ad2f88cfb369758"
+fingerprint = "fingerprints/bnp-bohemian-national-polka.txt"
+
+[song.bnp-spotify]
+title = "Bohemian National Polka"
+spotify = "spotify:track:1P0lq5uLZNy6j3p6AqfrCx"
+
+[song.bus-stop-back-in-time]
+title = "Back in Time"
+artist = "Huey Lewis and the News"
+note = "Bus Stop edit at 121 BPM"
+length = "3:47"
+hash = "ac6a61bfc8e2b59bbe229af02c3da50fc"
+fingerprint = "fingerprints/bus-stop-back-in-time.txt"
+
+[song.bus-stop-play-that-funky-music]
+title = "Play That Funky Music (Mike Edit)"
+artist = "Wild Cherry"
+length = "2:47"
+hash = "ac6dbcbe925c6c85e17501230fdd3c089"
+fingerprint = "fingerprints/bus-stop-play-that-funky-music-mike-edit.txt"
+
+[song.bus-stop-walk-like-an-egyptian]
+title = "Walk Like An Egyptian (Neonors Remix)"
+artist = "Bangles"
+note = "RP edit at 120 BPM"
+length = "3:21"
+hash = "ad274a29482ad58db6b9e75a3ad427b36"
+fingerprint = "fingerprints/bus-stop-walk-like-an-egyptian-neonors-remix.txt"
+
+[song.barbie-rp-edit]
+title = "Dance The Night"
+artist = "Dua Lipa"
+note = "RP edit at 116 BPM"
+length = "2:24"
+hash = "afcff5ba1a55be7aa86a69ee5dccb687f"
+fingerprint = "fingerprints/barbie-rp-edit.txt"
+
+[song.barbie-lucas-edit]
+title = "Dance The Night"
+artist = "Dua Lipa"
+note = "Lucas edit, 16-count intro"
+length = "2:35"
+hash = "abbe7029faa93bcba6e5ab00be4d07611"
+fingerprint = "fingerprints/barbie-lucas-edit.txt"
+
+[song.tokyo-polka-ievan-polkka]
+title = "Ievan Polkka"
+artist = "Hatsune Miku"
+note = "Timmie Wong edit"
+length = "2:15"
+hash = "a3cabfa2ff1d30808e7fe7d4202f88908"
+fingerprint = "fingerprints/tokyo-polka-ievan-polkka.txt"
+
+[song.tokyo-polka-spotify]
+title = "Tokyo Polka"
+spotify = "spotify:track:1ny0kgUklOy5FUigvWWK0q"
+
+[song.dawn-mazurka-168]
+title = "Russian Mazurka Quadrille"
+note = "at 168 BPM"
+length = "2:47"
+hash = "a82dabcc2bc2535d34ec71bd4a6a43dab"
+fingerprint = "fingerprints/dawn-mazurka-russian-mazurka-quadrille.txt"
+
+[song.dawn-mazurka-epic-rp-edit]
+title = "Norwegian Pirate / An Epic Age"
+artist = "Thomas Bergersen, Aleksandar Dimitrijevic"
+note = "RP edit at 165 BPM"
+length = "2:45"
+hash = "ace09e23c46703d8dc2c64f58323574ed"
+fingerprint = "fingerprints/dawn-mazurka-norwegian-pirate-an-epic-age.txt"
+
+[song.accelerating-waltz-lullaby-of-flame]
+title = "Lullaby of Flame (Accelerating Version)"
+artist = "DDRKirby(ISQ)"
+length = "1:55"
+fingerprint = "fingerprints/accelerating-waltz-lullaby-of-flame-accelerating-version.txt"
+
+[song.romany-polka-rp-edit]
+title = "Romany Polka"
+artist = "Victor Herbert (The Fortune Teller, 1898)"
+note = "RP edit, mixed tempo"
+length = "2:03"
+hash = "a5cd63893a55eb6d81bfca6c537a52da6"
+fingerprint = "fingerprints/romany-polka-rp-edit.txt"
+
+[song.shim-sham-taint-what-you-do]
+title = "Tain't What You Do (It's the Way That You Do It)"
+artist = "Jimmie Lunceford"
+note = "1939 recording"
+spotify = "spotify:track:6omAOQxWzNUuE3DZkI4cwr"
+
+[song.shim-sham-song]
+title = "The Shim Sham Song"
+artist = "Bill Elliott Swing Orchestra"
+spotify = "spotify:track:4ayZeCFcpODpQMwz9PRDQN"
