@@ -43,6 +43,9 @@ pub struct Takeover {
     pub last_hw: HashMap<String, f64>,
 }
 
+/// On / off time of the lights' error flash.
+const ERROR_FLASH_PERIOD_MS: i64 = 100;
+
 impl App {
     fn require_loaded(&self, deck: usize) -> Result<()> {
         if self.decks[deck].loaded() {
@@ -520,8 +523,13 @@ impl App {
         }
     }
 
-    /// Controller LED states (see `midi::led_states`).
+    /// Controller LED states (see `midi::led_states`), sent every 100 ms.
     pub fn led_states(&self) -> HashMap<String, bool> {
+        // A refused action: every light flashes together, fast.
+        if self.error_flashing() {
+            let on = (now_ms() / ERROR_FLASH_PERIOD_MS) % 2 == 0;
+            return crate::midi::led_states().into_iter().map(|s| (s, on)).collect();
+        }
         let blink = (now_ms() / 400) % 2 == 0;
         let next = self.next_entry();
         let next_ready = next.as_ref().map(|e| e.version_id.is_some()).unwrap_or(false);

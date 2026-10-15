@@ -218,6 +218,12 @@
             <label><input type="checkbox" checked={s.protectOnAir} onchange={(e) => set("protectOnAir", e.currentTarget.checked)} /> Protect the on-air deck: ignore jog wheels, CUE and cue jumps while the room hears it</label>
             <label><input type="checkbox" checked={s.headphonesFollowFreeDeck} onchange={(e) => set("headphonesFollowFreeDeck", e.currentTarget.checked)} /> Switch headphones to the free deck when a deck goes on air</label>
           </span>
+          <span class="l">Crossfader</span>
+          <span class="col">
+            <span>Counts as centered up to <input type="number" min="0" max="50" step="1" value={Math.round(s.crossfaderCenterTolerance * 100)}
+              onchange={(e) => set("crossfaderCenterTolerance", +e.currentTarget.value / 100)} /> % from the middle</span>
+            <span class="faint small">Orpheus never moves the crossfader. Play Next, Go Live and auto mode need it centered, or already on the side of the deck they start; otherwise they show an error and the controller's lights flash.</span>
+          </span>
           <span class="l">Fade-out length</span>
           <span><input type="number" min="0.5" step="0.5" placeholder={String(app.profile?.fadeOutSeconds ?? 5)} value={s.fadeOutMs != null ? s.fadeOutMs / 1000 : ""}
             onchange={(e) => set("fadeOutMs", e.currentTarget.value ? Math.round(+e.currentTarget.value * 1000) : null)} /> seconds</span>

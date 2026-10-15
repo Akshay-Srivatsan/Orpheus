@@ -85,6 +85,8 @@ class AppState {
   /** Smart crate being edited: its id, or "new". */
   smartEditor = $state<string | false>(false);
   /** Bumped by MIDI browse actions; the library table reacts. */
+  /** Counts refusals because of the crossfader (the transport flashes it). */
+  crossfaderBlocked = $state(0);
   midiNav = $state<{ action: string; delta?: number; deck?: 0 | 1; n: number }>({ action: "", n: 0 });
 
   trackMap = $derived(new Map(this.tracks.map((t) => [t.id, t])));
@@ -304,6 +306,7 @@ class AppState {
     this.tts = await api.ttsStatus();
     this.stems = await api.stemsStatus();
     this.stemsReady = new Set(await api.stemsReady());
+    this.listen("crossfader-blocked", () => this.crossfaderBlocked++);
     this.listen("midi-ui", (m) => (this.midiNav = { ...m, n: this.midiNav.n + 1 }));
   }
 

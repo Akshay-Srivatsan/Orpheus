@@ -333,6 +333,8 @@ export interface Settings {
   protectOnAir: boolean;
   /** Switch headphones to the free deck when a deck goes on air. */
   headphonesFollowFreeDeck: boolean;
+  /** Fraction of the crossfader's travel from the middle that still counts as centered. */
+  crossfaderCenterTolerance: number;
   projector: ProjectorSettings;
   /** mappingId "" = pick automatically from the connected controller. */
   midi: { enabled: boolean; mappingId: string; customMappings: MidiMapping[] };

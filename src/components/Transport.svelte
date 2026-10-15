@@ -19,6 +19,16 @@
   const playing = $derived(app.decks.some((d) => d.onAir && (d.status === "playing" || d.status === "loading")));
   const nextDeck = $derived(app.decks.find((d) => d.entryId && d.entryId === p?.nextEntryId));
   const xf = $derived(p?.crossfader ?? 0.5);
+  const xfOffCenter = $derived(Math.abs(xf - 0.5) > (app.settings?.crossfaderCenterTolerance ?? 0));
+  /** Flashes the crossfader when an action was refused because of it. */
+  let xfBlocked = $state(false);
+  $effect(() => {
+    if (!app.crossfaderBlocked) return;
+    // Restart the animation on every refusal.
+    xfBlocked = false;
+    const raf = requestAnimationFrame(() => (xfBlocked = true));
+    return () => cancelAnimationFrame(raf);
+  });
   const next = $derived(app.entryRow(p?.nextEntryId));
   const nextPb = $derived(next?.row ? playback(next.row.track, next.row.version, next.entry, app.clubStyleOf) : null);
   const nextShown = $derived(next ? app.shownFor(next.row?.version, next.entry, nextPb?.target ?? null) : []);
@@ -99,12 +109,16 @@
     {/if}
   </div>
 
-  <div class="xfader" title="Crossfader: which deck the room hears. Play Next and Go Live move it for you.">
+  <div class="xfader" class:blocked={xfBlocked} onanimationend={() => (xfBlocked = false)}
+    title="Crossfader: which deck the room hears. Only you move it: Play Next, Go Live and auto mode need it centered (or on the side of the deck they start).">
     <span class="xl" class:on={xf < 0.5}>A</span>
     <input type="range" min="0" max="1" step="0.01" value={xf} aria-label="Crossfader"
       oninput={(e) => api.setLevels({ crossfader: +e.currentTarget.value })} />
     <span class="xl" class:on={xf > 0.5}>B</span>
   </div>
+  {#if xfOffCenter && p?.autoAdvance}
+    <div class="xf-hint small" title="Auto mode only starts songs when the crossfader is centered">Auto mode: center the fader</div>
+  {/if}
 
   <div class="row">
     <button class="small" disabled={!next} onclick={() => api.skipNext()} title="Skip the up-next song (stays in the set, greyed out)">
@@ -154,4 +168,7 @@
   .xfader input { flex: 1; min-width: 0; }
   .xl { font-weight: 800; font-size: var(--fs-sm); color: var(--text-faint); width: 10px; text-align: center; }
   .xl.on { color: var(--text); }
+  .xfader.blocked { border-radius: 6px; animation: xf-error 0.2s 6 alternate; }
+  @keyframes xf-error { to { background: color-mix(in srgb, var(--red) 45%, transparent); } }
+  .xf-hint { color: var(--yellow); margin-top: -4px; }
 </style>

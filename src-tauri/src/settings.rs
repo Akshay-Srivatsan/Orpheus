@@ -184,6 +184,11 @@ pub struct Settings {
     pub protect_on_air: bool,
     /// When a deck goes on air, switch headphone cueing to the other deck.
     pub headphones_follow_free_deck: bool,
+    /// How far (fraction of the crossfader's travel) from the middle still
+    /// counts as centered. Orpheus never moves the crossfader: further off
+    /// center is the DJ's choice of deck, and Play Next / Go Live / auto mode
+    /// refuse to start the other deck.
+    pub crossfader_center_tolerance: f64,
     pub projector: ProjectorSettings,
     pub midi: MidiSettings,
     pub spotify: SpotifySettings,
@@ -211,6 +216,7 @@ impl Default for Settings {
             auto_load_next: true,
             protect_on_air: true,
             headphones_follow_free_deck: true,
+            crossfader_center_tolerance: 0.1,
             projector: ProjectorSettings::default(),
             midi: MidiSettings::default(),
             spotify: SpotifySettings { client_id: String::new(), auto_connect: true },

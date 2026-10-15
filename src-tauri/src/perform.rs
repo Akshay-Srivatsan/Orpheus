@@ -33,6 +33,9 @@ pub enum PendingNext {
 /// A synthesized announcement: samples and rate, or the error.
 pub type Clip = std::result::Result<(Arc<Vec<f32>>, u32), String>;
 
+/// How long the controller's lights flash when an action is refused.
+pub const ERROR_FLASH: Duration = Duration::from_millis(1200);
+
 /// Auto mode's progress through the pause before the next song:
 /// song ends → pause → announcement → pause → next song.
 #[derive(Default, Clone)]
@@ -68,7 +71,10 @@ pub struct Perform {
     pub auto_advance_override: Option<bool>,
     pub message: Option<String>,
     /// 0 = only deck A in the room, 1 = only deck B, 0.5 (the start) = both.
+    /// Only the DJ moves it.
     pub crossfader: f64,
+    /// Controller LEDs flash until then: an action was refused (see `check_crossfader`).
+    pub error_flash_until: Option<Instant>,
     /// The deck the room heard last (the "current" song's deck).
     pub live_deck: usize,
     /// Load generation of each deck's track once it has been counted as played.
@@ -172,15 +178,55 @@ impl App {
         }
     }
 
+    /// Moved by the DJ (screen or controller). Moving it off center toward a
+    /// deck puts that deck on air like Go Live does for headphones.
     pub fn set_crossfader(&self, x: f64) {
-        self.perform.lock().crossfader = x.clamp(0.0, 1.0);
+        let x = x.clamp(0.0, 1.0);
+        let before = std::mem::replace(&mut self.perform.lock().crossfader, x);
         self.update_routing();
+        let (was, now) = (self.crossfader_side(before), self.crossfader_side(x));
+        if let Some(deck) = now.filter(|_| now != was) {
+            self.went_live(deck);
+        }
     }
 
-    /// Puts `deck` fully on air (and, optionally, headphones on the other deck).
-    fn take_air(&self, deck: usize) {
-        self.set_crossfader(if deck == 0 { 0.0 } else { 1.0 });
-        self.untake(&["cue.crossfader"]);
+    /// The deck the crossfader favors, beyond the center tolerance (none = centered).
+    fn crossfader_side(&self, x: f64) -> Option<usize> {
+        let tolerance = self.settings.read().crossfader_center_tolerance;
+        if x < 0.5 - tolerance {
+            Some(0)
+        } else if x > 0.5 + tolerance {
+            Some(1)
+        } else {
+            None
+        }
+    }
+
+    /// Starting `deck` for the room is allowed unless the crossfader is
+    /// purposely off center toward the other deck: Orpheus never moves it, so
+    /// the refusal is loud (an error, and the controller's lights flash).
+    pub fn check_crossfader(&self, deck: usize) -> Result<()> {
+        let x = self.perform.lock().crossfader;
+        if self.crossfader_side(x) != Some(1 - deck) {
+            return Ok(());
+        }
+        self.perform.lock().error_flash_until = Some(Instant::now() + ERROR_FLASH);
+        emit(&self.handle, "crossfader-blocked", deck);
+        Err(anyhow!(
+            "The crossfader is over to deck {}, so the room wouldn't hear deck {}. Center it for Play Next, Go Live and auto mode, or move it to deck {} yourself.",
+            deck_name(1 - deck),
+            deck_name(deck),
+            deck_name(deck)
+        ))
+    }
+
+    /// Whether the controller's lights are flashing for a refused action.
+    pub fn error_flashing(&self) -> bool {
+        self.perform.lock().error_flash_until.is_some_and(|t| t > Instant::now())
+    }
+
+    /// `deck` started for the room: optionally, headphones move to the other deck.
+    fn went_live(&self, deck: usize) {
         if self.settings.read().headphones_follow_free_deck {
             self.decks[deck].set_pfl(false);
             self.decks[1 - deck].set_pfl(true);
@@ -303,6 +349,10 @@ impl App {
             PendingNext::Deck(d) => *d,
             _ => self.free_deck(),
         };
+        // Refuse before fading anything out.
+        if let Some(deck) = self.deck_for(&target) {
+            self.check_crossfader(deck)?;
+        }
         // Something else audible? Fade it out first; never overlap by default.
         let busy: Vec<usize> = (0..2).filter(|&d| d != target_deck && self.audible(d)).collect();
         if !busy.is_empty() {
@@ -339,7 +389,7 @@ impl App {
         match target {
             PendingNext::Deck(d) => {
                 let dk = &self.decks[d];
-                self.take_air(d);
+                self.went_live(d);
                 if dk.status() == "ended" {
                     dk.seek(dk.cue_secs());
                 }
@@ -370,6 +420,25 @@ impl App {
         Ok(())
     }
 
+    /// The deck `target` would start (none for a pause entry, or nothing to start).
+    fn deck_for(&self, target: &PendingNext) -> Option<usize> {
+        let entry = match target {
+            PendingNext::Deck(d) => return Some(*d),
+            PendingNext::Entry(id) => self.store.entry(id).ok()?.0,
+            PendingNext::Next => self.next_entry()?,
+        };
+        (entry.kind != EntryKind::Pause).then(|| self.deck_for_entry(&entry, self.free_deck()))
+    }
+
+    /// Already loaded on the other deck (e.g. the DJ loaded it by hand)? Use that deck.
+    fn deck_for_entry(&self, entry: &SetlistEntry, deck: usize) -> usize {
+        if self.decks[1 - deck].entry_id().as_deref() == Some(&entry.id) && !self.audible(1 - deck) {
+            1 - deck
+        } else {
+            deck
+        }
+    }
+
     /// Starts a setlist entry on `deck`, reusing it if it's already loaded there
     /// (so cue points / tempo set while cueing are kept).
     fn start_entry(&self, entry: &SetlistEntry, deck: usize) -> Result<()> {
@@ -388,18 +457,13 @@ impl App {
             };
             anyhow!("Choose a song for the {style} slot first")
         })?;
-        // Already loaded on the other deck (e.g. the DJ loaded it by hand)? Use that deck.
-        let deck = if self.decks[1 - deck].entry_id().as_deref() == Some(&entry.id) && !self.audible(1 - deck) {
-            1 - deck
-        } else {
-            deck
-        };
+        let deck = self.deck_for_entry(entry, deck);
         let d = &self.decks[deck];
         let same = d.loaded()
             && d.status() != "loading"
             && (d.entry_id().as_deref() == Some(&entry.id)
                 || (d.entry_id().is_none() && d.version_id().as_deref() == Some(&version_id)));
-        self.take_air(deck);
+        self.went_live(deck);
         if same {
             d.set_entry_id(Some(entry.id.clone()));
             // Always start from the cue point (the version's start unless the DJ
@@ -753,6 +817,16 @@ impl App {
                     return;
                 }
                 let Some(result) = clip.lock().take() else { return };
+                // Don't announce a song the crossfader wouldn't let the room hear.
+                if let Some(deck) = self.deck_for(&PendingNext::Next) {
+                    if let Err(e) = self.check_crossfader(deck) {
+                        emit(&self.handle, "toast", format!("Auto mode stopped: {e:#}"));
+                        let mut p = self.perform.lock();
+                        p.gap_started = None;
+                        p.auto = AutoPhase::Idle;
+                        return;
+                    }
+                }
                 let phase = match result {
                     Ok((samples, rate)) => {
                         let volume = self.settings.read().announce.volume as f32;

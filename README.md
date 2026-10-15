@@ -20,10 +20,13 @@ Runs on macOS, Linux and Windows (Tauri 2, Rust and Svelte).
   is optional.
 - **Two identical decks (A and B) and a crossfader.** The crossfader decides
   which deck the room hears; the other deck is the *free deck*, for cueing in
-  headphones. **Play Next** and **Go Live** move the crossfader for you once
-  the previous song has faded, so songs don't overlap unless you crossfade
-  by hand. It starts in the middle, so the room hears whichever deck you
-  play first.
+  headphones. Only you move the crossfader. It starts in the middle, where
+  the room hears both decks: that's the position for **Play Next**, **Go
+  Live** and auto mode, which fade out the previous song first so songs
+  don't overlap. Off center (more than 10% by default, see Settings →
+  General) is your choice of deck: starting the other deck is refused with
+  an error, and the controller's lights flash. Moving the crossfader toward
+  a deck switches the headphones to the other deck (optional).
 - **The next song in the set is loaded onto the free deck automatically**,
   paused at its start, so you can check it in headphones. Play Next always
   starts it from its cue point.

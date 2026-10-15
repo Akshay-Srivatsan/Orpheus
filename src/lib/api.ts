@@ -192,6 +192,8 @@ export interface Events {
   "output-status": T.OutputStatus;
   "midi-ui": { action: string; delta?: number; deck?: 0 | 1 };
   "toast-info": string;
+  /** Play Next / Go Live / auto mode refused: the crossfader is off center toward the other deck. */
+  "crossfader-blocked": 0 | 1;
   "stems-status": T.StemsStatus;
   "tts-status": T.TtsStatus;
   "open-settings": string;
