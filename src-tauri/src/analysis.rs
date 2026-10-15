@@ -3,8 +3,9 @@
 use crate::store::Analysis;
 use rustfft::{num_complex::Complex, FftPlanner};
 
-/// Bumped when analysis gains results (2: meter); older tracks are re-analysed.
-pub const VERSION: u32 = 2;
+/// Bumped when analysis gains results (2: meter; 3: quieter silence
+/// threshold); older tracks are re-analysed.
+pub const VERSION: u32 = 3;
 
 /// Number of waveform bins stored per track; each bin is 4 bytes:
 /// peak, low-band, mid-band, high-band (all 0..=255).
@@ -109,10 +110,15 @@ pub fn loudness(mono: &[f32], sr: u32) -> Option<f64> {
     Some(to_db(gated.iter().sum::<f64>() / gated.len() as f64))
 }
 
-/// Leading/trailing silence (below -48 dBFS over 10 ms windows).
+/// Below this (RMS over 10 ms) counts as silence. Fade-outs are still audible
+/// well below -48 dBFS (trimming there cut seconds off most songs); by -60 dBFS
+/// what's left is inaudible in a room.
+const SILENCE_DB: f32 = -60.0;
+
+/// Leading/trailing silence (below `SILENCE_DB`).
 pub fn silence_bounds(mono: &[f32], sr: u32) -> (Option<i64>, Option<i64>) {
     let win = (sr as usize / 100).max(1);
-    let thresh = 10f32.powf(-48.0 / 20.0);
+    let thresh = 10f32.powf(SILENCE_DB / 20.0);
     let windows: Vec<f32> = mono
         .chunks(win)
         .map(|c| (c.iter().map(|x| x * x).sum::<f32>() / c.len() as f32).sqrt())
@@ -540,5 +546,25 @@ mod tests {
         let w = waveform(&audio, sr);
         assert_eq!(w.len(), WAVEFORM_BINS * 4);
         assert!(loudness(&audio, sr).unwrap() < 0.0);
+    }
+
+    /// A fade-out is music until it's really inaudible, not cut mid-fade.
+    #[test]
+    fn fade_out_is_not_trimmed_early() {
+        let sr = 44100u32;
+        // 2 s at -20 dBFS, then a 10 s fade from -20 to -90 dB (7 dB/s).
+        let secs = 12.0;
+        let audio: Vec<f32> = (0..(secs * sr as f64) as usize)
+            .map(|i| {
+                let t = i as f64 / sr as f64;
+                let db = if t < 2.0 { -20.0 } else { -20.0 - 7.0 * (t - 2.0) };
+                let amp = 10f64.powf(db / 20.0) * std::f64::consts::SQRT_2;
+                (amp * (2.0 * std::f64::consts::PI * 440.0 * t).sin()) as f32
+            })
+            .collect();
+        let (_, e) = silence_bounds(&audio, sr);
+        // -60 dB is reached 40/7 s into the fade.
+        let expected = ((2.0 + 40.0 / 7.0) * 1000.0) as i64;
+        assert!((e.unwrap() - expected).abs() < 100, "end {e:?}, expected about {expected}");
     }
 }
