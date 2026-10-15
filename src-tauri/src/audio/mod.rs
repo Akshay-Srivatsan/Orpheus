@@ -94,6 +94,9 @@ pub struct Tap {
     /// Frames the deck couldn't write because this (follower) ring was full
     /// (diagnostics: heard as dropouts on that output).
     pub dropped: AtomicU64,
+    /// An open output stream consumes this tap (e.g. false for the headphone
+    /// taps when no headphone output is set up).
+    pub attached: AtomicBool,
 }
 
 impl Tap {
@@ -107,6 +110,7 @@ impl Tap {
             volume: AtomicF32::new(1.0),
             peak: AtomicF32::new(0.0),
             dropped: AtomicU64::new(0),
+            attached: AtomicBool::new(false),
         })
     }
 }

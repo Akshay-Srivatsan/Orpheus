@@ -771,8 +771,8 @@ impl Worker {
         }
         for (i, (p, clock)) in self.prods.iter_mut().enumerate() {
             let n = if *clock { out.len() } else { (p.slots() / 2 * 2).min(out.len()) };
-            if n < out.len() {
-                let tap = if i == 0 { &self.sh.master_tap } else { &self.sh.cue_tap };
+            let tap = if i == 0 { &self.sh.master_tap } else { &self.sh.cue_tap };
+            if n < out.len() && tap.attached.load(Ordering::Relaxed) {
                 tap.dropped.fetch_add(((out.len() - n) / 2) as u64, Ordering::Relaxed);
             }
             for &s in &out[..n] {

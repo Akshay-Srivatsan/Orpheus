@@ -6,3 +6,4 @@ src-tauri/gen/
 .env
 *.log
 /.claude/
+/room*.wav

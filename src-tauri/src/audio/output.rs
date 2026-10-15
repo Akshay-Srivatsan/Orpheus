@@ -199,6 +199,9 @@ fn open_streams(
     let mut st = OutputStatus::default();
     let mut streams = vec![];
     let mut rate = 48000;
+    for t in master_taps.iter().chain(&cue_taps) {
+        t.attached.store(false, Ordering::Relaxed);
+    }
 
     let master_dev = match find_device(&config.master_device) {
         Ok(d) => Some(d),
@@ -291,6 +294,7 @@ fn build_stream(
     status: Arc<Mutex<OutputStatus>>,
     is_master: bool,
 ) -> Result<cpal::Stream> {
+    let taps: Vec<Arc<Tap>> = assigns.iter().map(|a| a.tap.clone()).collect();
     let stream = match fmt {
         SampleFormat::F32 => build_typed::<f32>(dev, sc, assigns, levels, status, is_master),
         SampleFormat::I16 => build_typed::<i16>(dev, sc, assigns, levels, status, is_master),
@@ -302,7 +306,74 @@ fn build_stream(
         other => Err(anyhow!("unsupported sample format {other:?}")),
     }?;
     stream.play()?;
+    // These taps are consumed now.
+    for t in taps {
+        t.attached.store(true, Ordering::Relaxed);
+    }
     Ok(stream)
+}
+
+/// Environment variable naming a WAV file: the room output's mix is recorded
+/// there exactly as it goes to the device (for finding where a crackle comes
+/// from: in Orpheus's output, or after it).
+const RECORD_ENV: &str = "ORPHEUS_RECORD_ROOM";
+/// Audio the recorder buffers while its thread writes to disk.
+const RECORD_BUFFER_SECS: usize = 4;
+/// How often the recorder updates the WAV header (so the file stays playable).
+const RECORD_FLUSH: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Starts recording a stream's mix if `ORPHEUS_RECORD_ROOM` is set. The
+/// callback pushes into the returned ring (never waiting); a low-priority
+/// thread writes it out. Reopening the outputs starts a new numbered file.
+fn start_recorder(channels: usize, rate: u32) -> Option<rtrb::Producer<f32>> {
+    static OPENED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let base = std::env::var_os(RECORD_ENV)?;
+    let n = OPENED.fetch_add(1, Ordering::Relaxed);
+    let path = if n == 0 {
+        std::path::PathBuf::from(&base)
+    } else {
+        std::path::Path::new(&base).with_extension(format!("{n}.wav"))
+    };
+    let spec = hound::WavSpec { channels: channels as u16, sample_rate: rate, bits_per_sample: 32, sample_format: hound::SampleFormat::Float };
+    let mut w = match hound::WavWriter::create(&path, spec) {
+        Ok(w) => w,
+        Err(e) => {
+            log::warn!("can't record the room output to {}: {e}", path.display());
+            return None;
+        }
+    };
+    let (prod, mut cons) = rtrb::RingBuffer::<f32>::new(RECORD_BUFFER_SECS * rate as usize * channels);
+    log::info!("recording the room output to {}", path.display());
+    std::thread::Builder::new()
+        .name("room-recorder".into())
+        .spawn(move || {
+            super::priority::lower_current_thread();
+            let mut flushed = std::time::Instant::now();
+            loop {
+                let n = cons.slots();
+                if n == 0 {
+                    if cons.is_abandoned() {
+                        break;
+                    }
+                    std::thread::sleep(RECORD_FLUSH / 10);
+                    continue;
+                }
+                if let Ok(chunk) = cons.read_chunk(n) {
+                    let (a, b) = chunk.as_slices();
+                    for &v in a.iter().chain(b) {
+                        let _ = w.write_sample(v);
+                    }
+                    chunk.commit_all();
+                }
+                if flushed.elapsed() >= RECORD_FLUSH {
+                    let _ = w.flush();
+                    flushed = std::time::Instant::now();
+                }
+            }
+            let _ = w.finalize();
+        })
+        .ok()?;
+    Some(prod)
 }
 
 /// Fill level a follower ring is held at (the clock ring stays near full).
@@ -338,6 +409,7 @@ where
     let gain_step = (1.0 - (-1.0 / (0.005 * device_rate)).exp()) as f32;
     let err_status = status.clone();
     let mut last_start: Option<std::time::Instant> = None;
+    let mut recorder = if is_master { start_recorder(channels, sc.sample_rate) } else { None };
     let stream = dev.build_output_stream::<T, _, _>(
         sc.clone(),
         move |data: &mut [T], _info| {
@@ -424,8 +496,22 @@ where
                     a.tap.peak.set(deck_peak);
                 }
             }
+            for s in mix.iter_mut() {
+                *s = s.clamp(-1.0, 1.0);
+            }
             for (d, s) in data.iter_mut().zip(mix.iter()) {
-                *d = T::from_sample(s.clamp(-1.0, 1.0));
+                *d = T::from_sample(*s);
+            }
+            if let Some(r) = recorder.as_mut() {
+                // Never waits: if the writer falls behind, the excess is lost
+                // from the recording only.
+                if let Ok(mut chunk) = r.write_chunk(mix.len().min(r.slots())) {
+                    let (a, b) = chunk.as_mut_slices();
+                    let k = a.len();
+                    a.copy_from_slice(&mix[..k]);
+                    b.copy_from_slice(&mix[k..k + b.len()]);
+                    chunk.commit_all();
+                }
             }
             if master_peak > levels.master_peak.get() {
                 levels.master_peak.set(master_peak);
