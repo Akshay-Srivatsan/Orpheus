@@ -69,7 +69,7 @@
       class:on={sel.has(k)}
       class:drop={drop === k}
       style:--c={app.styleColor(k)}
-      title="{s.name}{app.hasClub ? ` · ${app.clubTargets(k).map((t) => t.name + range(t)).join(", ") || `not a ${app.club?.name} style`}` : ''} — click to filter, ⌘/Shift-click to add; drop songs here to label them"
+      title="{s.name} — click to filter, ⌘/Shift-click to add; drop songs here to label them"
       onclick={(e) => toggle(e, k)}
       ondragover={(e) => { e.preventDefault(); drop = k; }}
       ondragleave={() => (drop = null)}
@@ -94,10 +94,10 @@
     </select>
   {/if}
 </div>
-{#if app.filterStyle && app.hasClub}
+{#if app.filterStyle && app.hasClub && targets.length}
   <div class="info">
     <span class="sname" style:color={app.styleColor(app.filterStyle)}>{app.styleName(app.filterStyle)}</span>
-    {#if !targets.length}<span class="faint">not a {app.club?.name} style</span>{/if}
+    <span class="faint">mapped to</span>
     {#each targets as t}
       <span class="num"><span style:color={t.color}>{t.name}</span>{#if t.sweet} {t.sweet[0]}–{t.sweet[1]} BPM{#if t.extended} <span class="faint">(ok {t.extended[0]}–{t.extended[1]})</span>{/if}{/if}</span>
     {/each}

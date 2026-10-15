@@ -204,14 +204,6 @@ class AppState {
     return targets.find((t) => assess(t.key, this.club!.style[t.key], facts, this.clubCtx!.tempoChange).ok) ?? targets[0];
   }
 
-  /** How one of your styles is shown at the current club: the club style it maps to (first), else yours. */
-  show(key: string, bpm: number | null = null): Shown {
-    const s = this.style(key, bpm);
-    const mine = mineShown(this.styleLib, key);
-    if (!s) return { ...mine, unmapped: this.hasClub };
-    return { ...mine, key: s.key, name: s.name, short: s.short, color: s.color, club: s };
-  }
-
   /** One of your styles as you name it (ignoring the club). */
   mine(key: string): Shown {
     return mineShown(this.styleLib, key);

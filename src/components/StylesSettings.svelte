@@ -101,9 +101,10 @@
 <h2>Dance Styles &amp; Tags</h2>
 <p class="dim">
   Your dance styles are what you tag songs with; a song can have several. In a club's set, songs show the <i>club's</i>
-  styles they match by meter, tempo and length. The table below says which club styles each of yours may show as; a song
-  then shows those it matches (or, if it matches none, all of them, with a warning). Songs with no ticks show every
-  style they match. Without a club, your own styles are shown.
+  styles they fit (by meter, tempo and length, or because the club suggests the song). When a song fits several, the
+  table below picks which of them show by default: those ticked for its styles (all of them if none is ticked). It never
+  makes a song a style it doesn't fit; choose any style for a song in the set with right-click → Show as. Without a club,
+  your own styles are shown.
 </p>
 
 <h3>Your styles</h3>

@@ -122,10 +122,17 @@ describe("what a song shows", () => {
     expect(clubShown(club, song(148, 3), tc, null, ["waltz"], mapping).ids).toEqual(["rotary"]);
   });
 
-  it("a mapped song that fits none of its styles still shows them, with the reason", () => {
+  it("the mapping never adds a style the song doesn't match", () => {
     const s = clubShown(club, song(95, 4, { meterDetected: false }), tc, null, ["my-polka"], mapping);
-    expect(s.ids).toEqual(["polka"]);
-    expect(s.fits.polka.problems.length).toBeGreaterThan(0);
+    expect(s.ids).toEqual([]);
+  });
+
+  it("the mapping picks among several matches, and doesn't matter for one", () => {
+    // 115 duple: Polka and Lindy Hop (+8.7 %) both fit; your polka mapping picks Polka.
+    expect(clubShown(club, song(115, 4), tc, null, ["my-polka"], mapping).ids).toEqual(["polka"]);
+    expect(clubShown(club, song(115, 4), tc, null, ["kizomba"], mapping).ids).toEqual(["polka", "lindy"]);
+    // Only Rotary fits a 148 BPM waltz: shown whatever the mapping says.
+    expect(clubShown(club, song(148, 3), tc, null, ["my-polka"], mapping).ids).toEqual(["rotary"]);
   });
 
   it("without a mapping, every match", () => {

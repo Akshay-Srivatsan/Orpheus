@@ -11,10 +11,11 @@
 //    one the song doesn't match, with a warning);
 // 2. the styles the club suggests this very song for (its listed songs, found
 //    by fingerprint, Spotify track or file hash);
-// 3. your mapping: of the club styles your style may show as (Settings →
-//    Styles), those the song matches, or all of them if it matches none
-//    (you said what it is: a warning says why it doesn't fit);
-// 4. otherwise every club style it matches.
+// 3. the club styles it matches. When it matches several, your mapping
+//    (Settings → Styles & Tags) picks which of them show by default: those
+//    ticked for your styles on the song, or all of them if none is. The
+//    mapping never adds a style the song doesn't match, and doesn't matter
+//    when only one matches.
 //
 // This module is the only implementation: the main window and the projector
 // both use it.
@@ -315,13 +316,13 @@ export function clubShown(
   if (listed.length) return { ids: listed, fits: fitsOf(listed), source: "listed" };
   const all = matches(club, f, tc);
   const ticked = known([...new Set(myKeys.flatMap((k) => mapping?.[k] ?? []))]);
-  if (ticked.length) {
-    const hit = all.filter((a) => ticked.includes(a.id)).map((a) => a.id);
-    const ids = hit.length ? hit : ticked;
-    return { ids, fits: fitsOf(ids), source: "mapping" };
-  }
-  const ids = all.map((a) => a.id);
-  return { ids, fits: Object.fromEntries(all.map((a) => [a.id, a])), source: ids.length ? "matches" : "none" };
+  const hit = all.length > 1 ? all.filter((a) => ticked.includes(a.id)) : [];
+  const shown = hit.length ? hit : all;
+  return {
+    ids: shown.map((a) => a.id),
+    fits: Object.fromEntries(shown.map((a) => [a.id, a])),
+    source: !shown.length ? "none" : hit.length ? "mapping" : "matches",
+  };
 }
 
 function unchecked(id: string): Assessment {
