@@ -3,6 +3,7 @@
   // "add" menu. With `choices`, only those can be toggled on and off (e.g.
   // which of a song's styles a setlist shows).
   import { app } from "../lib/state.svelte";
+  import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
 
   interface Props {
     value: string[];
@@ -19,6 +20,15 @@
   const addable = $derived(all.filter((s) => !value.includes(s.key)));
   const name = (k: string) => (kind === "tag" ? app.tagName(k) : app.styleName(k));
   const color = (k: string) => (kind === "tag" ? app.tagColor(k) : app.styleColor(k));
+
+  // The app's own menu, not a native <select>: WebKitGTK truncates a narrow
+  // select's "+" to an ellipsis.
+  let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  function openAdd(e: MouseEvent) {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const items: MenuItem[] = addable.map((s) => ({ label: s.name, action: () => onchange([...value, s.key]) }));
+    menu = { x: r.left, y: r.bottom + 2, items };
+  }
 
   function title(key: string): string {
     if (kind === "tag") return app.tagName(key);
@@ -45,15 +55,15 @@
       </span>
     {/each}
     {#if addable.length}
-      <select class="add" value="" onchange={(e) => { const k = e.currentTarget.value; e.currentTarget.value = ""; if (k) onchange([...value, k]); }}>
-        <option value="">{value.length ? "+" : kind === "tag" ? "Add tag…" : "Add style…"}</option>
-        {#each addable as s}<option value={s.key}>{s.name}</option>{/each}
-      </select>
+      <button class="add small" title={kind === "tag" ? "Add a tag" : "Add a dance style"} onclick={openAdd}>
+        {value.length ? "+" : kind === "tag" ? "Add tag…" : "Add style…"}
+      </button>
     {:else if !all.length}
       <button class="plain small" onclick={() => (app.settingsOpen = "styles")}>{kind === "tag" ? "Create tags…" : "Create dance styles…"}</button>
     {/if}
   {/if}
 </span>
+{#if menu}<ContextMenu x={menu.x} y={menu.y} items={menu.items} onclose={() => (menu = null)} />{/if}
 
 <style>
   .chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
@@ -61,6 +71,6 @@
   button.chip { cursor: pointer; }
   .chip.off { opacity: 0.4; filter: grayscale(0.7); }
   .x { padding: 0 2px; height: 16px; min-width: 0; font-size: 13px; line-height: 1; color: inherit; }
-  .add { height: 22px; width: auto; max-width: 140px; }
+  .add { height: 20px; min-width: 24px; padding: 0 6px; }
   .small { font-size: var(--fs-sm); }
 </style>

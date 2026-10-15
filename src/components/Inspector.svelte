@@ -224,7 +224,7 @@
             {/if}
           </span>
           <span></span>
-          <span class="faint small">{track.bpmSource ? `from ${{ detected: "analysis", tag: "file tag", tap: "tapping", user: "you" }[track.bpmSource] ?? track.bpmSource}` : track.analyzed ? "not detected" : "analysing…"}{#if track.loudnessDb != null} · {track.loudnessDb.toFixed(1)} LUFS{/if} · {fmtTime(track.durationMs)}</span>
+          <span class="faint small">{track.bpmSource ? `from ${{ detected: "analysis", tag: "file tag", tap: "tapping", user: "you" }[track.bpmSource] ?? track.bpmSource}` : track.analyzed ? "not detected" : "analysing…"}{#if track.loudnessDb != null}{" · "}{track.loudnessDb.toFixed(1)} LUFS{/if} · {fmtTime(track.durationMs)}</span>
           <span class="lbl" title="Beats per bar. Detected from the audio, on the beat grid of the BPM above (fix the BPM first if it's off)">Meter</span>
           <span class="row">
             <select value={track.meterSource === "user" ? String(track.beatsPerBar ?? "") : "auto"}

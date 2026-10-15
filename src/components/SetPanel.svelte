@@ -375,7 +375,7 @@
                 </button>
                 {#if app.fillingSlot === x.e.id}<span class="hint">or drag a song here</span>{/if}
               {/if}
-              {#if x.r}<span class="a">{x.r.track.artist}{#if app.versionLabel(x.r.version, x.r.track)} · {x.r.version.name}{/if}</span>{/if}
+              {#if x.r}<span class="a">{x.r.track.artist}{#if app.versionLabel(x.r.version, x.r.track)}{" · "}{x.r.version.name}{/if}</span>{/if}
               {#each x.e.tags ?? [] as tag}
                 {@const t = app.profile?.tags.find((d) => d.id === tag)}
                 <span class="badge tag" style:--c={t?.color ?? "#999"}>{t?.name ?? tag}</span>
@@ -399,7 +399,7 @@
       <button class="small" onclick={slotMenu} title="Add a placeholder for a dance style; choose the song live"><Icon name="plus" size={12} /> Style slot</button>
       <button class="small" onclick={addPause} title="Add a pause without a song: for a break, an extra pause, an announcement or a stop for auto mode"><Icon name="pause" size={12} /> Pause</button>
       <span class="spacer"></span>
-      <span class="dim small num">{number.size} songs · {fmtTime(totalMs)}{#if remainingMs && app.perform?.startedAt} · {fmtTime(remainingMs)} left{/if}</span>
+      <span class="dim small num">{number.size} songs · {fmtTime(totalMs)}{#if remainingMs && app.perform?.startedAt}{" · "}{fmtTime(remainingMs)} left{/if}</span>
     </div>
   {/if}
 </div>

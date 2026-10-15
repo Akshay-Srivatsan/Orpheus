@@ -196,11 +196,10 @@
     <div class="titles">
       {#if track}
         <div class="title" title={track.title}>{track.title}</div>
+        <!-- Chips share the artist's line, so every deck's header is the same height. -->
         <div class="artist">
-          {track.artist}
-          {#if row && app.versionLabel(row.version, track)}<span class="ver">· {row.version.name}</span>{/if}
-        </div>
-        <div class="chips">
+          <span class="who">{track.artist}{#if row && app.versionLabel(row.version, track)}<span class="ver">{" · "}{row.version.name}</span>{/if}</span>
+          <span class="chips">
           <StyleBadge styles={shown} label={customLabel(row?.version, entry)} />
           {#each entry?.tags ?? [] as tag}
             {@const t = app.profile?.tags.find((x) => x.id === tag)}
@@ -209,6 +208,7 @@
           {#if track.sources.some((s) => s.kind === "spotify") && (track.files.length === 0 || track.preferredSource === "spotify")}
             <span class="badge" style:--c="#1db954">Spotify</span>
           {/if}
+          </span>
         </div>
       {:else if d.status === "loading"}
         <div class="title faint">Loading…</div>
@@ -338,15 +338,16 @@
   .status { font-size: var(--fs-sm); color: var(--text-dim); }
   .spacer { flex: 1; }
   button.on { color: var(--teal); background: color-mix(in srgb, var(--teal) 16%, transparent); }
-  .meta { display: flex; gap: 10px; align-items: center; min-height: 56px; }
+  .meta { display: flex; gap: 10px; align-items: center; height: 56px; }
   .art { width: 52px; height: 52px; flex: none; border-radius: 6px; overflow: hidden; display: grid; place-items: center;
     background: color-mix(in srgb, var(--c) 25%, var(--bg-elev-2)); color: color-mix(in srgb, var(--c) 80%, white); font-weight: 800; font-size: 14px; }
   .art img { width: 100%; height: 100%; object-fit: cover; }
   .titles { flex: 1; min-width: 0; }
   .title { font: 600 19px/1.2 var(--font-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .artist { color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+  .artist { color: var(--text-dim); display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 1px; }
+  .who { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ver { color: var(--text-faint); }
-  .chips { display: flex; gap: 4px; margin-top: 4px; flex-wrap: nowrap; overflow: hidden; }
+  .chips { flex: none; display: flex; gap: 4px; flex-wrap: nowrap; }
   .times { text-align: right; }
   .remain { font: 600 24px/1 var(--font-display); }
   .remain.near { color: var(--orange); }

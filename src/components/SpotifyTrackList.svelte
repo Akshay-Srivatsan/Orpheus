@@ -75,7 +75,7 @@
       {#if t.artworkUrl}<img src={t.artworkUrl} alt="" />{:else}<div class="noart"></div>{/if}
       <div class="txt">
         <div class="t">{t.title}</div>
-        <div class="a dim">{t.artist}{#if !compact} · {t.album}{/if}</div>
+        <div class="a dim">{t.artist}{#if !compact}{" · "}{t.album}{/if}</div>
       </div>
       <span class="num dim">{fmtTime(t.durationMs)}</span>
       <button class="plain icon" title="Preview in headphones" onclick={() => preview(t)}><Icon name="headphones" size={14} /></button>

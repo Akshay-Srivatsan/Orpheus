@@ -77,16 +77,18 @@
   {#if inGap || playing}
   <div class="gap" class:active={inGap}>
     {#if inGap}
+      <!-- One line: the pause, and what auto mode does next. -->
       <div class="gap-time num">
         <span class="big" class:over={gapMs > gapTarget}>{fmtTime(gapMs)}</span>
-        <span class="dim">pause · target {Math.round(gapTarget / 1000)}s</span>
+        {#if p?.autoPhase === "announcing"}<span class="auto line" title="Announcing the next dance">announcing…</span>
+        {:else if p?.autoPhase === "held"}<span class="auto held line" title="Auto mode waits here: press Play Next">waits for Play Next</span>
+        {:else if autoIn != null}<span class="auto line">next song in {Math.ceil(autoIn / 1000)}s</span>
+        {:else}<span class="dim line">pause · target {Math.round(gapTarget / 1000)}s</span>{/if}
       </div>
       <div class="bar"><div style:width="{Math.min(100, (gapMs / gapTarget) * 100)}%"></div></div>
-      {#if p?.autoPhase === "announcing"}<div class="auto">Announcing the next dance…</div>
-      {:else if p?.autoPhase === "held"}<div class="auto held">Auto mode waits here: press Play Next</div>
-      {:else if autoIn != null}<div class="auto num">Next song in {Math.ceil(autoIn / 1000)}s</div>{/if}
     {:else if playing}
-      <div class="dim small">{p?.autoAdvance ? (p.autoPhase === "held" ? "Auto mode stops before the next song." : "Auto mode starts the next song after the pause.") : "Next song starts only when you press Play Next."}</div>
+      {@const note = p?.autoAdvance ? (p.autoPhase === "held" ? "Auto mode stops before the next song." : "Auto mode starts the next song after the pause.") : "Next song starts only when you press Play Next."}
+      <div class="dim small line" title={note}>{note}</div>
     {/if}
   </div>
   {/if}
@@ -96,16 +98,19 @@
     {#if next && next.entry.kind === "pause"}
       <div class="un-title"><Icon name="pause" size={12} /> {next.entry.label || "Pause"}</div>
       <div class="un-artist dim small num">
-        {Math.round(next.entry.pauseBefore ?? p?.gapSeconds ?? 0)} s{#if next.entry.announcement} · “{next.entry.announcement}”{/if}{#if next.entry.hold} · stops here{/if}
+        {Math.round(next.entry.pauseBefore ?? p?.gapSeconds ?? 0)} s{#if next.entry.announcement}{" · "}“{next.entry.announcement}”{/if}{#if next.entry.hold}{" · "}stops here{/if}
       </div>
     {:else if next}
-      <div class="un-style"><StyleBadge styles={nextShown} label={customLabel(next.row?.version, next.entry)} big /></div>
       {#if next.row}
-        <div class="un-title" title={next.row.track.title}>{next.row.track.title}</div>
+        <div class="un-title" title={next.row.track.title}>
+          <StyleBadge styles={nextShown} label={customLabel(next.row?.version, next.entry)} />
+          <span class="line">{next.row.track.title}</span>
+        </div>
         <div class="un-artist dim small num">
-          {next.row.track.artist}{#if nextPb?.target} · {fmtBpm(nextPb.target)} BPM{/if}{#if nextDeck}<span class="ondeck"> · deck {nextDeck.deck === 0 ? "A" : "B"}</span>{/if}
+          {next.row.track.artist}{#if nextPb?.target}{" · "}{fmtBpm(nextPb.target)} BPM{/if}{#if nextDeck}<span class="ondeck">{" · "}deck {nextDeck.deck === 0 ? "A" : "B"}</span>{/if}
         </div>
       {:else}
+        <div class="un-style"><StyleBadge styles={nextShown} label={customLabel(undefined, next.entry)} big /></div>
         <div class="slot">Pick a song for this slot</div>
       {/if}
     {:else}
@@ -114,7 +119,7 @@
   </div>
 
   <div class="xfader" class:blocked={xfBlocked} onanimationend={() => (xfBlocked = false)}>
-    <button class="plain xl" class:on={xf < 0.5} title="Crossfader all the way to deck A" onclick={() => setXf(0)}>A</button>
+    <button class="plain xl" class:lit={xf < 0.5} title="Crossfader all the way to deck A" onclick={() => setXf(0)}>A</button>
     <span class="track">
       <input type="range" min="0" max="1" step="0.01" value={xf} aria-label="Crossfader"
         title="Crossfader: which deck the room hears. Snaps to the center. Play Next, Go Live and auto mode need it centered or on the side of the deck they start."
@@ -122,7 +127,7 @@
       <button class="plain notch" class:on={xf === 0.5} title="Center the crossfader (the room hears both decks)" aria-label="Center the crossfader"
         onclick={() => setXf(0.5)}></button>
     </span>
-    <button class="plain xl" class:on={xf > 0.5} title="Crossfader all the way to deck B" onclick={() => setXf(1)}>B</button>
+    <button class="plain xl" class:lit={xf > 0.5} title="Crossfader all the way to deck B" onclick={() => setXf(1)}>B</button>
   </div>
   {#if xfOffCenter && p?.autoAdvance}
     <button class="plain xf-hint small" title="Auto mode only starts songs when the crossfader is centered" onclick={() => setXf(0.5)}>Auto mode: center the fader</button>
@@ -154,18 +159,23 @@
   .next.pending, .next.pending:hover:not(:disabled) { background: var(--bg-elev-3); color: var(--text-dim); }
   @keyframes blink { to { filter: brightness(1.25); } }
   .small { font-size: var(--fs-sm); }
-  .gap { flex: none; min-height: 40px; display: flex; flex-direction: column; gap: 4px; justify-content: center; }
-  .gap-time { display: flex; align-items: baseline; gap: 8px; }
+  /* The first to give up space (the column's height is fixed): never the up-next song. */
+  .gap { flex: 0 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 4px; justify-content: center; }
+  .line { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gap-time { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .gap-time .big { flex: none; }
   .big { font: 600 24px/1 var(--font-display); color: var(--green); }
   .big.over { color: var(--yellow); }
   .bar { height: 4px; background: var(--bg-elev-3); border-radius: 2px; overflow: hidden; }
   .bar div { height: 100%; background: var(--green); transition: width 0.2s linear; }
   .auto { color: var(--teal); font-size: var(--fs-sm); }
   .auto.held { color: var(--yellow); }
-  .upnext { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 2px; padding-top: 6px; border-top: 1px solid var(--border); min-width: 0; }
+  .upnext { flex: 1 0 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 2px; padding-top: 6px; border-top: 1px solid var(--border); min-width: 0; }
   .upnext > * { flex: none; }
   .un-style { margin: 2px 0; }
-  .un-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .un-title { font-weight: 600; display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .un-title > :global(*) { flex: none; }
+  .un-title .line { flex: 1; }
   .un-artist { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .slot { color: var(--yellow); font-size: var(--fs-sm); }
   .row { flex: none; display: flex; gap: 6px; }
@@ -181,7 +191,7 @@
     border: 4px solid transparent; border-bottom: 5px solid var(--text-faint); border-top: none; }
   .notch:hover::after, .notch.on::after { border-bottom-color: var(--text); }
   .xl { font-weight: 800; font-size: var(--fs-sm); color: var(--text-faint); width: 18px; min-width: 18px; padding: 2px 0; text-align: center; }
-  .xl.on { color: var(--text); }
+  .xl.lit { color: var(--text); }
   .xf-hint { align-self: flex-start; padding: 0; }
   .xfader.blocked { border-radius: 6px; animation: xf-error 0.2s 6 alternate; }
   @keyframes xf-error { to { background: color-mix(in srgb, var(--red) 45%, transparent); } }
