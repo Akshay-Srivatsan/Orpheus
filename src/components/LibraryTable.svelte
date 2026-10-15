@@ -383,7 +383,7 @@
 <div class="table" role="grid" tabindex="0" onkeydown={keydown} aria-label="Library">
   <div class="thead">
     {#if showPos}<button class="c pos" onclick={() => sortBy("position")}>#</button>{/if}
-    <button class="c title" onclick={() => sortBy("title")}>Title {sortKey === "title" ? (sortAsc ? "▲" : "▼") : ""}</button>
+    <button class="c title" class:tree={foldable} onclick={() => sortBy("title")}>Title {sortKey === "title" ? (sortAsc ? "▲" : "▼") : ""}</button>
     <button class="c artist" onclick={() => sortBy("artist")}>Artist {sortKey === "artist" ? (sortAsc ? "▲" : "▼") : ""}</button>
     <span class="c version">
       <button class="plain hbtn" onclick={() => sortBy("version")}>Version</button>
@@ -426,9 +426,13 @@
         >
           {#if showPos}<span class="c pos num faint">{r.position}</span>{/if}
           <span class="c title" title={r.track.title}>
-            {#if fold}
-              <button class="plain fold" title={fold.open ? "Fold its versions" : `Show all ${fold.count} versions`} onclick={(e) => toggleFold(e, r.track.id)}>{fold.open ? "▾" : "▸"}<span class="n">{fold.count}</span></button>
-            {:else if child}<span class="fold-pad"></span>{/if}
+            <!-- A tree: every song keeps the disclosure slot (so titles line up); its other versions are indented a level. -->
+            {#if foldable}
+              {#if child}<span class="indent"></span>{/if}
+              {#if fold}
+                <button class="plain fold" title={fold.open ? "Fold its versions" : `Show all ${fold.count} versions`} onclick={(e) => toggleFold(e, r.track.id)}>{fold.open ? "▾" : "▸"}<span class="n">{fold.count}</span></button>
+              {:else}<span class="fold-pad"></span>{/if}
+            {/if}
             {#if r.rec.missing}<span title="File missing on this computer"><Icon name="warning" size={12} /></span>{/if}
             {#if r.rec.sources.some((s) => s.kind === "spotify") && !r.rec.files.length}<span class="sp" title="Spotify">●</span>{/if}
             {r.track.title}
@@ -497,9 +501,13 @@
   .tr.sel { background: var(--bg-selected); }
   .tr.missing { color: var(--text-faint); }
   .tr.suggested { color: var(--text-dim); font-style: italic; }
-  .fold { padding: 0 3px 0 0; height: 16px; min-width: 22px; color: var(--text-dim); flex: none; font-size: 10px; gap: 1px; }
+  /* The disclosure slot: the same width on every row, so titles line up. */
+  .fold, .fold-pad { width: 26px; min-width: 26px; flex: none; }
+  .fold { padding: 0; height: 16px; justify-content: flex-start; color: var(--text-dim); font-size: 10px; gap: 1px; }
   .fold .n { font-size: var(--fs-xs); color: var(--text-faint); font-variant-numeric: tabular-nums; }
-  .fold-pad { display: inline-block; width: 22px; flex: none; }
+  .fold-pad { display: inline-block; }
+  .indent { display: inline-block; width: 16px; flex: none; }
+  .thead .title.tree { padding-left: 26px; }
   .tr.child .title { color: var(--text-dim); }
   .thead .version { display: flex; gap: 6px; align-items: center; }
   .hbtn { padding: 0; height: auto; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; }
