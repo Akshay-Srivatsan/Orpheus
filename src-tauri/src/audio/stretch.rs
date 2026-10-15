@@ -51,10 +51,10 @@ pub trait TimeStretch: Send {
 pub fn create(engine: Engine, src_rate: u32) -> Box<dyn TimeStretch> {
     match engine {
         Engine::Signalsmith => Box::new(Signalsmith { s: signalsmith_stretch::Stretch::preset_default(2, src_rate) }),
-        Engine::SoundTouch => Box::new(Fifo::new(SoundTouchEngine::new(src_rate))),
-        Engine::RubberBand => Box::new(Fifo::new(RubberBandEngine::new(src_rate))),
+        Engine::SoundTouch => Box::new(Fifo::new(SoundTouchEngine::new(src_rate), src_rate)),
+        Engine::RubberBand => Box::new(Fifo::new(RubberBandEngine::new(src_rate), src_rate)),
         Engine::Bungee => match BungeeEngine::new(src_rate) {
-            Some(b) => Box::new(Fifo::new(b)),
+            Some(b) => Box::new(Fifo::new(b, src_rate)),
             None => {
                 log::warn!("Bungee unavailable; using Signalsmith Stretch");
                 create(Engine::Signalsmith, src_rate)
@@ -100,8 +100,15 @@ trait PushEngine: Send {
     fn reset(&mut self);
 }
 
+/// Output the queue holds back before playing, beyond the block being asked
+/// for. Engines deliver output unevenly (Rubber Band in hops), so a queue
+/// started with no reserve runs a few frames short now and then, and each
+/// shortfall became a click.
+const FIFO_RESERVE_SECS: f64 = 0.05;
+
 /// Gives a push engine the exact-size interface: output is queued, and
-/// silence fills in until the engine's initial latency has passed.
+/// silence fills in until the engine's initial latency has passed and a
+/// reserve (`FIFO_RESERVE_SECS`) has built up.
 struct Fifo<E: PushEngine> {
     engine: E,
     pitch: f64,
@@ -111,16 +118,37 @@ struct Fifo<E: PushEngine> {
     /// Source frames fed in, and source-equivalent of engine output emitted.
     fed: f64,
     emitted: f64,
+    src_rate: u32,
+    /// The reserve has built up and output is flowing.
+    primed: bool,
 }
 
 impl<E: PushEngine> Fifo<E> {
-    fn new(engine: E) -> Self {
-        Self { engine, pitch: 1.0, ratio: 1.0, queue: VecDeque::new(), scratch: vec![], fed: 0.0, emitted: 0.0 }
+    fn new(engine: E, src_rate: u32) -> Self {
+        Self {
+            engine,
+            pitch: 1.0,
+            ratio: 1.0,
+            queue: VecDeque::new(),
+            scratch: vec![],
+            fed: 0.0,
+            emitted: 0.0,
+            src_rate,
+            primed: false,
+        }
     }
 
     fn emit(&mut self, out: &mut [f32]) {
+        if !self.primed {
+            let reserve = (FIFO_RESERVE_SECS * self.src_rate as f64 * self.ratio) as usize * 2;
+            if self.queue.len() < out.len() + reserve {
+                out.fill(0.0);
+                return;
+            }
+            self.primed = true;
+        }
         let have = self.queue.len().min(out.len()) / 2 * 2;
-        // Not enough engine output yet: silence first (the engine's latency).
+        // Short even so (shouldn't happen once primed): fill with silence.
         let pad = out.len() - have;
         out[..pad].fill(0.0);
         for (o, s) in out[pad..].iter_mut().zip(self.queue.drain(..have)) {
@@ -160,6 +188,7 @@ impl<E: PushEngine> TimeStretch for Fifo<E> {
         self.queue.clear();
         self.fed = 0.0;
         self.emitted = 0.0;
+        self.primed = false;
     }
 }
 
@@ -409,6 +438,49 @@ mod tests {
             let hz = crossings as f64 / (left.len() as f64 / sr as f64);
             assert!((hz - 440.0).abs() < 8.0, "{engine:?}: {hz:.1} Hz");
             assert!(s.latency_src_frames() >= 0.0);
+        }
+    }
+
+    /// Once audio has started, no silence is inserted into it (each gap is a
+    /// click). Set up like a deck: 44.1 kHz source, 48 kHz output, key lock.
+    /// Real songs made Rubber Band's output uneven enough to cause gaps for
+    /// the first seconds (fixed by `FIFO_RESERVE_SECS`); this synthetic signal
+    /// doesn't, so check real songs with `examples/deckrender` too.
+    #[test]
+    fn no_gaps_after_the_start() {
+        let (sr, out_rate) = (44100u32, 48000.0);
+        // Music-like: a tone plus noise bursts (transients), never exactly 0.
+        let mut seed = 1u32;
+        let tone: Vec<f32> = (0..sr * 8)
+            .flat_map(|i| {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                let noise = (seed >> 8) as f32 / (1u32 << 24) as f32 - 0.5;
+                let t = i as f32 / sr as f32;
+                let burst = if (t * 4.0).fract() < 0.05 { 0.8 } else { 0.4 };
+                let v = (t * 440.0 * std::f32::consts::TAU).sin() * 0.3 + noise * burst + 0.05;
+                [v, -v]
+            })
+            .collect();
+        for engine in [Engine::Signalsmith, Engine::SoundTouch, Engine::Bungee, Engine::RubberBand] {
+            for tempo in [1.0, 0.95] {
+                let mut s = create(engine, sr);
+                s.set_pitch((sr as f64 / out_rate) as f32);
+                let ratio = out_rate / sr as f64 / tempo;
+                let (mut out, mut acc) = (vec![], 0.0);
+                for block in tone.chunks(512 * 2) {
+                    acc += (block.len() / 2) as f64 * ratio;
+                    let n = acc.floor() as usize;
+                    acc -= n as f64;
+                    let mut o = vec![0.0f32; n * 2];
+                    s.process(block, &mut o);
+                    out.extend(o);
+                }
+                let left: Vec<f32> = out.chunks_exact(2).map(|f| f[0]).collect();
+                // (Skipping the engine's first 50 ms: its fade-in may touch 0.)
+                let start = left.iter().position(|v| *v != 0.0).expect("output starts") + out_rate as usize / 20;
+                let gaps = left[start..].iter().filter(|v| **v == 0.0).count();
+                assert_eq!(gaps, 0, "{engine:?} at {tempo}: {gaps} samples of silence after the start");
+            }
         }
     }
 }
