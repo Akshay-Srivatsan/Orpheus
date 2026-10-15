@@ -298,6 +298,23 @@ impl App {
     /// same version, in any audio format) agrees.
     pub fn club_song_matches(&self, r: &ClubRef) -> HashMap<Id, Vec<String>> {
         let mut out: HashMap<Id, Vec<String>> = HashMap::new();
+        for (style, entries) in self.club_song_entries(r) {
+            for tracks in entries {
+                for t in tracks {
+                    let styles = out.entry(t).or_default();
+                    if !styles.contains(&style) {
+                        styles.push(style.clone());
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// For each style with suggested songs, each song's matching library
+    /// tracks (in the style's song order).
+    pub fn club_song_entries(&self, r: &ClubRef) -> HashMap<String, Vec<Vec<Id>>> {
+        let mut out: HashMap<String, Vec<Vec<Id>>> = HashMap::new();
         let Some(club) = self.club(r) else { return out };
         let key = |s: &str| {
             use std::hash::{Hash, Hasher};
@@ -308,6 +325,7 @@ impl App {
         // The club's songs, with their fingerprints read once.
         struct Wanted<'a> {
             style: &'a str,
+            index: usize,
             song: &'a crate::club::ClubSong,
             fp: Option<(u64, Vec<u32>)>,
             spotify: Option<String>,
@@ -315,14 +333,20 @@ impl App {
         let wanted: Vec<Wanted> = club
             .styles
             .iter()
-            .flat_map(|(id, st)| st.songs.iter().map(move |song| (id, song)))
-            .map(|(id, song)| Wanted {
+            .flat_map(|(id, st)| st.songs.iter().enumerate().map(move |(i, song)| (id, i, song)))
+            .map(|(id, index, song)| Wanted {
                 style: id,
+                index,
                 song,
                 fp: club.fingerprint_of(song).and_then(|f| Some((key(f), crate::fingerprint::decode(f).ok()?))),
                 spotify: song.spotify_id(),
             })
             .collect();
+        for (id, st) in &club.styles {
+            if !st.songs.is_empty() {
+                out.insert(id.clone(), vec![vec![]; st.songs.len()]);
+            }
+        }
         if wanted.is_empty() {
             return out;
         }
@@ -356,9 +380,8 @@ impl App {
                         _ => false,
                     };
                 if by_id || by_fp {
-                    let styles = out.entry(t.rec.id.clone()).or_default();
-                    if !styles.iter().any(|s| s == w.style) {
-                        styles.push(w.style.to_string());
+                    if let Some(e) = out.get_mut(w.style).and_then(|v| v.get_mut(w.index)) {
+                        e.push(t.rec.id.clone());
                     }
                 }
             }

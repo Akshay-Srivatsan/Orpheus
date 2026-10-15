@@ -46,7 +46,7 @@ describe("what songs show", () => {
   });
 
   it("the projector resolves the same way", () => {
-    const e: ProjEntry = { id: "e", trackId: "t", title: "", artist: "", styles: ["waltz"], clubStyles: null, meter: 3, lengthSecs: 180, label: null, tags: [], status: "pending", bpm: 147 };
+    const e: ProjEntry = { id: "e", trackId: "t", title: "", artist: "", styles: ["waltz"], clubStyles: null, meter: 3, lengthSecs: 180, clubListed: [], label: null, tags: [], status: "pending", bpm: 147 };
     expect(projStyle({ club, clubId: "club", styleLibrary: lib, tempoRangePct: 10 }, e).name).toBe("Rotary Waltz");
     expect(projStyle({ club, clubId: "club", styleLibrary: lib, tempoRangePct: 10 }, { ...e, label: "Mixer" }).name).toBe("Mixer");
   });

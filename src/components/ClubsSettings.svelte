@@ -5,8 +5,8 @@
   // with; saving edits to a version that sets use makes a new version.
   import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api";
-  import { emptyClub, type Club, type ClubGroup, type ClubRule, type ClubStyle, type ClubTag, type Range } from "../lib/clubs";
-  import { app, confirmAction } from "../lib/state.svelte";
+  import { emptyClub, fmtSecs, hasCriteria, type Club, type ClubGroup, type ClubRule, type ClubStyle, type ClubTag, type Range } from "../lib/clubs";
+  import { app, confirmAction, versionDate } from "../lib/state.svelte";
   import { NEUTRAL } from "../lib/styles";
   import type { ClubInfo, ClubVersionInfo } from "../lib/types";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
@@ -22,6 +22,8 @@
   let urlOpen = $state(false);
   let url = $state("");
   let busy = $state(false);
+  /** For each style with suggested songs: each song's matching library tracks (as saved). */
+  let entries = $state<Record<string, string[][]>>({});
 
   // The version being edited: its file text and (if it parses) its definition.
   let text = $state("");
@@ -40,6 +42,7 @@
       return;
     }
     api.clubUsage(c.id).then((u) => (usage = u));
+    api.clubSongEntries(c.id, v.id).then((e) => (entries = e)).catch(() => (entries = {}));
     api.club(c.id, v.id).then((r) => {
       text = r.text;
       draft = r.club;
@@ -47,8 +50,7 @@
     });
   });
 
-  const date = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-  const versionLabel = (v: ClubVersionInfo, i: number) => v.name || (i === 0 ? `Latest (${date(v.imported)})` : date(v.imported));
+  const versionLabel = (v: ClubVersionInfo, i: number) => v.name || (i === 0 ? `Latest (${versionDate(sel!, v)})` : versionDate(sel!, v));
   const fromLabel = (f: string) => (f === "edited" ? "edited here" : f === "example" ? "example" : f === "new" ? "new" : f);
 
   function picked(c: { clubId: string; versionId: string; unchanged: boolean }, what: string) {
@@ -199,6 +201,39 @@
   });
 
   let openStyle = $state<string | null>(null);
+
+  // ---------------------------------------------------------------- suggested songs
+
+  const trackTitle = (id: string) => {
+    const t = app.trackMap.get(id);
+    return t ? `${t.title}${t.artist ? ` — ${t.artist}` : ""}` : id;
+  };
+
+  /** Adds the song selected in the library to a style's suggested songs. */
+  async function addSelectedSong(styleId: string) {
+    const tid = app.inspectTrack;
+    if (!tid) {
+      app.toast("Select a song in the library first.", "info");
+      return;
+    }
+    const song = await app.run(api.clubSongForTrack(tid));
+    if (song) edit((d) => (d.style[styleId].song = [...(d.style[styleId].song ?? []), song]));
+  }
+
+  async function addFromSpotify(uri: string) {
+    const found = await app.run(api.spotifyResolve(uri));
+    if (found?.length) {
+      await app.run(api.spotifyImport(found));
+      app.toast("Added to your library from Spotify.", "info");
+    }
+  }
+
+  async function download(url: string, hash: string) {
+    busy = true;
+    const path = await app.run(api.clubSongDownload(url, hash));
+    busy = false;
+    if (path) app.toast(`Downloaded and added to your library (${path}).`, "info");
+  }
 
   /** "3" or "2, 4" → [3] / [2, 4]. */
   const meters = (t: string) => t.split(/[ ,/]+/).map(Number).filter((n) => n > 0 && Number.isInteger(n));
@@ -354,7 +389,7 @@
                 <td><RangeInput value={st.preferred} onchange={(r) => edit((d) => (d.style[id].preferred = r))} /></td>
                 <td><RangeInput value={st.count} onchange={(r) => edit((d) => (d.style[id].count = r))} /></td>
                 <td class="nowrap">
-                  <button class="plain icon" class:on={openStyle === id} title="More: length, share, where in the set, notes" onclick={() => (openStyle = openStyle === id ? null : id)}><Icon name="dots" size={12} /></button>
+                  <button class="plain icon" class:on={openStyle === id} title="More: length, share, where in the set, notes, suggested songs" onclick={() => (openStyle = openStyle === id ? null : id)}>{#if st.song?.length}<span class="nsongs">♪{st.song.length}</span>{:else}<Icon name="dots" size={12} />{/if}</button>
                   <button class="plain icon danger" title="Remove" onclick={() => edit((d) => delete d.style[id])}><Icon name="x" size={12} /></button>
                 </td>
               </tr>
@@ -373,6 +408,29 @@
                       <label><input type="checkbox" checked={st.last} onchange={(e) => edit((d) => (d.style[id].last = e.currentTarget.checked))} /> last song</label>
                     </span>
                     <input type="text" class="note" placeholder="Note" value={st.note ?? ""} onchange={(e) => edit((d) => (d.style[id].note = e.currentTarget.value || null))} />
+                    <div class="songs">
+                      <span class="faint">Suggested songs{#if !hasCriteria(st)}{" (this style has no meter, tempo or length: only these songs fit it)"}{/if}</span>
+                      {#each st.song ?? [] as song, i (i)}
+                        {@const have = entries[id]?.[i] ?? []}
+                        <div class="song">
+                          <span class="stitle">{song.title || "Untitled"}{#if song.artist}<span class="faint">{" — "}{song.artist}</span>{/if}{#if song.length}<span class="faint">{" · "}{fmtSecs(song.length)}</span>{/if}{#if song.note}<span class="faint">{" · "}{song.note}</span>{/if}</span>
+                          <span class="ids faint">{[song.fingerprint && "fingerprint", song.spotify && "Spotify", song.hash && "hash"].filter(Boolean).join(" · ")}</span>
+                          {#if have.length}
+                            <span class="ok" title={have.map(trackTitle).join("\n")}><Icon name="check" size={11} /> in your library</span>
+                          {:else}
+                            <span class="faint">not in your library</span>
+                            {#if song.spotify}<button class="plain small" onclick={() => addFromSpotify(song.spotify!)}>Add from Spotify</button>{/if}
+                            {#each song.download ?? [] as url, k (k)}
+                              <button class="plain small" disabled={busy || !song.hash} title={url} onclick={() => download(url, song.hash!)}>Download{(song.download?.length ?? 0) > 1 ? ` (${k + 1})` : ""}</button>
+                            {/each}
+                          {/if}
+                          <button class="plain icon danger" title="Remove" onclick={() => edit((d) => d.style[id].song!.splice(i, 1))}><Icon name="x" size={11} /></button>
+                          <textarea class="links" rows="1" placeholder="Download links, one per line (need the file's hash)" value={(song.download ?? []).join("\n")}
+                            onchange={(e) => edit((d) => (d.style[id].song![i].download = e.currentTarget.value.split("\n").map((l) => l.trim()).filter(Boolean)))}></textarea>
+                        </div>
+                      {/each}
+                      <button class="small" onclick={() => addSelectedSong(id)} title="The song selected in the library (its fingerprint, file hash and Spotify link)"><Icon name="plus" size={11} /> Add the Selected Song</button>
+                    </div>
                   </td>
                 </tr>
               {/if}
@@ -484,11 +542,18 @@
   .styles input[type="color"], .row input[type="color"] { width: 26px; height: 22px; padding: 0; border: none; background: none; }
   .more td { padding-bottom: 8px; }
   .more .row { margin-bottom: 4px; }
-  .note { width: 100%; }
+  .note, .styles .more input.note { width: 100%; }
   .chips { display: inline-flex; flex-wrap: wrap; gap: 3px; }
   .chip { height: 20px; cursor: pointer; }
   .chip.off { opacity: 0.35; filter: grayscale(0.7); }
   .danger { color: var(--red); }
   button.on { color: var(--accent); }
   code { font: var(--fs-xs) var(--font-mono); }
+  .songs { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+  .song { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; padding: 3px 0; border-top: 1px solid var(--border); }
+  .stitle { min-width: 0; }
+  .ids { font-size: var(--fs-xs); }
+  .ok { color: var(--green); display: inline-flex; gap: 3px; align-items: center; }
+  .links { width: 100%; font-size: var(--fs-xs); }
+  .nsongs { font-size: var(--fs-xs); color: var(--accent); }
 </style>

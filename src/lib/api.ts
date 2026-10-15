@@ -93,6 +93,16 @@ export const api = {
   clubDeleteVersion: (clubId: string, versionId: string) => call<void>("club_delete_version", { clubId, versionId }),
   clubDelete: (clubId: string) => call<void>("club_delete", { clubId }),
   clubExport: (clubId: string, versionId: string, path: string) => call<void>("club_export", { clubId, versionId, path }),
+  /** Library songs that are the club's suggested songs: track id → style ids. */
+  clubSongMatches: (clubId: string, versionId: string) => call<Record<T.Id, string[]>>("club_song_matches", { clubId, versionId }),
+  /** For each style with suggested songs: each song's matching library tracks. */
+  clubSongEntries: (clubId: string, versionId: string) => call<Record<string, T.Id[][]>>("club_song_entries", { clubId, versionId }),
+  /** A club-file song entry for one of your songs. */
+  clubSongForTrack: (trackId: T.Id) => call<import("./clubs").ClubSong>("club_song_for_track", { trackId }),
+  /** The same as text to paste into a club file. */
+  clubSongText: (trackId: T.Id) => call<string>("club_song_text", { trackId }),
+  /** Downloads a suggested song (checked against its hash) and adds it to the library. */
+  clubSongDownload: (url: string, hash: string) => call<string>("club_song_download", { url, hash }),
   /** Bundled examples: [id, name, description]. */
   clubExamples: () => call<[string, string, string][]>("club_examples"),
   clubImportExample: (id: string) => call<T.ClubImported>("club_import_example", { id }),

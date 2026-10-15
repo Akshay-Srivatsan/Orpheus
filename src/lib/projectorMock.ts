@@ -104,6 +104,7 @@ export function mockPayload(p: URLSearchParams): ProjectorPayload {
       clubStyles: [st],
       meter: null,
       lengthSecs: null,
+      clubListed: [],
       label: null,
       tags: (tags ?? []).map((t) => ({ id: t, name: TAGS[t][0], color: TAGS[t][1] })),
       status: i < cur ? (i === 3 ? "skipped" : "played") : i === cur && !gap ? "playing" : "pending",

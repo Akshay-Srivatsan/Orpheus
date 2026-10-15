@@ -55,6 +55,8 @@ export interface Track {
   loudnessDb: number | null;
   audioStartMs: number | null;
   audioEndMs: number | null;
+  /** Chromaprint fingerprint (text form), from analysis. */
+  fingerprint?: string | null;
   notes?: string;
   analyzed: boolean;
   preferredSource?: "file" | "spotify" | null;
@@ -466,6 +468,8 @@ export interface ProjEntry {
   /** For matching club styles. */
   meter: number | null;
   lengthSecs: number | null;
+  /** Club styles that suggest this song. */
+  clubListed: string[];
   label: string | null;
   tags: ProjTag[];
   status: EntryStatus;

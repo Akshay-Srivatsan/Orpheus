@@ -35,6 +35,15 @@ const emptyDeck = (deck: 0 | 1): DeckState => ({
   pfl: deck === 1, error: null,
 });
 
+/** A club version's import date, with the time when another version shares the day. */
+export function versionDate(c: ClubInfo, v: { id: string; imported: number }): string {
+  const day = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  const sameDay = c.versions.some((x) => x.id !== v.id && day(x.imported) === day(v.imported));
+  return sameDay
+    ? new Date(v.imported).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })
+    : day(v.imported);
+}
+
 /** Fade-out length when neither you nor the club set one (seconds; matches the backend). */
 const DEFAULT_FADE_SECS = 5;
 
@@ -118,6 +127,26 @@ class AppState {
   });
   /** Those guidelines (null: no club, or not loaded yet). */
   club = $derived(this.clubRef ? (this.clubCache[`${this.clubRef.id}/${this.clubRef.version}`] ?? null) : null);
+  /** Library songs that are the club's suggested songs: track id → style ids. */
+  songMatches = $state<Record<Id, string[]>>({});
+  private songMatchesFor = "";
+  /** Refreshes `songMatches` (when the club or the library changes). */
+  async loadSongMatches(force = false) {
+    const r = this.clubRef;
+    const key = r ? `${r.id}/${r.version}` : "";
+    if (!force && key === this.songMatchesFor) return;
+    this.songMatchesFor = key;
+    if (!r) {
+      this.songMatches = {};
+      return;
+    }
+    try {
+      const m = await api.clubSongMatches(r.id, r.version);
+      if (this.songMatchesFor === key) this.songMatches = m;
+    } catch {
+      /* the club may be missing: nothing listed */
+    }
+  }
   clubCtx = $derived<ClubContext | null>(clubContext(this.club, this.clubRef?.id, this.styleLib, this.settings?.tempoRangePct ?? 10));
   /** Your dance styles (what songs are tagged with). */
   myStyles = $derived(this.styleLib?.styles ?? []);
@@ -156,7 +185,7 @@ class AppState {
     if (i < 0) return `${c.name} (missing version)`;
     const v = c.versions[i];
     if (v.name) return `${c.name} (${v.name})`;
-    return i === 0 ? c.name : `${c.name} (${new Date(v.imported).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })})`;
+    return i === 0 ? c.name : `${c.name} (${versionDate(c, v)})`;
   }
 
   /** The club styles one of your styles may show as (your mapping), with tempo ranges. */
@@ -200,7 +229,7 @@ class AppState {
 
   /** What matching needs about a song. */
   factsFor(track: Track | undefined, version: Version | undefined, entry: Partial<SetlistEntry> | null | undefined) {
-    return songFacts(track, version, entry, { fadeSeconds: this.fadeSeconds, trimSilence: this.settings?.trimSilence ?? true });
+    return songFacts(track, version, entry, { fadeSeconds: this.fadeSeconds, trimSilence: this.settings?.trimSilence ?? true }, track ? (this.songMatches[track.id] ?? []) : []);
   }
 
   /** The styles an entry (or a version) shows: the club's in a club's set, else yours. */
@@ -317,6 +346,7 @@ class AppState {
       $effect(() => {
         const r = this.clubRef;
         if (r) void this.loadClub(r);
+        void this.loadSongMatches();
       });
     });
     this.styleLib = await api.styles();
@@ -332,6 +362,8 @@ class AppState {
     });
     this.listen("library-changed", async (ids) => {
       await this.reloadTracks(ids);
+      // New or re-analysed songs may be a club's suggested songs.
+      void this.loadSongMatches(true);
       // Style usage counts may have changed.
       this.styleLib = await api.styles();
     });
@@ -347,6 +379,7 @@ class AppState {
       // Versions edited in place: reload what's shown.
       this.clubCache = {};
       this.clubs = await api.clubs();
+      void this.loadSongMatches(true);
       this.setlists = await api.setlists();
     });
     this.listen("settings-changed", (s) => (this.settings = s));

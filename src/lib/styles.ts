@@ -112,9 +112,11 @@ export function songFacts(
   version: Version | undefined,
   entry: Partial<SetlistEntry> | null | undefined,
   opts: { fadeSeconds?: number; trimSilence?: boolean } = {},
+  listed: string[] = [],
 ): SongFacts | null {
   if (!track) return null;
   return {
+    listed,
     bpm: track.bpm,
     target: resolveSettings(version, entry).targetBpm ?? null,
     meter: track.beatsPerBar ?? null,
@@ -150,7 +152,7 @@ export function labelOf(shown: Shown[], custom: string | null, sep = " / "): str
 /** What the projector shows for an entry: the club's style names (or the entry's custom label). */
 export function projStyle(p: Pick<ProjectorPayload, "club" | "clubId" | "styleLibrary" | "tempoRangePct">, e: ProjEntry): { name: string; short: string; color: string } {
   const ctx = clubContext(p.club, p.clubId, p.styleLibrary, p.tempoRangePct);
-  const facts: SongFacts | null = e.trackId ? { bpm: e.bpm, target: null, meter: e.meter, meterDetected: true, lengthSecs: e.lengthSecs } : null;
+  const facts: SongFacts | null = e.trackId ? { bpm: e.bpm, target: null, meter: e.meter, meterDetected: true, lengthSecs: e.lengthSecs, listed: e.clubListed } : null;
   const shown = shownStyles(p.styleLibrary, ctx, facts, undefined, { styles: e.styles, clubStyles: e.clubStyles });
   return {
     name: e.label || shown.map((s) => s.name).join(" / "),

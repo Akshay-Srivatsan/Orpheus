@@ -81,6 +81,39 @@ describe("matching", () => {
   });
 });
 
+describe("suggested songs", () => {
+  const withSongs: Club = {
+    ...club,
+    style: {
+      ...club.style,
+      // A choreography: no meter, tempo or length; only its suggested songs.
+      bnp: style({ name: "Bohemian National Polka", song: [{ title: "BNP", hash: "a0" }] }),
+      // A style with criteria and suggestions.
+      polka: { ...club.style.polka, song: [{ title: "Slow polka", hash: "a1" }] },
+    },
+  };
+
+  it("a choreography matches only its suggested songs", () => {
+    expect(matches(withSongs, song(118, 4), tc).map((a) => a.id)).not.toContain("bnp");
+    expect(matches(withSongs, song(118, 4, { listed: ["bnp"] }), tc)[0].id).toBe("bnp");
+    expect(assess("bnp", withSongs.style.bnp, song(118, 4), tc).problems[0]).toMatch(/not one of the songs suggested/);
+  });
+
+  it("a listed song shows only the styles that list it", () => {
+    // 118 BPM duple would also fit Polka by tempo; the club says it's a BNP.
+    const shown = clubShown(withSongs, song(118, 4, { listed: ["bnp"] }), tc, null, [], undefined);
+    expect(shown).toMatchObject({ ids: ["bnp"], source: "listed" });
+    // The DJ's choice still wins.
+    expect(clubShown(withSongs, song(118, 4, { listed: ["bnp"] }), tc, ["polka"], [], undefined).ids).toEqual(["polka"]);
+  });
+
+  it("other styles take suggested songs, whatever their tempo, and matching songs from the library", () => {
+    const slow = song(90, 4, { meterDetected: false, listed: ["polka"] }); // a polka at 90 BPM, which the club suggests
+    expect(assess("polka", withSongs.style.polka, slow, tc)).toMatchObject({ ok: true, fit: "listed" });
+    expect(matches(withSongs, song(115, 4), tc).map((a) => a.id)).toContain("polka");
+  });
+});
+
 describe("what a song shows", () => {
   const mapping = { waltz: ["cross-step", "rotary"], "my-polka": ["polka"] };
 

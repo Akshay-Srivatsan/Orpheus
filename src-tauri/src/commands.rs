@@ -762,6 +762,13 @@ pub async fn club_song_matches(app: S<'_>, club_id: String, version_id: String) 
     blocking(move || Ok(a.club_song_matches(&ClubRef { id: club_id, version: version_id }))).await
 }
 
+/// For each style with suggested songs: each song's matching library tracks.
+#[tauri::command]
+pub async fn club_song_entries(app: S<'_>, club_id: String, version_id: String) -> Res<HashMap<String, Vec<Vec<Id>>>> {
+    let a = app.inner().clone();
+    blocking(move || Ok(a.club_song_entries(&ClubRef { id: club_id, version: version_id }))).await
+}
+
 /// A club-file song entry for one of your songs (to accept it for a style).
 #[tauri::command]
 pub async fn club_song_for_track(app: S<'_>, track_id: Id) -> Res<club::ClubSong> {
@@ -775,6 +782,59 @@ pub async fn club_song_for_track(app: S<'_>, track_id: Id) -> Res<club::ClubSong
         hash: t.rec.sources.iter().find(|s| s.kind == "file").map(|s| s.key.clone()),
         ..Default::default()
     })
+}
+
+/// Downloads a club's suggested song into Orpheus's downloads folder and
+/// adds it to the library, if the file is the one the club lists (`hash`).
+#[tauri::command]
+pub async fn club_song_download(app: S<'_>, url: String, hash: String) -> Res<String> {
+    if !club::valid_hash(&hash) {
+        return Err("The club gives no valid hash for this download".into());
+    }
+    let resp = reqwest::get(&url).await.map_err(|e| format!("{url}: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("{url}: {}", resp.status()));
+    }
+    let name = url.rsplit('/').next().unwrap_or("").split(['?', '#']).next().unwrap_or("").to_string();
+    let name: String = name.chars().filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')).collect();
+    let name = if name.is_empty() { format!("{hash}.audio") } else { percent_decode(&name) };
+    let bytes = resp.bytes().await.map_err(|e| format!("{url}: {e}"))?;
+    let dir = app.data_dir.join("downloads");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    // Never overwrite: a new name if taken.
+    let mut path = dir.join(&name);
+    let mut n = 2;
+    while path.exists() {
+        path = dir.join(format!("{n}-{name}"));
+        n += 1;
+    }
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    let got = crate::decode::content_hash(&path).map_err(ae);
+    if got.as_deref() != Ok(hash.as_str()) {
+        let _ = std::fs::remove_file(&path);
+        return Err(format!("{url} isn't the file the club lists (its hash differs), so it wasn't added"));
+    }
+    let p = path.to_string_lossy().into_owned();
+    app.inner().import_paths(vec![p.clone()]);
+    Ok(p)
+}
+
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let Some(v) = std::str::from_utf8(&b[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok()) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// The same entry as club-file text (Info → Copy for a club file).

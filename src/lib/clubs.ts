@@ -9,10 +9,12 @@
 // What a song shows in a club's set, in order of precedence:
 // 1. the club styles chosen for that entry (the DJ's choice: any style, even
 //    one the song doesn't match, with a warning);
-// 2. your mapping: of the club styles your style may show as (Settings →
+// 2. the styles the club suggests this very song for (its listed songs, found
+//    by fingerprint, Spotify track or file hash);
+// 3. your mapping: of the club styles your style may show as (Settings →
 //    Styles), those the song matches, or all of them if it matches none
 //    (you said what it is: a warning says why it doesn't fit);
-// 3. otherwise every club style it matches.
+// 4. otherwise every club style it matches.
 //
 // This module is the only implementation: the main window and the projector
 // both use it.
@@ -39,6 +41,25 @@ export interface ClubStyle {
   last: boolean;
   max_in_a_row?: number | null;
   note?: string | null;
+  /** Songs the club suggests for this style (often particular edits). */
+  song?: ClubSong[];
+}
+
+/** A song a club suggests; any of fingerprint, spotify and hash identifies it. */
+export interface ClubSong {
+  title?: string | null;
+  artist?: string | null;
+  length?: number | null;
+  fingerprint?: string | null;
+  spotify?: string | null;
+  hash?: string | null;
+  download?: string[];
+  note?: string | null;
+}
+
+/** The style says what fits it (meter, tempo or length); without, only its suggested songs do (e.g. a choreography). */
+export function hasCriteria(s: ClubStyle): boolean {
+  return s.meter.length > 0 || !!s.tempo || !!s.preferred || !!s.length;
 }
 
 export interface ClubGroup {
@@ -151,6 +172,8 @@ export interface SongFacts {
   meterDetected: boolean;
   /** Playing length at its own tempo (seconds). */
   lengthSecs: number | null;
+  /** Club styles that suggest this song (it's one of their listed songs). */
+  listed?: string[];
 }
 
 /** How much the club allows a song's tempo to change (percent). */
@@ -159,10 +182,11 @@ export interface TempoChange {
   slower: number;
 }
 
-/** preferred: in the preferred tempo; range: in the allowed tempo; stretch:
- * needs a tempo change (within what the club allows); unchecked: the style
- * has no tempo, or the song's tempo is unknown. */
-export type Fit = "preferred" | "range" | "stretch" | "unchecked";
+/** listed: a song the club suggests for the style; preferred: in the
+ * preferred tempo; range: in the allowed tempo; stretch: needs a tempo change
+ * (within what the club allows); unchecked: the style has no tempo, or the
+ * song's tempo is unknown. */
+export type Fit = "listed" | "preferred" | "range" | "stretch" | "unchecked";
 
 export interface Assessment {
   id: string;
@@ -188,6 +212,12 @@ function meterFits(style: ClubStyle, f: SongFacts): boolean | null {
 const meterName = (m: number) => (m === 3 ? "triple (3)" : m === 2 ? "2/4" : m === 4 ? "4/4" : `${m} beats a bar`);
 
 export function assess(id: string, style: ClubStyle, f: SongFacts, tc: TempoChange): Assessment {
+  // The club suggests this song for the style: it fits, whatever its tempo.
+  if (f.listed?.includes(id)) return { id, ok: true, fit: "listed", rate: 1, bpm: null, problems: [] };
+  // A style danced to particular songs only (no meter, tempo or length to go by).
+  if (style.song?.length && !hasCriteria(style)) {
+    return { id, ok: false, fit: "unchecked", rate: 1, bpm: null, problems: [`not one of the songs suggested for ${style.name}`] };
+  }
   const problems: string[] = [];
   let fit: Fit = "unchecked";
   let rate = 1;
@@ -231,24 +261,24 @@ export function assess(id: string, style: ClubStyle, f: SongFacts, tc: TempoChan
 }
 
 function score(a: Assessment, f: SongFacts, style: ClubStyle): number {
-  const base = { preferred: 0, range: 1, unchecked: 1.5, stretch: 2 }[a.fit];
+  const base = { listed: -1, preferred: 0, range: 1, unchecked: 1.5, stretch: 2 }[a.fit];
   const meterUnknown = style.meter.length > 0 && f.meter == null ? 0.5 : 0;
   return base + Math.abs(a.rate - 1) * 10 + meterUnknown;
 }
 
-/** Club styles a song matches, best fit first. Styles without a tempo
- * (e.g. Mixer, Line Dance) match only by your mapping or choice: they'd
- * otherwise match every song. */
+/** Club styles a song matches, best fit first: those that suggest it, and
+ * those whose tempo it fits. Other styles without a tempo (e.g. a Mixer) match
+ * only by your mapping or choice: they'd otherwise match every song. */
 export function matches(club: Club, f: SongFacts, tc: TempoChange): Assessment[] {
   return Object.entries(club.style)
-    .filter(([, s]) => s.tempo || s.preferred)
+    .filter(([id, s]) => f.listed?.includes(id) || s.tempo || s.preferred)
     .map(([id, s]) => ({ a: assess(id, s, f, tc), s }))
     .filter(({ a }) => a.ok)
     .sort((x, y) => score(x.a, f, x.s) - score(y.a, f, y.s))
     .map(({ a }) => a);
 }
 
-export type ShownSource = "chosen" | "mapping" | "matches" | "none";
+export type ShownSource = "chosen" | "listed" | "mapping" | "matches" | "none";
 
 export interface ClubShown {
   /** Club style ids to show, in order. */
@@ -279,6 +309,10 @@ export function clubShown(
     return { ids, fits: fitsOf(ids), source: "chosen" };
   }
   if (!f) return { ids: [], fits: {}, source: "none" };
+  // The club lists this song for some styles: it is those (e.g. a line
+  // dance's edit), even if its tempo would fit others too.
+  const listed = known(f.listed ?? []);
+  if (listed.length) return { ids: listed, fits: fitsOf(listed), source: "listed" };
   const all = matches(club, f, tc);
   const ticked = known([...new Set(myKeys.flatMap((k) => mapping?.[k] ?? []))]);
   if (ticked.length) {

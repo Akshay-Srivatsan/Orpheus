@@ -139,6 +139,8 @@ pub struct ProjEntry {
     /// For matching club styles: beats per bar and playing length.
     pub meter: Option<u8>,
     pub length_secs: Option<f64>,
+    /// Club styles that list this song among their songs.
+    pub club_listed: Vec<String>,
     /// Custom text replacing the style names.
     pub label: Option<String>,
     pub tags: Vec<ProjTag>,
@@ -959,7 +961,7 @@ impl App {
 
     /// Club style names / colours are filled in by the projector page from
     /// `ProjectorPayload::{profile, style_library}` (see `src/lib/styles.ts`).
-    fn proj_entry(&self, e: &SetlistEntry, club: Option<&Club>, lookup: &HashMap<Id, (Version, Track)>) -> ProjEntry {
+    fn proj_entry(&self, e: &SetlistEntry, club: Option<&Club>, listed: &HashMap<Id, Vec<String>>, lookup: &HashMap<Id, (Version, Track)>) -> ProjEntry {
         let vt = e.version_id.as_ref().and_then(|id| lookup.get(id));
         let styles = e.styles.clone().or_else(|| vt.map(|(v, _)| v.styles.clone())).unwrap_or_default();
         let settings = vt.map(|(v, _)| Self::resolve_settings(v, Some(e)));
@@ -978,6 +980,7 @@ impl App {
             styles,
             club_styles: e.club_styles.clone(),
             meter: vt.and_then(|(_, t)| t.rec.beats_per_bar),
+            club_listed: vt.and_then(|(_, t)| listed.get(&t.rec.id).cloned()).unwrap_or_default(),
             length_secs,
             // Entry label, else the version's display name (e.g. a line dance's name).
             label: e
@@ -1014,7 +1017,8 @@ impl App {
                 }
             }
         }
-        let proj: Vec<ProjEntry> = entries.iter().map(|e| self.proj_entry(e, club.as_deref(), &lookup)).collect();
+        let listed = self.active_club_ref().map(|r| self.club_song_matches(&r)).unwrap_or_default();
+        let proj: Vec<ProjEntry> = entries.iter().map(|e| self.proj_entry(e, club.as_deref(), &listed, &lookup)).collect();
         // Only songs the room has heard count as "current".
         let current_id = self.current_entry_id().filter(|id| {
             entries.iter().any(|e| &e.id == id && (e.status == "playing" || e.status == "played"))

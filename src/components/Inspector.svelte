@@ -19,6 +19,17 @@
   let taps = $state<number[]>([]);
   let linkInput = $state("");
 
+  /** Copies text for a club file (a song's fingerprint, hash or whole entry). */
+  async function copy(text: string | null | undefined, what: string) {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      app.toast(`${what} copied.`, "info");
+    } catch (e) {
+      app.toast(`Couldn't copy: ${e}`);
+    }
+  }
+
   function patchTrack(patch: Parameters<typeof api.updateTrack>[1]) {
     if (track) app.run(api.updateTrack(track.id, patch));
   }
@@ -367,6 +378,18 @@
           {track.analyzed ? "Analysed" : "Not analysed yet"} · played {track.playCount}×
           <button class="plain small" onclick={() => api.analyze([track.id])}><Icon name="reload" size={11} /> Re-analyse</button>
         </div>
+        <div class="row small" title="To suggest this song in a club's file: the fingerprint recognises this version in any audio format; the hash, exactly this file">
+          <span class="faint">For a club file:</span>
+          <button class="plain small" onclick={async () => copy(await app.run(api.clubSongText(track.id)), "Song entry")}><Icon name="copy" size={11} /> Song entry</button>
+          <button class="plain small" disabled={!track.fingerprint} title={track.fingerprint ? "" : "Analyse the song first"}
+            onclick={() => copy(track.fingerprint, "Fingerprint")}>Fingerprint</button>
+          {#if track.sources.find((x) => x.kind === "file")}
+            <button class="plain small" onclick={() => copy(track.sources.find((x) => x.kind === "file")?.key, "File hash")}>Hash</button>
+          {/if}
+          {#if app.songMatches[track.id]?.length && app.club}
+            <span class="ok" title="{app.club.name} suggests this song">★ {app.songMatches[track.id].map((id) => app.club?.style[id]?.name ?? id).join(", ")}</span>
+          {/if}
+        </div>
       </section>
     {/if}
   {/if}
@@ -387,6 +410,7 @@
   .mult { display: inline-flex; }
   .mult button { padding: 0 5px; height: 22px; }
   .small { font-size: var(--fs-sm); }
+  .ok { color: var(--green); }
   .version { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 6px; background: var(--bg-elev); border-left: 3px solid var(--c); }
   .version.hl { outline: 1px solid var(--blue); }
   .vhead { display: flex; gap: 4px; align-items: center; }
