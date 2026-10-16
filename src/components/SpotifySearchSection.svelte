@@ -62,7 +62,7 @@
   .sps { border-top: 1px solid var(--border-strong); display: flex; flex-direction: column; min-height: 0; }
   .sps.open { flex: 0 1 40%; }
   .head { justify-content: flex-start; gap: 6px; height: 28px; padding: 0 10px; border-radius: 0; background: var(--bg-elev); width: 100%; }
-  .head :global(svg) { color: #1db954; }
+  .head :global(svg) { color: var(--spotify); }
   .spacer { flex: 1; }
   .small { font-size: var(--fs-sm); }
   .body { overflow-y: auto; min-height: 0; }

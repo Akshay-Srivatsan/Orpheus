@@ -208,7 +208,7 @@
             <span class="badge" style:--c={t?.color ?? "#999"}>{t?.name ?? tag}</span>
           {/each}
           {#if rec && rec.sources.some((s) => s.kind === "spotify") && (rec.files.length === 0 || rec.preferredSource === "spotify")}
-            <span class="badge" style:--c="#1db954">Spotify</span>
+            <span class="badge" style:--c="var(--spotify)">Spotify</span>
           {/if}
           </span>
         </div>

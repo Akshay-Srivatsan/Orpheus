@@ -478,7 +478,7 @@
               {:else}<span class="fold-pad"></span>{/if}
             {/if}
             <!-- Its own slot on every row, so it never moves the title. -->
-            <span class="sp">{#if r.rec.sources.some((s) => s.kind === "spotify") && !r.rec.files.length}<span title="Spotify">●</span>{/if}</span>
+            <span class="sp">{#if r.rec.sources.some((s) => s.kind === "spotify")}{#if r.rec.files.length}<span class="dot both" title="A file and Spotify"></span>{:else}<span class="dot" title="Spotify only"></span>{/if}{/if}</span>
             {#if r.rec.missing}<span title="File missing on this computer"><Icon name="warning" size={12} /></span>{/if}
             {r.track.title}
           </span>
@@ -569,7 +569,10 @@
   .c { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .title { display: flex; align-items: center; gap: 5px; }
   .title :global(svg) { color: var(--yellow); flex: none; }
-  .sp { color: #1db954; font-size: 9px; display: inline-block; width: 12px; flex: none; }
+  /* Where a song plays from: nothing (a file), ○ (Spotify only), ● (both). */
+  .sp { display: inline-flex; align-items: center; width: 12px; flex: none; }
+  .sp .dot { width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; border: 1.5px solid var(--spotify); }
+  .sp .dot.both { background: var(--spotify); }
   .bpm { display: flex; gap: 4px; align-items: baseline; }
   .rate { font-size: var(--fs-xs); color: var(--teal); }
   .fit-sweet { color: var(--green); }
