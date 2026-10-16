@@ -259,6 +259,10 @@
         <button class="small" disabled={!linkInput.trim()} onclick={async () => { if (await app.run(api.linkSpotify(rec.id, linkInput))) linkInput = ""; }}>
           <Icon name="link" size={12} /> Link
         </button>
+        {#if app.spotify?.connected}
+          <button class="small" title="Search Spotify (by ISRC, or title and artist) and link the track that sounds the same"
+            onclick={async () => { if ((await app.run(api.findOnSpotify([rec.id]))) !== undefined) app.toast("Looking on Spotify…", "info"); }}>Find</button>
+        {/if}
       </div>
     {/if}
     {#if rec.sources.some((x) => x.kind === "spotify") && rec.sources.some((x) => x.kind === "file")}

@@ -174,6 +174,7 @@ pub fn run() {
             commands::spotify_resolve,
             commands::spotify_import,
             commands::source_link_spotify,
+            commands::recordings_find_spotify,
             commands::track_set_in_library,
             commands::source_remove,
             commands::songs_combine,

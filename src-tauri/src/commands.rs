@@ -398,6 +398,12 @@ pub async fn source_link_spotify(app: S<'_>, recording_id: Id, uri: String) -> R
     app.store.recording(&recording_id).map_err(ae)
 }
 
+/// Looks for each recording on Spotify and links the same audio (in the background).
+#[tauri::command]
+pub async fn recordings_find_spotify(app: S<'_>, ids: Vec<Id>) -> Res<()> {
+    app.inner().find_on_spotify(ids).map_err(ae)
+}
+
 #[tauri::command]
 pub async fn source_remove(app: S<'_>, recording_id: Id, source: SourceRef) -> Res<Recording> {
     app.store.remove_source(&recording_id, &source).map_err(ae)?;

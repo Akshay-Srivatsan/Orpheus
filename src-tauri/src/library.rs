@@ -72,6 +72,12 @@ pub fn read_tags(path: &Path) -> NewTrack {
     t
 }
 
+/// The ISRC in a file's tags (identifies the recording at Spotify and elsewhere).
+pub fn read_isrc(path: &Path) -> Option<String> {
+    let tagged = lofty::read_from_path(path).ok()?;
+    tagged.tags().iter().find_map(|t| t.get_string(ItemKey::Isrc)).map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
 /// Cover art for a local file: the embedded front cover (or any embedded
 /// picture), else an image file next to it. Returns (MIME type, bytes).
 pub fn artwork(path: &Path) -> Option<(String, Vec<u8>)> {

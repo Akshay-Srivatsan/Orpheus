@@ -35,6 +35,9 @@ pub struct LevelsSnapshot {
 
 /// Fade-out length when neither you nor the club set one (seconds).
 const DEFAULT_FADE_SECS: f64 = 5.0;
+/// Find on Spotify: candidates streamed per recording to compare fingerprints
+/// (each is a whole track), closest in length first.
+const SPOTIFY_CANDIDATES: usize = 3;
 
 pub struct App {
     pub handle: AppHandle,
@@ -63,6 +66,8 @@ pub struct App {
     /// Spotify songs already queued for analysis this session (each is
     /// streamed once in the background for its waveform and BPM).
     spotify_analysed: Mutex<std::collections::HashSet<Id>>,
+    /// A Find on Spotify job is running (one at a time).
+    spotify_finding: std::sync::atomic::AtomicBool,
     pub(crate) takeover: Mutex<crate::controls::Takeover>,
     pub(crate) deck_ctl: Mutex<[crate::controls::DeckControlState; 2]>,
     /// Pace decks by the headphone output (set when no master device is open).
@@ -150,6 +155,7 @@ impl App {
             scan_progress: Mutex::new(Default::default()),
             analysis_tx,
             spotify_analysed: Mutex::new(Default::default()),
+            spotify_finding: Default::default(),
             takeover: Mutex::new(Default::default()),
             deck_ctl: Mutex::new(Default::default()),
             clock_cue,
@@ -816,6 +822,86 @@ impl App {
                 })
                 .unwrap();
         }
+    }
+
+    /// Links each recording to its Spotify track, if Spotify has the same audio:
+    /// searched by ISRC (from the file's tags) or title and artist, then
+    /// confirmed by fingerprint, so an export can name both sources. Runs in
+    /// the background; reports with a toast.
+    pub fn find_on_spotify(self: &Arc<Self>, ids: Vec<Id>) -> Result<()> {
+        if !self.spotify.is_connected() {
+            return Err(anyhow!("Connect Spotify first (Settings → Spotify)"));
+        }
+        if self.spotify_finding.swap(true, Ordering::SeqCst) {
+            return Err(anyhow!("Already looking on Spotify"));
+        }
+        let app = self.clone();
+        std::thread::Builder::new()
+            .name("find-on-spotify".into())
+            .spawn(move || {
+                let (mut linked, mut tried) = (0, 0);
+                for id in ids {
+                    let Ok(r) = app.store.recording(&id) else { continue };
+                    if r.rec.sources.iter().any(|s| s.kind == "spotify") {
+                        continue;
+                    }
+                    tried += 1;
+                    match app.spotify_match(&r) {
+                        Ok(Some(uri)) => match app.store.add_source(&r.rec.id, SourceRef { kind: "spotify".into(), key: uri }) {
+                            Ok(()) => {
+                                linked += 1;
+                                emit(&app.handle, "library-changed", app.store.songs_for_recording(&r.rec.id));
+                                emit(&app.handle, "recordings-changed", ());
+                            }
+                            Err(e) => log::warn!("linking {} to Spotify: {e:#}", r.rec.id),
+                        },
+                        Ok(None) => {}
+                        Err(e) => log::warn!("finding {} on Spotify: {e:#}", r.rec.id),
+                    }
+                }
+                app.spotify_finding.store(false, Ordering::SeqCst);
+                let msg = match (tried, linked) {
+                    (0, _) => "Already linked to Spotify".to_string(),
+                    (1, 1) => "Linked to Spotify".to_string(),
+                    (1, 0) => "Not found on Spotify (no track there sounds the same)".to_string(),
+                    _ => format!("Linked {linked} of {tried} to Spotify"),
+                };
+                emit(&app.handle, "toast-info", msg);
+            })?;
+        Ok(())
+    }
+
+    /// The Spotify track that is the same audio as a recording, if any.
+    fn spotify_match(&self, r: &Recording) -> Result<Option<String>> {
+        let path = crate::library::resolve_path(&self.store, &r.rec.id);
+        let fp = match r.rec.fingerprint.as_deref().map(crate::fingerprint::decode) {
+            Some(Ok(fp)) => fp,
+            _ => {
+                let p = path.as_ref().ok_or_else(|| anyhow!("not analysed and no file to fingerprint"))?;
+                let (mono, sr) = crate::decode::decode_mono(p)?;
+                crate::fingerprint::compute(&mono, sr)?
+            }
+        };
+        let isrc = path.as_deref().and_then(crate::library::read_isrc);
+        let max_diff = (crate::fingerprint::SAME_VERSION_LENGTH_SECS * 1000.0) as i64;
+        let hits = self.spotify.candidates(isrc.as_deref(), &r.rec.title, &r.rec.artist, r.rec.duration_ms, max_diff)?;
+        for t in hits.into_iter().take(SPOTIFY_CANDIDATES) {
+            let src = SourceRef { kind: "spotify".into(), key: t.uri.clone() };
+            if self.store.recording_for_source(&src).is_some() {
+                continue;
+            }
+            let (mono, sr) = match self.spotify.decode_for_analysis(&t.uri) {
+                Ok(a) => a,
+                Err(e) => {
+                    log::info!("Find on Spotify: {} unavailable: {e:#}", t.uri);
+                    continue;
+                }
+            };
+            if crate::fingerprint::same_version(&fp, &crate::fingerprint::compute(&mono, sr)?) {
+                return Ok(Some(t.uri));
+            }
+        }
+        Ok(None)
     }
 
     /// Analyses a recording (from its file, else from Spotify).

@@ -186,6 +186,11 @@
   const start = $derived(Math.max(0, Math.floor(scrollTop / ROW_H) - 10));
   const end = $derived(Math.min(sorted.length, Math.ceil((scrollTop + viewH) / ROW_H) + 10));
   const visible = $derived(sorted.slice(start, end));
+  /** Links the selected songs' audio to the same audio on Spotify, where it's there. */
+  async function findOnSpotify(ids: Id[]) {
+    const recs = [...new Set(ids.map((id) => app.versionMap.get(id)?.rec).filter((r) => r && !r.sources.some((s) => s.kind === "spotify")).map((r) => r!.id))];
+    if ((await app.run(api.findOnSpotify(recs))) !== undefined) app.toast(`Looking for ${recs.length === 1 ? "it" : `${recs.length} songs`} on Spotify…`, "info");
+  }
   const selSet = $derived(new Set(app.selected));
 
   function sortBy(k: SortKey) {
@@ -314,6 +319,11 @@
       { separator: true },
       { label: "New Version of This Song…", action: () => { app.inspectTrack = r.track.id; app.rightTab = "info"; } },
       { label: "Re-analyze", action: () => api.analyze([...new Set(ids.map((id) => app.versionMap.get(id)?.rec.id).filter(Boolean) as Id[])]) },
+      ...(app.spotify?.connected ? [{
+        label: "Find on Spotify",
+        disabled: ids.every((id) => app.versionMap.get(id)?.rec.sources.some((s) => s.kind === "spotify")),
+        action: () => findOnSpotify(ids),
+      }] : []),
       ...mergeMenu(ids),
       { separator: true },
       { label: "Remove from Library…", danger: true, action: () => deleteSelected(ids) },

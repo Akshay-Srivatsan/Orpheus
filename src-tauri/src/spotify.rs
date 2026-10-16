@@ -751,6 +751,24 @@ impl Spotify {
         Ok(hits)
     }
 
+    /// Spotify tracks that may be this audio: by ISRC if known, else by title
+    /// and artist; only those within `max_len_diff_ms` of its length, closest
+    /// first. (Whether one is the same audio takes a fingerprint.)
+    pub fn candidates(&self, isrc: Option<&str>, title: &str, artist: &str, duration_ms: i64, max_len_diff_ms: i64) -> Result<Vec<SpotifyTrack>> {
+        let mut hits = match isrc.map(str::trim).filter(|i| !i.is_empty()) {
+            Some(i) => self.search(&format!("isrc:{i}"))?,
+            None => vec![],
+        };
+        if hits.is_empty() {
+            let q = format!("{} {}", title.trim(), artist.trim());
+            if q.trim().is_empty() {
+                return Ok(vec![]);
+            }
+            hits = self.search(&q)?;
+        }
+        Ok(closest_in_length(hits, duration_ms, max_len_diff_ms))
+    }
+
     pub fn my_playlists(&self) -> Result<Vec<SpotifyPlaylist>> {
         self.rt.block_on(async {
             let mut out = vec![SpotifyPlaylist {
@@ -855,6 +873,15 @@ impl Spotify {
     }
 }
 
+/// Tracks within `max_diff_ms` of a length, closest first, each once.
+fn closest_in_length(mut hits: Vec<SpotifyTrack>, duration_ms: i64, max_diff_ms: i64) -> Vec<SpotifyTrack> {
+    hits.retain(|t| (t.duration_ms - duration_ms).abs() <= max_diff_ms);
+    hits.sort_by_key(|t| (t.duration_ms - duration_ms).abs());
+    let mut seen = std::collections::HashSet::new();
+    hits.retain(|t| seen.insert(t.uri.clone()));
+    hits
+}
+
 fn web_track(t: &serde_json::Value) -> Option<SpotifyTrack> {
     let uri = t["uri"].as_str()?;
     if !uri.starts_with("spotify:track:") {
@@ -915,6 +942,16 @@ pub fn normalize_uri(input: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn candidates_by_length() {
+        let t = |uri: &str, ms| SpotifyTrack {
+            uri: uri.into(), title: String::new(), artist: String::new(), album: String::new(), duration_ms: ms, artwork_url: None,
+        };
+        let hits = vec![t("a", 200_000), t("b", 181_000), t("c", 179_500), t("b", 181_000), t("d", 184_000)];
+        let uris: Vec<_> = closest_in_length(hits, 180_000, 3_000).into_iter().map(|t| t.uri).collect();
+        assert_eq!(uris, ["c", "b"]);
+    }
 
     #[test]
     fn normalizes_links() {

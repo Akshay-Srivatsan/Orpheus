@@ -59,6 +59,8 @@ export const api = {
 
   // sources & versions
   linkSpotify: (recordingId: T.Id, uri: string) => call<T.Recording>("source_link_spotify", { recordingId, uri }),
+  /** Searches Spotify for each recording and links the same audio (in the background; reports with a toast). */
+  findOnSpotify: (ids: T.Id[]) => call<null>("recordings_find_spotify", { ids }),
   removeSource: (recordingId: T.Id, source: T.SourceRef) => call<T.Recording>("source_remove", { recordingId, source }),
   /** Combines songs into `keep` (their versions move). */
   combineSongs: (keep: T.Id, others: T.Id[]) => call<T.Track>("songs_combine", { keep, others }),
