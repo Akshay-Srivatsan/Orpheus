@@ -111,12 +111,16 @@ fn image_mime(p: &Path) -> Option<&'static str> {
 }
 
 /// Imports (or re-links) one file. Returns the songs playing its recording
-/// and whether it is new (new audio gets a song; known audio, even a hidden
-/// recording, gets none).
+/// and whether it is new (new audio gets a song; known audio, and files
+/// removed from the library, get none).
 fn import_candidate(store: &Store, c: &Candidate, hash: &str, tags: Option<NewTrack>) -> Result<(Vec<Id>, bool)> {
     let path_s = c.path.to_string_lossy().to_string();
     store.upsert_file(&path_s, FileEntry { hash: hash.to_string(), size: c.size, mtime: c.mtime, root: c.root.clone() });
     let src = SourceRef { kind: "file".into(), key: hash.to_string() };
+    // Removed from the library: only Library → Files adds it again.
+    if store.is_excluded(hash) {
+        return Ok((vec![], false));
+    }
     if let Some(rid) = store.recording_for_source(&src) {
         return Ok((store.songs_for_recording(&rid), false));
     }

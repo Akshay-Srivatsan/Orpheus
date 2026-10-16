@@ -242,7 +242,8 @@ pub struct HotCue {
 /// A recording: a piece of audio, as stored in `recordings/<id>.json`. Its
 /// sources (files by content hash, Spotify tracks) are the same audio. Songs'
 /// versions play recordings; several songs can use one (a song that works for
-/// two line dances), and one no song uses is hidden.
+/// two line dances). One nothing plays any more leaves the library (its files
+/// are listed in `excluded.json`).
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct RecordingRecord {
@@ -301,6 +302,41 @@ pub struct RecordingRecord {
     pub aliases: Vec<Id>,
 }
 
+/// `excluded.json` in the library folder: files removed from the library (by
+/// content hash, so it works on every machine). Scanning the library folders
+/// doesn't add them again; adding one explicitly (Library → Files) does.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Excluded {
+    pub files: Vec<ExcludedFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ExcludedFile {
+    pub hash: String,
+    /// What it was called, for showing it.
+    pub title: String,
+    pub artist: String,
+    pub removed_at: i64,
+}
+
+/// An audio file in the library folders (Library → Files).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryFile {
+    pub path: String,
+    /// The library folder it's in (absent: added from elsewhere).
+    pub root: Option<String>,
+    pub hash: String,
+    /// The recording it is, if it's in the library.
+    pub recording: Option<Id>,
+    /// Songs playing it.
+    pub songs: Vec<Id>,
+    /// Removed from the library (scanning skips it).
+    pub removed: bool,
+}
+
 /// A recording as sent to the UI: the record plus machine-local/derived state.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -311,7 +347,7 @@ pub struct Recording {
     pub files: Vec<String>,
     /// No playable source (files missing and no Spotify link).
     pub missing: bool,
-    /// Songs whose versions play it (none: hidden).
+    /// Songs whose versions play it.
     pub songs: Vec<Id>,
 }
 

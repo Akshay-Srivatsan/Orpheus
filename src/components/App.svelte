@@ -6,7 +6,7 @@
   import Deck from "./Deck.svelte";
   import Inspector from "./Inspector.svelte";
   import LibraryTable from "./LibraryTable.svelte";
-  import RecordingsView from "./RecordingsView.svelte";
+  import FilesView from "./FilesView.svelte";
   import NewSetlistDialog from "./NewSetlistDialog.svelte";
   import MergeDialog from "./MergeDialog.svelte";
   import SetPanel from "./SetPanel.svelte";
@@ -62,7 +62,7 @@
       case "setlist": return app.setlists.find((s) => s.id === v.id)?.name ?? "Setlist";
       case "history": return "History";
       case "missing": return "Missing Files";
-      case "recordings": return "Recordings";
+      case "files": return "Files";
       case "spotify-search": return "Spotify";
       case "spotify-playlist": return v.name;
     }
@@ -121,7 +121,7 @@
               <input type="search" placeholder="Search" bind:value={app.search} bind:this={searchEl} />
             </div>
           </div>
-          <div class="tablewrap">{#if app.view.kind === "recordings"}<RecordingsView />{:else}<LibraryTable />{/if}</div>
+          <div class="tablewrap">{#if app.view.kind === "files"}<FilesView />{:else}<LibraryTable />{/if}</div>
           {#if app.spotify?.connected}<SpotifySearchSection query={app.search} />{/if}
         {/if}
       </main>

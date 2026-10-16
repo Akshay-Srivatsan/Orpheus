@@ -13,8 +13,6 @@ export const api = {
   updateTrack: (id: T.Id, patch: T.TrackPatch) => call<T.Track>("track_update", { id, patch }),
   deleteTracks: (ids: T.Id[]) => call<void>("tracks_delete", { ids }),
   // recordings (ids are recording ids)
-  /** Every recording, hidden ones (no song plays them) too. */
-  recordings: () => call<T.Recording[]>("recordings_list"),
   updateRecording: (id: T.Id, patch: T.RecordingPatch) => call<T.Recording>("recording_update", { id, patch }),
   resetBpm: (id: T.Id, from: "detected" | "tag") => call<T.Recording>("recording_reset_bpm", { id, from }),
   /** Cover art: a data URL (local files) or a Spotify image URL. */
@@ -23,12 +21,17 @@ export const api = {
   analyze: (ids: T.Id[]) => call<void>("recordings_analyze", { ids }),
   /** A new song (in the library) for a recording, e.g. a hidden one. */
   songFromRecording: (id: T.Id) => call<T.Track>("song_from_recording", { id }),
-  /** Deletes recordings no song plays (not ones whose file is in the library folder). */
-  deleteRecordings: (ids: T.Id[]) => call<void>("recordings_delete", { ids }),
+  /** Removes recordings from the library with the versions playing them (files stay on disk). */
+  removeRecordings: (ids: T.Id[]) => call<void>("recordings_remove", { ids }),
+  /** The audio files in the library folders, and what each is in the library. */
+  libraryFiles: () => call<T.LibraryFile[]>("library_files"),
+  /** Adds files to the library, including ones removed from it before. */
+  addFiles: (paths: string[]) => call<void>("library_add_files", { paths }),
   /** Marks recordings as the same audio, kept as `keep`. */
   mergeRecordings: (keep: T.Id, others: T.Id[]) => call<T.Recording>("recordings_merge", { keep, others }),
-  /** Takes a source out into a recording of its own; `versions` play it. */
-  splitSource: (id: T.Id, source: T.SourceRef, versions: T.Id[]) => call<T.Recording>("recording_split_source", { id, source, versions }),
+  /** Takes a source out into a recording of its own: `versions` play it, and with `newSong` a song of its own. */
+  splitSource: (id: T.Id, source: T.SourceRef, versions: T.Id[], newSong = false) =>
+    call<T.Recording>("recording_split_source", { id, source, versions, newSong }),
   rescan: () => call<void>("library_rescan"),
   reloadLibrary: () => call<string[]>("library_reload"),
   libraryInfo: () => call<T.LibraryInfo>("library_info"),

@@ -73,11 +73,6 @@ fn emit_recording_changed(app: &S<'_>, rec_id: &str) {
 }
 
 #[tauri::command]
-pub async fn recordings_list(app: S<'_>) -> Res<Vec<Recording>> {
-    Ok(app.store.all_recordings())
-}
-
-#[tauri::command]
 pub async fn recording_update(app: S<'_>, id: Id, patch: serde_json::Value) -> Res<Recording> {
     let patch: RecordingPatch = serde_json::from_value(patch).map_err(err)?;
     app.store.update_recording(&id, &patch).map_err(ae)?;
@@ -150,11 +145,33 @@ pub async fn song_from_recording(app: S<'_>, id: Id) -> Res<Track> {
     app.store.track(&sid).map_err(ae)
 }
 
-/// Deletes recordings no song plays (see `Store::delete_recordings`).
+/// Removes recordings from the library with the versions playing them
+/// (files stay on disk; Library → Files adds them again).
 #[tauri::command]
-pub async fn recordings_delete(app: S<'_>, ids: Vec<Id>) -> Res<()> {
-    app.store.delete_recordings(&ids).map_err(ae)?;
+pub async fn recordings_remove(app: S<'_>, ids: Vec<Id>) -> Res<()> {
+    app.store.remove_recordings(&ids).map_err(ae)?;
+    crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
     crate::app::emit(&app.handle, "recordings-changed", ());
+    crate::app::emit(&app.handle, "setlists-changed", ());
+    crate::app::emit(&app.handle, "crates-changed", ());
+    Ok(())
+}
+
+/// The audio files in the library folders, with what each is in the library.
+#[tauri::command]
+pub async fn library_files(app: S<'_>) -> Res<Vec<LibraryFile>> {
+    Ok(app.store.library_files())
+}
+
+/// Adds files to the library, including ones removed from it before.
+#[tauri::command]
+pub async fn library_add_files(app: S<'_>, paths: Vec<String>) -> Res<()> {
+    for p in &paths {
+        if let Some(f) = app.store.file_info(p) {
+            app.store.include_file(&f.hash).map_err(ae)?;
+        }
+    }
+    app.inner().import_paths(paths);
     Ok(())
 }
 
@@ -297,10 +314,11 @@ pub async fn recordings_merge(app: S<'_>, keep: Id, others: Vec<Id>) -> Res<Reco
     app.store.recording(&keep).map_err(ae)
 }
 
-/// Takes a source out into a recording of its own (analysed afresh); `versions` play it.
+/// Takes a source out into a recording of its own (analysed afresh): `versions`
+/// play it, and with `new_song` a song of its own does.
 #[tauri::command]
-pub async fn recording_split_source(app: S<'_>, id: Id, source: SourceRef, versions: Vec<Id>) -> Res<Recording> {
-    let new = app.store.split_source(&id, &source, &versions).map_err(ae)?;
+pub async fn recording_split_source(app: S<'_>, id: Id, source: SourceRef, versions: Vec<Id>, new_song: bool) -> Res<Recording> {
+    let new = app.store.split_source(&id, &source, &versions, new_song).map_err(ae)?;
     app.queue_analysis(new.clone(), true);
     crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
     crate::app::emit(&app.handle, "recordings-changed", ());

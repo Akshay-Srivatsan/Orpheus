@@ -127,9 +127,8 @@
     const playing = (track?.versions ?? []).filter((v) => v.recording === rec.id);
     const split = (versions: Id[]) => app.run(api.splitSource(rec.id, src, versions));
     const items: MenuItem[] = [
-      { label: "Split Off as a Song of Its Own", action: async () => { const n = await split([]); if (n) await app.run(api.songFromRecording(n.id)); } },
+      { label: "Split Off as a Song of Its Own", action: () => app.run(api.splitSource(rec.id, src, [], true)) },
       ...playing.map((v) => ({ label: `Split Off for Version “${v.name}”`, action: () => split([v.id]) })),
-      { label: "Split Off, Hidden (see Recordings)", action: () => split([]) },
     ];
     clubMenu = { x: r.left, y: r.bottom + 2, items };
   }

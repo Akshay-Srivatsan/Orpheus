@@ -124,8 +124,8 @@
     <button class="item" class:sel={is({ kind: "history" })} onclick={() => go({ kind: "history" })}>
       <Icon name="history" size={14} /> History
     </button>
-    <button class="item" class:sel={is({ kind: "recordings" })} onclick={() => go({ kind: "recordings" })} title="Every recording, including hidden ones (played by no song)">
-      <Icon name="disc" size={14} /> Recordings
+    <button class="item" class:sel={is({ kind: "files" })} onclick={() => go({ kind: "files" })} title="The audio files in your library folders: add ones removed from the library, or remove some">
+      <Icon name="disc" size={14} /> Files
     </button>
     {#if missing}
       <button class="item warn" class:sel={is({ kind: "missing" })} onclick={() => go({ kind: "missing" })}>

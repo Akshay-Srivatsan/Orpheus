@@ -371,7 +371,7 @@
 
   async function deleteSelected(ids: Id[]) {
     const tids = [...new Set(ids.map((id) => app.versionMap.get(id)!.track.id))];
-    if (!(await confirmAction(`Remove ${tids.length} song(s) and all their versions from the library? Your music files are not touched; their recordings stay in Library → Recordings (hidden), unless only on Spotify.`, "Remove"))) return;
+    if (!(await confirmAction(`Remove ${tids.length} song(s) and all their versions from the library? Your music files are not touched (Library → Files adds them again).`, "Remove"))) return;
     await app.run(api.deleteTracks(tids));
   }
 

@@ -93,6 +93,7 @@ struct Inner {
     by_hash: HashMap<String, Vec<String>>,
     load_errors: Vec<String>,
     styles: Option<StyleLibrary>,
+    excluded: Excluded,
 }
 
 pub struct Store {
@@ -398,6 +399,13 @@ impl Store {
                 Err(e) => errors.push(format!("{e:#}")),
             }
         }
+        let excluded_path = library_dir.join("excluded.json");
+        if excluded_path.exists() {
+            match read_json::<Excluded>(&excluded_path) {
+                Ok(x) => inner.excluded = x,
+                Err(e) => errors.push(format!("{e:#}")),
+            }
+        }
         let index_path = self.local.join("file-index.json");
         if index_path.exists() {
             match read_json::<FileIndex>(&index_path) {
@@ -422,7 +430,99 @@ impl Store {
             }
             self.save_track(t)?;
         }
+        // Recordings nothing plays (e.g. "hidden" ones from before) leave the
+        // library; not when a file failed to load (its songs may play them).
+        let unused: Vec<Id> = if !self.load_errors().is_empty() {
+            vec![]
+        } else {
+            let inner = self.inner.read();
+            let users = inner.recording_users();
+            inner.recordings.keys().filter(|id| !users.contains_key(*id)).cloned().collect()
+        };
+        if !unused.is_empty() {
+            log::info!("library: {} recording(s) no song plays leave the library", unused.len());
+            self.drop_unused_recordings(&unused)?;
+        }
         Ok(())
+    }
+
+    fn save_excluded(&self) -> Result<()> {
+        let x = self.inner.read().excluded.clone();
+        write_json(&self.library_dir().join("excluded.json"), &x)
+    }
+
+    /// Whether a file (by content hash) was removed from the library.
+    pub fn is_excluded(&self, hash: &str) -> bool {
+        self.inner.read().excluded.files.iter().any(|f| f.hash == hash)
+    }
+
+    /// Lets scanning add a removed file again.
+    pub fn include_file(&self, hash: &str) -> Result<()> {
+        let changed = {
+            let mut inner = self.inner.write();
+            let before = inner.excluded.files.len();
+            inner.excluded.files.retain(|f| f.hash != hash);
+            inner.excluded.files.len() != before
+        };
+        if changed {
+            self.save_excluded()?;
+        }
+        Ok(())
+    }
+
+    /// Recordings nothing plays any more leave the library: Spotify-only ones
+    /// simply go (they can be found on Spotify again); files are excluded
+    /// from scanning (they stay on disk; Library → Files adds them again).
+    fn drop_unused_recordings(&self, ids: &[Id]) -> Result<()> {
+        let users = self.inner.read().recording_users();
+        let mut excluded_changed = false;
+        for id in ids {
+            let rid = self.inner.read().canonical_rec(id);
+            if users.contains_key(&rid) {
+                continue;
+            }
+            let Some(r) = self.inner.write().recordings.remove(&rid) else { continue };
+            {
+                let mut inner = self.inner.write();
+                for s in &r.sources {
+                    inner.source_owner.remove(s);
+                    if s.kind == "file" && !inner.excluded.files.iter().any(|f| f.hash == s.key) {
+                        inner.excluded.files.push(ExcludedFile { hash: s.key.clone(), title: r.title.clone(), artist: r.artist.clone(), removed_at: now_ms() });
+                        excluded_changed = true;
+                    }
+                }
+            }
+            let _ = fs::remove_file(self.lib_path("recordings", &r.id));
+            let _ = fs::remove_file(self.waveform_path(&r.id));
+        }
+        if excluded_changed {
+            self.save_excluded()?;
+        }
+        Ok(())
+    }
+
+    /// The audio files in the library folders (and files added from elsewhere), with what they are.
+    pub fn library_files(&self) -> Vec<LibraryFile> {
+        let inner = self.inner.read();
+        let users = inner.recording_users();
+        let mut out: Vec<LibraryFile> = inner
+            .index
+            .files
+            .iter()
+            .map(|(path, f)| {
+                let rec = inner.source_owner.get(&SourceRef { kind: "file".into(), key: f.hash.clone() }).cloned();
+                LibraryFile {
+                    path: path.clone(),
+                    root: f.root.clone(),
+                    hash: f.hash.clone(),
+                    songs: rec.as_ref().and_then(|r| users.get(r).cloned()).unwrap_or_default(),
+                    recording: rec,
+                    removed: inner.excluded.files.iter().any(|x| x.hash == f.hash),
+                }
+            })
+            .collect();
+        out.sort_by(|a, b| a.path.cmp(&b.path));
+        out
     }
 
     fn lib_path(&self, kind: &str, id: &str) -> PathBuf {
@@ -825,16 +925,7 @@ impl Store {
         for c in changed_crates {
             self.save_crate(&c)?;
         }
-        let users = self.inner.read().recording_users();
-        let spotify_only: Vec<Id> = {
-            let inner = self.inner.read();
-            recs.iter()
-                .filter(|r| !users.contains_key(*r))
-                .filter(|r| inner.recordings.get(*r).is_some_and(|x| x.sources.iter().all(|s| s.kind == "spotify")))
-                .cloned()
-                .collect()
-        };
-        self.delete_recordings(&spotify_only)
+        self.drop_unused_recordings(&recs)
     }
 
     /// Songs played in setlists (newest first). Deleting a setlist removes its plays.
@@ -1024,7 +1115,10 @@ impl Store {
     /// Takes one source out of a recording into a new recording of its own
     /// (analysed afresh); `versions` switch to it. Undoes `merge_recordings`,
     /// including merges made before recordings were separate.
-    pub fn split_source(&self, rec_id: &str, source: &SourceRef, versions: &[Id]) -> Result<Id> {
+    pub fn split_source(&self, rec_id: &str, source: &SourceRef, versions: &[Id], new_song: bool) -> Result<Id> {
+        if versions.is_empty() && !new_song {
+            return Err(anyhow!("something must play the split-off audio: a version, or a song of its own"));
+        }
         let old = self.recording(rec_id)?.rec;
         if !old.sources.contains(source) {
             return Err(anyhow!("that source isn't part of this recording"));
@@ -1054,29 +1148,83 @@ impl Store {
         for vid in versions {
             self.version_update(vid, &VersionPatch { recording: Some(new.id.clone()), ..Default::default() })?;
         }
+        if new_song {
+            self.song_from_recording(&new.id, true)?;
+        }
         Ok(new.id)
     }
 
-    /// Deletes recordings no song plays, unless a file of theirs is on this
-    /// machine (the next scan would only add it again: it stays hidden).
-    pub fn delete_recordings(&self, ids: &[Id]) -> Result<()> {
-        let users = self.inner.read().recording_users();
-        for id in ids {
-            let r = self.recording(id)?;
-            if users.contains_key(&r.rec.id) {
-                return Err(anyhow!("“{}” is played by a song; delete the song (or its version) first", r.rec.title));
+    /// Removes recordings from the library with the versions playing them
+    /// (songs left without versions go too; set entries lose their song).
+    /// Files stay on disk, excluded from scanning.
+    pub fn remove_recordings(&self, ids: &[Id]) -> Result<()> {
+        let rids: Vec<Id> = ids.iter().map(|id| self.inner.read().canonical_rec(id)).collect();
+        let (whole, partial): (Vec<Id>, Vec<(Id, Vec<Id>)>) = {
+            let inner = self.inner.read();
+            let mut whole = vec![];
+            let mut partial = vec![];
+            for t in inner.tracks.values() {
+                let hit: Vec<Id> = t.versions.iter().filter(|v| rids.contains(&inner.canonical_rec(&v.recording))).map(|v| v.id.clone()).collect();
+                if hit.is_empty() {
+                    continue;
+                }
+                if hit.len() == t.versions.len() {
+                    whole.push(t.id.clone());
+                } else {
+                    partial.push((t.id.clone(), hit));
+                }
             }
-            if !r.files.is_empty() {
-                return Err(anyhow!("“{}” is a file in the library folder ({}); it stays hidden unless the file is removed", r.rec.title, r.files[0]));
-            }
+            (whole, partial)
+        };
+        for (song, vids) in &partial {
+            self.with_track(song, |t| {
+                t.versions.retain(|v| !vids.contains(&v.id));
+                if t.primary.as_ref().is_some_and(|p| vids.contains(p)) {
+                    t.primary = None;
+                }
+                Ok(())
+            })?;
+            self.forget_versions(vids)?;
+        }
+        self.delete_tracks(&whole)?;
+        self.drop_unused_recordings(&rids)
+    }
+
+    /// Set entries and crates stop referring to removed versions.
+    fn forget_versions(&self, vids: &[Id]) -> Result<()> {
+        let (setlists, crates) = {
             let mut inner = self.inner.write();
-            inner.recordings.remove(&r.rec.id);
-            for s in &r.rec.sources {
-                inner.source_owner.remove(s);
+            for v in vids {
+                inner.version_owner.remove(v);
             }
-            drop(inner);
-            let _ = fs::remove_file(self.lib_path("recordings", &r.rec.id));
-            let _ = fs::remove_file(self.waveform_path(&r.rec.id));
+            let mut setlists = vec![];
+            for s in inner.setlists.values_mut() {
+                let mut hit = false;
+                for e in s.entries.iter_mut() {
+                    if e.version_id.as_ref().is_some_and(|v| vids.contains(v)) {
+                        e.version_id = None;
+                        hit = true;
+                    }
+                }
+                if hit {
+                    setlists.push(s.clone());
+                }
+            }
+            let mut crates = vec![];
+            for c in inner.crates.values_mut() {
+                let before = c.version_ids.len();
+                c.version_ids.retain(|v| !vids.contains(v));
+                if c.version_ids.len() != before {
+                    crates.push(c.clone());
+                }
+            }
+            (setlists, crates)
+        };
+        for s in &setlists {
+            self.save_setlist(s)?;
+        }
+        for c in &crates {
+            self.save_crate(c)?;
         }
         Ok(())
     }
@@ -1232,7 +1380,7 @@ impl Store {
     }
 
     pub fn version_delete(&self, id: &str) -> Result<()> {
-        let (_, tid) = self.version(id)?;
+        let (version, tid) = self.version(id)?;
         let used: usize = self
             .inner
             .read()
@@ -1266,7 +1414,8 @@ impl Store {
         for c in changed {
             self.save_crate(&c)?;
         }
-        Ok(())
+        // Its audio, if nothing else plays it, leaves the library.
+        self.drop_unused_recordings(&[version.recording])
     }
 
     // ---------------------------------------------------------------- file index
@@ -1989,7 +2138,7 @@ mod tests {
 
         // The old merge can be undone: the Spotify track becomes a recording
         // of its own, and the short version plays it.
-        let new = again.split_source("s1", &spotify("x"), &["v2".to_string()]).unwrap();
+        let new = again.split_source("s1", &spotify("x"), &["v2".to_string()], false).unwrap();
         assert_eq!(again.recording("s1").unwrap().rec.sources, vec![file("h1")]);
         assert_eq!(again.recording(&new).unwrap().rec.sources, vec![spotify("x")]);
         assert!(!again.recording(&new).unwrap().rec.analyzed, "analysed afresh");
@@ -2092,43 +2241,66 @@ mod tests {
         assert_eq!(reloaded.version(&vs).unwrap().0.recording, rf);
 
         // Undone.
-        let back = reloaded.split_source(&rf, &spotify("x"), &[vs.clone()]).unwrap();
+        let back = reloaded.split_source(&rf, &spotify("x"), &[vs.clone()], false).unwrap();
         assert_eq!(reloaded.version(&vs).unwrap().0.recording, back);
         assert_eq!(reloaded.version(&vf).unwrap().0.recording, rf);
-        assert!(reloaded.split_source(&rf, &file("h"), &[]).is_err(), "a recording keeps one source");
+        assert!(reloaded.split_source(&rf, &file("h"), &[], true).is_err(), "a recording keeps one source");
+        assert!(reloaded.split_source(&rf, &file("h"), &[], false).is_err(), "something must play it");
         let _ = fs::remove_dir_all(lib.parent().unwrap());
     }
 
     #[test]
-    fn recordings_without_songs_are_hidden() {
+    fn audio_nothing_plays_leaves_the_library() {
         let (lib, local) = temp_dirs();
         let store = Store::open(&lib, &local).unwrap();
         let a = song(&store, "Walk Like an Egyptian", file("h"));
         let (_, r) = first(&store, &a);
-        store.upsert_file("/music/w.flac", FileEntry { hash: "h".into(), size: 1, mtime: 2, root: None });
-        // A second song (another line dance) plays the same recording.
+        store.upsert_file("/music/w.flac", FileEntry { hash: "h".into(), size: 1, mtime: 2, root: Some("/music".into()) });
+        // A second song (another line dance) plays the same recording: it stays while one does.
         let b = store.song_from_recording(&r, true).unwrap();
-        assert_eq!(store.recording(&r).unwrap().songs.len(), 2);
-        store.delete_tracks(&[a.clone()]).unwrap();
+        store.delete_tracks(&[a]).unwrap();
         assert_eq!(store.recording(&r).unwrap().songs, vec![b.clone()]);
         store.delete_tracks(&[b]).unwrap();
-        // No song plays it: hidden, but still there (its file is in the library folder).
-        let hidden = store.recording(&r).unwrap();
-        assert!(hidden.songs.is_empty());
-        assert!(store.all_tracks().is_empty());
-        assert!(store.delete_recordings(&[r.clone()]).is_err(), "the next scan would only add it again");
-        // Scanning the file again finds the recording and makes no song.
-        assert_eq!(store.insert_recording(&NewTrack::default(), file("h")).unwrap(), (r.clone(), false));
-        assert!(store.all_tracks().is_empty());
-        // Shown again on request.
-        let c = store.song_from_recording(&r, true).unwrap();
-        assert_eq!(store.track(&c).unwrap().rec.title, "Walk Like an Egyptian");
-        // Without its file, a hidden recording can be deleted.
-        store.delete_tracks(&[c]).unwrap();
-        store.remove_file("/music/w.flac");
-        store.delete_recordings(&[r.clone()]).unwrap();
+        // Nothing plays it: out of the library, the file excluded from scanning (not deleted).
         assert!(store.recording(&r).is_err());
-        assert!(store.recording_for_source(&file("h")).is_none());
+        assert!(store.is_excluded("h"));
+        let f = &store.library_files()[0];
+        assert!(f.removed && f.recording.is_none() && f.path == "/music/w.flac");
+        // Added again explicitly.
+        store.include_file("h").unwrap();
+        assert!(!Store::open(&lib, &local).unwrap().is_excluded("h"));
+        // Spotify-only audio simply goes.
+        let s = song(&store, "S", spotify("x"));
+        store.delete_tracks(&[s]).unwrap();
+        assert!(store.recording_for_source(&spotify("x")).is_none());
+        assert!(!store.is_excluded("spotify:track:x"));
+        let _ = fs::remove_dir_all(lib.parent().unwrap());
+    }
+
+    #[test]
+    fn removing_audio_takes_its_versions() {
+        let (lib, local) = temp_dirs();
+        let store = Store::open(&lib, &local).unwrap();
+        let a = song(&store, "Barbie (RP edit)", file("a"));
+        let b = song(&store, "Barbie (Lucas edit)", file("b"));
+        let (va, _) = first(&store, &a);
+        let (vb, rb) = first(&store, &b);
+        store.combine_songs(&a, &[b]).unwrap();
+        let sid = store.setlist_create("Set", "live", None, None).unwrap();
+        let eid = store.entries_insert(&sid, None, &[NewEntry { version_id: Some(vb.clone()), ..Default::default() }]).unwrap()[0].clone();
+        store.remove_recordings(&[rb.clone()]).unwrap();
+        assert_eq!(store.track(&a).unwrap().rec.versions.iter().map(|v| v.id.clone()).collect::<Vec<_>>(), vec![va]);
+        assert_eq!(store.entry(&eid).unwrap().0.version_id, None, "the set entry loses its song");
+        assert!(store.is_excluded("b"));
+        // Older "hidden" recordings (no song) leave the library on load.
+        let r = store.insert_recording(&NewTrack { title: "Old".into(), ..Default::default() }, file("c")).unwrap().0;
+        // Not while a song file is unreadable (it may be the one playing it).
+        fs::write(lib.join("tracks").join("broken.json"), "{ not json").unwrap();
+        assert!(Store::open(&lib, &local).unwrap().recording(&r).is_ok());
+        fs::remove_file(lib.join("tracks").join("broken.json")).unwrap();
+        let reloaded = Store::open(&lib, &local).unwrap();
+        assert!(reloaded.recording(&r).is_err());
+        assert!(reloaded.is_excluded("c"));
         let _ = fs::remove_dir_all(lib.parent().unwrap());
     }
 }

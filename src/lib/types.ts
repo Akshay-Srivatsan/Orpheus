@@ -36,8 +36,9 @@ export interface Version extends Overrides {
 
 /**
  * A recording: a piece of audio (its sources are the same audio) and its
- * analysis. Songs' versions play recordings; several songs can share one, and
- * one no song uses is hidden.
+ * analysis. Songs' versions play recordings, and several songs can share one;
+ * one nothing plays any more leaves the library (its files are listed in
+ * Library → Files, to add again).
  */
 export interface Recording {
   id: Id;
@@ -75,8 +76,21 @@ export interface Recording {
   /** Paths of its files on this machine. */
   files: string[];
   missing: boolean;
-  /** Songs whose versions play it (none: hidden). */
+  /** Songs whose versions play it. */
   songs: Id[];
+}
+
+/** An audio file in the library folders (Library → Files). */
+export interface LibraryFile {
+  path: string;
+  /** The library folder it's in (absent: added from elsewhere). */
+  root?: string | null;
+  hash: string;
+  /** The recording it is, if it's in the library. */
+  recording: Id | null;
+  songs: Id[];
+  /** Removed from the library: scanning skips it until it's added again. */
+  removed: boolean;
 }
 
 /** A song: what the DJ thinks of as one song, with versions to play (which may play different recordings). */

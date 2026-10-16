@@ -18,7 +18,7 @@ export type SourceView =
   | { kind: "setlist"; id: Id }
   | { kind: "history" }
   | { kind: "missing" }
-  | { kind: "recordings" }
+  | { kind: "files" }
   | { kind: "spotify-search" }
   | { kind: "spotify-playlist"; uri: string; name: string };
 
@@ -114,7 +114,7 @@ class AppState {
   midiNav = $state<{ action: string; delta?: number; deck?: 0 | 1; n: number }>({ action: "", n: 0 });
 
   trackMap = $derived(new Map(this.tracks.map((t) => [t.id, t])));
-  /** Recordings that songs play (hidden ones: `api.recordings()`). */
+  /** Recordings that songs play. */
   recordingMap = $derived(new Map(this.tracks.flatMap((t) => t.recordings).map((r) => [r.id, r])));
   versionMap = $derived.by(() => {
     const m = new Map<Id, Row>();
