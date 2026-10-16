@@ -1,14 +1,15 @@
 <script lang="ts">
-  // Combine (Same Song): songs become one song, each version keeping its
-  // recording. Combine (Same Recording): recordings become one (the same
-  // audio), and their songs one song. Where they differ (title, BPM, …), the
-  // DJ picks which value to keep. Undone by separating again (Inspector).
+  // Combine: songs become one song. If their audio is the same (FLAC and MP3,
+  // a file and its Spotify track: suggested by comparing fingerprints), it
+  // becomes one audio too; otherwise each version keeps its own. Where they
+  // differ (title, BPM, …), the DJ picks which value to keep. Undone by
+  // separating again (Inspector).
   import { api } from "../lib/api";
   import { app } from "../lib/state.svelte";
   import { fmtBpm } from "../lib/tempo";
   import type { Id, Recording, RecordingPatch, Track, TrackPatch } from "../lib/types";
 
-  /** The songs to combine (the first kept), and for Same Recording the recordings (the first kept). */
+  /** The songs to combine (the first kept), and the audio they play (the first kept, if it's the same). */
   let { songs: songIds, recordings: recIds }: { songs: Id[]; recordings: Id[] } = $props();
 
   interface Field {
@@ -20,7 +21,24 @@
 
   const songs = $derived(songIds.map((id) => app.trackMap.get(id)).filter(Boolean) as Track[]);
   const recordings = $derived(recIds.map((id) => app.recordingMap.get(id)).filter(Boolean) as Recording[]);
-  const sameRecording = $derived(recordings.length > 1);
+  /** The audio is the same (combine it too): suggested by its fingerprints, the DJ's to change. */
+  let sameAudio = $state(false);
+  let verdict = $state<"checking" | "same" | "different" | "unknown" | null>(null);
+  let match = $state(0);
+  /** Over the stretch that lines up, how much the audio differs (bit error). */
+  let diff = $state(0);
+  $effect(() => {
+    if (recIds.length < 2) return;
+    verdict = "checking";
+    api.compareRecordings(recIds).then((m) => {
+      const known = m.every((x) => x.known);
+      match = Math.min(...m.map((x) => x.coverage));
+      diff = Math.max(...m.map((x) => x.error));
+      verdict = !known ? "unknown" : m.every((x) => x.same) ? "same" : "different";
+      sameAudio = verdict === "same";
+    }).catch(() => (verdict = "unknown"));
+  });
+  const sameRecording = $derived(recordings.length > 1 && sameAudio);
   const meter = (r: Recording) => (r.beatsPerBar ? `${r.beatsPerBar} beats a bar${r.meterSource === "user" ? " (set by you)" : ""}` : "unknown");
   /** "FLAC file + Spotify": tells recordings with the same title apart. */
   const sourceText = (r: Recording) => {
@@ -96,21 +114,25 @@
 
 <div class="overlay" role="presentation" onmousedown={(e) => e.target === e.currentTarget && (app.mergeDialog = null)}>
   <form class="sheet" onsubmit={(e) => { e.preventDefault(); merge(); }}>
-    {#if sameRecording}
-      <h2>Combine as the Same Recording</h2>
-      <p class="dim">
-        Their sources ({recordings.map(sourceText).join("; ")}) become one recording: the same audio, analysed once, with one
-        BPM and one set of hot cues.{#if songs.length > 1}{" "}Their {songs.length} songs become one song.{/if} Setlists and crates
-        keep working. To undo, split a source off in Info → Recording; “Separate into Its Own Song” makes a version a song of
-        its own again (it keeps playing this recording).
+    <h2>Combine{songs.length > 1 ? ` ${songs.length} Songs` : ""}</h2>
+    {#if recordings.length > 1}
+      <p class="small">
+        {#if verdict === "checking"}<span class="faint">Comparing their audio…</span>
+        {:else if verdict === "same"}<span class="ok">Their audio is the same{match ? ` (${Math.round(match * 100)}% match)` : ""}</span>: {recordings.map(sourceText).join(", ")}.
+        {:else if verdict === "different"}<span>Their audio is different{match >= 0.95 ? ` (it lines up all through, but ${Math.round(diff * 100)}% of the detail differs: a remaster, or a lossy copy?)` : match > 0.05 ? ` (only ${Math.round(match * 100)}% of it lines up: an edit?)` : ""}.</span>
+        {:else}<span class="faint">Not all of it is analysed yet, so Orpheus can't compare it.</span>{/if}
       </p>
-    {:else}
-      <h2>Combine {songs.length} Songs as the Same Song</h2>
-      <p class="dim">
-        Their versions become versions of one song (each keeps its own recording), and count as the same song in a set.
-        Setlists and crates keep working. To undo, select a version and choose “Separate into Its Own Song”.
-      </p>
+      <div class="choices">
+        <label><input type="radio" checked={!sameAudio} onchange={() => (sameAudio = false)} disabled={songs.length < 2} />
+          <span><b>Different audio</b> — one song, each version keeping its own audio (e.g. several edits for one line dance){#if songs.length < 2} <span class="faint">(they're already one song)</span>{/if}</span></label>
+        <label><input type="radio" checked={sameAudio} onchange={() => (sameAudio = true)} />
+          <span><b>The same audio</b> — one song and one audio (e.g. a FLAC and an MP3, or a file and its Spotify track): analysed once, one BPM, one set of hot cues; versions that become identical merge</span></label>
+      </div>
     {/if}
+    <p class="dim small">
+      {songs.length > 1 ? "Their versions become versions of one song, and count as the same song in a set. " : ""}Setlists and crates keep working.
+      To undo: “Separate into Its Own Song” (a version), or Split off… (a file or Spotify link, in its Audio).
+    </p>
     {#if fields.length}
       <p>They differ in these; choose what to keep:</p>
       <div class="fields">
@@ -132,7 +154,7 @@
     {/if}
     <div class="buttons">
       <button type="button" onclick={() => (app.mergeDialog = null)}>Cancel</button>
-      <button type="submit" class="primary" disabled={busy}>Combine</button>
+      <button type="submit" class="primary" disabled={busy || verdict === "checking" || (songs.length < 2 && !sameAudio)}>Combine</button>
     </div>
   </form>
 </div>
@@ -148,5 +170,8 @@
   .col label { display: flex; gap: 6px; align-items: baseline; }
   .col label span:first-of-type { overflow-wrap: anywhere; }
   .small { font-size: var(--fs-sm); }
+  .ok { color: var(--green); }
+  .choices { display: flex; flex-direction: column; gap: 6px; margin: 0 0 12px; }
+  .choices label { display: flex; gap: 8px; align-items: flex-start; }
   .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 </style>

@@ -355,9 +355,8 @@
     const songs = [...new Set(rows.map((r) => r.track.id))];
     const recs = [...new Set(rows.map((r) => r.rec.id))];
     const items: MenuItem[] = [];
-    if (songs.length > 1) items.push({ label: "Combine (Same Song)…", action: () => (app.mergeDialog = { songs, recordings: [] }) });
-    // The same audio is the same song too (a version can be separated again, keeping the recording).
-    if (recs.length > 1) items.push({ label: "Combine (Same Recording)…", action: () => (app.mergeDialog = { songs, recordings: recs }) });
+    // One song either way; the dialog suggests whether they're also the same audio (fingerprints).
+    if (songs.length > 1 || recs.length > 1) items.push({ label: "Combine…", action: () => (app.mergeDialog = { songs, recordings: recs }) });
     // One version of a song with several: it can stand for the song.
     if (rows.length === 1 && rows[0].track.versions.length > 1 && primaryVersion(rows[0].track)?.id !== rows[0].version.id) {
       items.push({ label: "Make Primary Version", action: () => app.run(api.updateTrack(rows[0].track.id, { primary: rows[0].version.id })) });

@@ -182,6 +182,7 @@ pub fn run() {
             commands::recording_update,
             commands::song_from_recording,
             commands::recordings_remove,
+            commands::recordings_compare,
             commands::library_files,
             commands::library_add_files,
             commands::version_create,

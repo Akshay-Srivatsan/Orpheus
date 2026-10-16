@@ -140,10 +140,11 @@
   /** "FLAC" / "Spotify" chips for an audio's files and Spotify link. */
   function sourceChips(rec: Recording): { label: string; title: string }[] {
     const ext = (p: string) => p.match(/\.([a-z0-9]+)$/i)?.[1]?.toUpperCase() ?? "file";
-    const out = rec.files.map((p) => ({ label: ext(p), title: p }));
-    if (!rec.files.length && rec.sources.some((x) => x.kind === "file")) out.push({ label: "file missing", title: "Not found on this computer: add its folder in Settings → Library" });
-    for (const x of rec.sources) if (x.kind === "spotify") out.push({ label: "Spotify", title: x.key });
-    return out;
+    return rec.sources.map((x) => {
+      if (x.kind === "spotify") return { label: "Spotify", title: x.key };
+      const p = rec.filePaths?.[x.key]?.[0];
+      return p ? { label: ext(p), title: p } : { label: "file missing", title: "Not found on this computer: add its folder in Settings → Library" };
+    });
   }
 
   /** Other songs playing a recording. */
@@ -234,9 +235,10 @@
       <div class="source">
         <Icon name={s.kind === "spotify" ? "spotify" : "music"} size={13} />
         {#if s.kind === "file"}
+          {@const paths = rec.filePaths?.[s.key] ?? []}
           <div class="src-body">
-            {#if rec.files.length}
-              {#each rec.files as p}<div class="path" title={p}>{p}</div>{/each}
+            {#if paths.length}
+              {#each paths as p}<div class="path" title={p}>{p.split(/[/\\]/).pop()}</div>{/each}
             {:else}
               <div class="warn small">File not found on this computer (content id {s.key.slice(0, 10)}…). Add its folder to your library to relink it.</div>
             {/if}
@@ -259,7 +261,7 @@
         </button>
       </div>
     {/if}
-    {#if rec.sources.length > 1}
+    {#if rec.sources.some((x) => x.kind === "spotify") && rec.sources.some((x) => x.kind === "file")}
       <div class="row small">
         Play from
         <div class="segmented">

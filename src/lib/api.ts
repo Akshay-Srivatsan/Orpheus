@@ -21,6 +21,8 @@ export const api = {
   analyze: (ids: T.Id[]) => call<void>("recordings_analyze", { ids }),
   /** A new song (in the library) for a recording, e.g. a hidden one. */
   songFromRecording: (id: T.Id) => call<T.Track>("song_from_recording", { id }),
+  /** Compares recordings with the first (fingerprints): are they the same audio? */
+  compareRecordings: (ids: T.Id[]) => call<{ id: T.Id; known: boolean; coverage: number; error: number; same: boolean }[]>("recordings_compare", { ids }),
   /** Removes recordings from the library with the versions playing them (files stay on disk). */
   removeRecordings: (ids: T.Id[]) => call<void>("recordings_remove", { ids }),
   /** The audio files in the library folders, and what each is in the library. */

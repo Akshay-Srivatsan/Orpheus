@@ -75,6 +75,8 @@ export interface Recording {
   hotCues?: { slot: number; ms: number }[];
   /** Paths of its files on this machine. */
   files: string[];
+  /** The same for each file (by content hash). */
+  filePaths?: Record<string, string[]>;
   missing: boolean;
   /** Songs whose versions play it. */
   songs: Id[];

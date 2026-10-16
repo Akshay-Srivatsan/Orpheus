@@ -345,6 +345,8 @@ pub struct Recording {
     pub rec: RecordingRecord,
     /// Known paths of this recording's files on this machine.
     pub files: Vec<String>,
+    /// The same, for each file (by content hash).
+    pub file_paths: std::collections::BTreeMap<String, Vec<String>>,
     /// No playable source (files missing and no Spotify link).
     pub missing: bool,
     /// Songs whose versions play it.

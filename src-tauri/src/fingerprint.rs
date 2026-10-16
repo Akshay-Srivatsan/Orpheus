@@ -180,12 +180,27 @@ pub fn similarity(a: &[u32], b: &[u32]) -> Similarity {
 
 /// Whether two fingerprints are the same version (re-encodes yes; edits no).
 pub fn same_version(a: &[u32], b: &[u32]) -> bool {
+    same_within(a, b, SAME_VERSION_ERROR)
+}
+
+/// For combining a library's songs, a looser bit error: a lossy copy (an MP3
+/// of a 24-bit FLAC measured 6 %) or a remaster of the same performance is
+/// the same recording; unrelated music stays far above it, and edits still
+/// fail on coverage or length.
+pub const SAME_RECORDING_ERROR: f64 = 0.10;
+
+/// Whether two fingerprints are the same recording (any copy of it; not an edit).
+pub fn same_recording(a: &[u32], b: &[u32]) -> bool {
+    same_within(a, b, SAME_RECORDING_ERROR)
+}
+
+fn same_within(a: &[u32], b: &[u32], max_error: f64) -> bool {
     let len_diff = (a.len() as f64 - b.len() as f64).abs() * item_secs();
     if len_diff > SAME_VERSION_LENGTH_SECS {
         return false;
     }
     let s = similarity(a, b);
-    s.coverage >= SAME_VERSION_COVERAGE && s.error < SAME_VERSION_ERROR
+    s.coverage >= SAME_VERSION_COVERAGE && s.error < max_error
 }
 
 #[cfg(test)]
@@ -238,13 +253,16 @@ mod tests {
             .collect();
         let b = compute(&noisy, sr).unwrap();
         assert!(same_version(&a, &b), "{:?}", similarity(&a, &b));
+        assert!(same_recording(&a, &b));
         // An edit: 15 s cut from the middle.
         let mut edit = song[..sr as usize * 20].to_vec();
         edit.extend_from_slice(&song[sr as usize * 35..]);
         let c = compute(&edit, sr).unwrap();
         assert!(!same_version(&a, &c), "{:?}", similarity(&a, &c));
+        assert!(!same_recording(&a, &c), "an edit isn't the same recording either");
         // A different song.
         let d = compute(&music(60.0, sr, 99), sr).unwrap();
         assert!(!same_version(&a, &d));
+        assert!(!same_recording(&a, &d));
     }
 }

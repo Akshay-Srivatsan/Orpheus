@@ -145,6 +145,43 @@ pub async fn song_from_recording(app: S<'_>, id: Id) -> Res<Track> {
     app.store.track(&sid).map_err(ae)
 }
 
+/// How another recording's audio compares with the first one's (fingerprints).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioMatch {
+    pub id: Id,
+    /// Both were fingerprinted (analysed).
+    pub known: bool,
+    /// The longest stretch that is the same audio, as a share of the longer.
+    pub coverage: f64,
+    /// How much it differs over that stretch (bit error: 0 = identical).
+    pub error: f64,
+    /// The same recording (a copy: FLAC and MP3, a file and its Spotify track; not an edit).
+    pub same: bool,
+}
+
+/// Compares recordings with the first: are they the same audio? (For Combine.)
+#[tauri::command]
+pub async fn recordings_compare(app: S<'_>, ids: Vec<Id>) -> Res<Vec<AudioMatch>> {
+    let store = app.store.clone();
+    blocking(move || {
+        let fp = |id: &str| store.recording(id).ok().and_then(|r| r.rec.fingerprint).and_then(|f| crate::fingerprint::decode(&f).ok());
+        let Some(first) = ids.first() else { return Ok(vec![]) };
+        let base = fp(first);
+        Ok(ids[1..]
+            .iter()
+            .map(|id| match (&base, fp(id)) {
+                (Some(a), Some(b)) => {
+                    let s = crate::fingerprint::similarity(a, &b);
+                    AudioMatch { id: id.clone(), known: true, coverage: s.coverage, error: s.error, same: crate::fingerprint::same_recording(a, &b) }
+                }
+                _ => AudioMatch { id: id.clone(), known: false, coverage: 0.0, error: 1.0, same: false },
+            })
+            .collect())
+    })
+    .await
+}
+
 /// Removes recordings from the library with the versions playing them
 /// (files stay on disk; Library → Files adds them again).
 #[tauri::command]

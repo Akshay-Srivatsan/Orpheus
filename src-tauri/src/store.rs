@@ -258,9 +258,13 @@ impl Inner {
 
     fn to_recording(&self, rec: &RecordingRecord, users: &HashMap<Id, Vec<Id>>) -> Recording {
         let mut files = vec![];
+        let mut file_paths = BTreeMap::new();
         for s in rec.sources.iter().filter(|s| s.kind == "file") {
             if let Some(paths) = self.by_hash.get(&s.key) {
                 files.extend(paths.iter().cloned());
+                let mut p = paths.clone();
+                p.sort();
+                file_paths.insert(s.key.clone(), p);
             }
         }
         files.sort();
@@ -268,6 +272,7 @@ impl Inner {
         Recording {
             missing: files.is_empty() && !has_spotify,
             files,
+            file_paths,
             songs: users.get(&rec.id).cloned().unwrap_or_default(),
             rec: rec.clone(),
         }
