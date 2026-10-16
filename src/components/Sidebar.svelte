@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api";
   import { evaluate } from "../lib/smart";
   import { app, type SourceView, confirmAction } from "../lib/state.svelte";
@@ -7,6 +8,17 @@
   import Icon from "./Icon.svelte";
 
   const missing = $derived(app.libraryTracks.filter((t) => t.missing).length);
+
+  /** Opens a set file: its songs link to this library's audio (the same file, another encoding, or Spotify). */
+  async function importSet() {
+    const path = await openDialog({ multiple: false, directory: false, title: "Import a set", filters: [{ name: "Orpheus set", extensions: ["toml"] }] });
+    if (typeof path !== "string") return;
+    const r = await app.run(api.importSetlist(path));
+    if (!r) return;
+    await app.run(api.performOpen(r.setlistId));
+    const parts = [`${r.linked} linked to your songs`, r.spotify ? `${r.spotify} from Spotify` : "", r.missing ? `${r.missing} not here yet (they link up when you add the audio, or a file that sounds the same)` : ""];
+    app.toast(`Imported: ${parts.filter(Boolean).join(", ")}.`, r.missing ? "error" : "info");
+  }
 
   let playlists = $state<SpotifyPlaylist[] | null>(null);
   let loadingPlaylists = $state(false);
@@ -167,7 +179,12 @@
   </div>
 
   <div class="group">
-    <div class="section-title row">Setlists <button class="plain icon add" title="New setlist" onclick={() => (app.newSetlistOpen = true)}><Icon name="plus" size={13} /></button></div>
+    <div class="section-title row">Setlists
+      <span>
+        <button class="plain icon add" title="Import a set file (its songs link to your audio)" onclick={importSet}><Icon name="download" size={13} /></button>
+        <button class="plain icon add" title="New setlist" onclick={() => (app.newSetlistOpen = true)}><Icon name="plus" size={13} /></button>
+      </span>
+    </div>
     {#each app.setlists as s (s.id)}
       {#if renamingSet === s.id}
         <!-- svelte-ignore a11y_autofocus -->

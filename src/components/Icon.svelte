@@ -23,6 +23,7 @@
     list: "M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01",
     crate: "M4 8h16v11H4zM3 5h18v3H3zM10 12h4",
     history: "M12 7v5l3 2M3.5 12a8.5 8.5 0 1 0 2.5-6M3 4v4h4",
+    download: "M12 4v11m0 0l-4-4m4 4l4-4M5 19h14",
     disc: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z",
     warning: "M12 4l9 16H3zM12 10v4M12 17h.01",
     check: "M5 12.5l4.5 4.5L19 7",

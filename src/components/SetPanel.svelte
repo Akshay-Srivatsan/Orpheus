@@ -323,6 +323,7 @@
       { label: "Duplicate", action: () => api.duplicateSetlist(s.id, `${s.name} (copy)`) },
       { label: "Reset Played / Skipped", action: () => confirmAction("Mark every song in this set as not played?", "Reset").then((ok) => { if (ok) api.resetSetlist(s.id); }) },
       { separator: true },
+      { label: "Export Set…", action: exportSet },
       { label: "Export as CSV…", action: exportCsv },
       { label: "Print Setlist…", action: () => window.print() },
       { separator: true },
@@ -330,6 +331,13 @@
       { label: "Delete Set…", danger: true, action: () => confirmAction(`Delete “${s.name}”?`).then((ok) => { if (ok) api.deleteSetlist(s.id); }) },
     ];
     menu = { x: ev.clientX, y: ev.clientY, items };
+  }
+
+  /** A set file another library can open: its songs link to the same audio there (any encoding, or Spotify). */
+  async function exportSet() {
+    if (!set) return;
+    const path = await save({ defaultPath: `${set.name}.orpheus-set.toml`, filters: [{ name: "Orpheus set", extensions: ["toml"] }] });
+    if (path && (await app.run(api.exportSetlist(set.id, path))) !== undefined) app.toast(`Exported “${set.name}”.`, "info");
   }
 
   async function exportCsv() {

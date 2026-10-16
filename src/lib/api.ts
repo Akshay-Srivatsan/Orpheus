@@ -25,6 +25,10 @@ export const api = {
   compareRecordings: (ids: T.Id[]) => call<{ id: T.Id; known: boolean; coverage: number; error: number; same: boolean }[]>("recordings_compare", { ids }),
   /** Removes recordings from the library with the versions playing them (files stay on disk). */
   removeRecordings: (ids: T.Id[]) => call<void>("recordings_remove", { ids }),
+  /** Writes a set as a set file; its songs carry their audio's identity (hashes, Spotify, fingerprint). */
+  exportSetlist: (id: T.Id, path: string) => call<void>("setlist_export", { id, path }),
+  /** Adds a set from a set file, linking its songs to this library's audio. */
+  importSetlist: (path: string) => call<{ setlistId: T.Id; linked: number; spotify: number; missing: number }>("setlist_import", { path }),
   /** Takes one file out of the library (a recording with other files keeps them; files stay on disk). */
   removeAudioFile: (hash: string) => call<void>("audio_file_remove", { hash }),
   /** Recordings here that sound the same as missing audio songs still play. */

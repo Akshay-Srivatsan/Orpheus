@@ -624,6 +624,60 @@ impl Store {
         }
     }
 
+    /// The recording with this audio: the same file (hash), Spotify track, or
+    /// fingerprint (the same version in any encoding; not an edit).
+    pub fn find_recording(&self, hashes: &[String], spotify: &[String], fingerprint: Option<&str>) -> Option<Id> {
+        for h in hashes {
+            if let Some(r) = self.recording_for_source(&SourceRef { kind: "file".into(), key: h.clone() }) {
+                return Some(r);
+            }
+        }
+        for s in spotify {
+            let uri = crate::spotify::normalize_uri(s).unwrap_or_else(|| s.clone());
+            if let Some(r) = self.recording_for_source(&SourceRef { kind: "spotify".into(), key: uri }) {
+                return Some(r);
+            }
+        }
+        let want = crate::fingerprint::decode(fingerprint?).ok()?;
+        let item = crate::fingerprint::item_secs();
+        let inner = self.inner.read();
+        let mut ids: Vec<&Id> = inner.recordings.keys().collect();
+        ids.sort();
+        ids.into_iter()
+            .find(|id| {
+                let Some(fp) = inner.recordings[*id].fingerprint.as_deref().and_then(|f| crate::fingerprint::decode(f).ok()) else { return false };
+                (fp.len() as f64 - want.len() as f64).abs() * item <= crate::fingerprint::SAME_VERSION_LENGTH_SECS && crate::fingerprint::same_version(&fp, &want)
+            })
+            .cloned()
+    }
+
+    /// A recording for audio this library doesn't have (e.g. from a set
+    /// file): its files and Spotify tracks, fingerprint and length. It plays
+    /// once one of them is here; a file that sounds the same is offered for it.
+    pub fn insert_missing_recording(&self, song: &crate::setfile::SetSong) -> Result<Id> {
+        let mut sources: Vec<SourceRef> = song.hash.iter().map(|h| SourceRef { kind: "file".into(), key: h.clone() }).collect();
+        sources.extend(song.spotify.iter().map(|s| SourceRef { kind: "spotify".into(), key: crate::spotify::normalize_uri(s).unwrap_or_else(|| s.clone()) }));
+        let id = match sources.first() {
+            Some(s) => self.free_recording_id(s),
+            None => new_id(),
+        };
+        let rec = RecordingRecord {
+            id: id.clone(),
+            title: song.title.clone(),
+            artist: song.artist.clone(),
+            duration_ms: song.length.map(|l| (l * 1000.0) as i64).unwrap_or(0),
+            fingerprint: song.fingerprint.clone(),
+            added_at: now_ms(),
+            sources,
+            ..Default::default()
+        };
+        self.save_recording(&rec)?;
+        let mut inner = self.inner.write();
+        inner.reindex_recording(&rec);
+        inner.recordings.insert(id.clone(), rec);
+        Ok(id)
+    }
+
     /// Recordings here that sound the same as missing ones that songs still
     /// play (fingerprints: the same version, any encoding; not an edit).
     /// `only` limits the candidates (e.g. a recording just analysed).

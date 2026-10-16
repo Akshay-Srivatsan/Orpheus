@@ -13,6 +13,7 @@ pub mod library;
 pub mod midi;
 pub mod model;
 pub mod perform;
+pub mod setfile;
 pub mod settings;
 pub mod spotify;
 pub mod stems;
@@ -186,6 +187,8 @@ pub fn run() {
             commands::audio_file_remove,
             commands::reconnect_matches,
             commands::reconnect,
+            commands::setlist_export,
+            commands::setlist_import,
             commands::library_files,
             commands::library_add_files,
             commands::version_create,

@@ -222,6 +222,33 @@ pub async fn reconnect(app: S<'_>, missing: Id, found: Id) -> Res<()> {
     Ok(())
 }
 
+/// Writes a set as a set file (`*.orpheus-set.toml`).
+#[tauri::command]
+pub async fn setlist_export(app: S<'_>, id: Id, path: String) -> Res<()> {
+    let club_name = app.store.setlist(&id).ok().and_then(|s| s.club).and_then(|c| app.club(&c)).map(|c| c.name.clone());
+    let text = crate::setfile::export(&app.store, &id, club_name).map_err(ae)?;
+    crate::store::write_atomic(std::path::Path::new(&path), text.as_bytes()).map_err(ae)
+}
+
+/// Adds a set from a set file, linking its songs to the library's audio.
+#[tauri::command]
+pub async fn setlist_import(app: S<'_>, path: String) -> Res<crate::setfile::ImportReport> {
+    let text = std::fs::read_to_string(&path).map_err(err)?;
+    let file: crate::setfile::SetFile = toml::from_str(&text).map_err(|e| format!("Not an Orpheus set file: {e}"))?;
+    // Its club, if you have it: that version of its guidelines, else the latest.
+    let club = file.club.as_ref().and_then(|c| {
+        let clubs = app.clubs();
+        let have = clubs.club(&c.id, Some(&c.version)).is_ok();
+        let version = if have { Some(c.version.clone()) } else { clubs.latest(&c.id) };
+        version.map(|v| ClubRef { id: c.id.clone(), version: v })
+    });
+    let report = crate::setfile::import(&app.store, &text, club).map_err(ae)?;
+    crate::app::emit(&app.handle, "setlists-changed", ());
+    crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
+    crate::app::emit(&app.handle, "recordings-changed", ());
+    Ok(report)
+}
+
 /// The audio files in the library folders, with what each is in the library.
 #[tauri::command]
 pub async fn library_files(app: S<'_>) -> Res<Vec<LibraryFile>> {
