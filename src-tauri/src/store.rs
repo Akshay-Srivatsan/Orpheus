@@ -96,6 +96,47 @@ struct Inner {
     excluded: Excluded,
 }
 
+/// The library's songs, recordings, setlists and crates at one moment (see
+/// `Store::undo_point`).
+#[derive(Default)]
+pub struct Snapshot {
+    tracks: HashMap<Id, TrackRecord>,
+    recordings: HashMap<Id, RecordingRecord>,
+    setlists: HashMap<Id, Setlist>,
+    crates: HashMap<Id, Crate>,
+}
+
+/// What an action changed, as it was before (`None`: it didn't exist):
+/// `Store::undo` puts it back.
+#[derive(Default)]
+pub struct UndoPoint {
+    tracks: HashMap<Id, Option<TrackRecord>>,
+    recordings: HashMap<Id, Option<RecordingRecord>>,
+    setlists: HashMap<Id, Option<Setlist>>,
+    crates: HashMap<Id, Option<Crate>>,
+}
+
+impl UndoPoint {
+    pub fn is_empty(&self) -> bool {
+        self.tracks.is_empty() && self.recordings.is_empty() && self.setlists.is_empty() && self.crates.is_empty()
+    }
+}
+
+/// The objects that differ between `before` and `now`, as they were before.
+fn changed<T: Serialize + Clone>(before: &HashMap<Id, T>, now: &HashMap<Id, T>) -> HashMap<Id, Option<T>> {
+    let json = |t: &T| serde_json::to_string(t).ok();
+    let mut out: HashMap<Id, Option<T>> = HashMap::new();
+    for (id, b) in before {
+        if now.get(id).map_or(true, |n| json(n) != json(b)) {
+            out.insert(id.clone(), Some(b.clone()));
+        }
+    }
+    for id in now.keys().filter(|id| !before.contains_key(*id)) {
+        out.insert(id.clone(), None);
+    }
+    out
+}
+
 pub struct Store {
     lib: RwLock<PathBuf>,
     local: PathBuf,
@@ -200,6 +241,24 @@ impl Inner {
     fn reindex_setlist(&mut self, s: &Setlist) {
         for e in &s.entries {
             self.entry_owner.insert(e.id.clone(), s.id.clone());
+        }
+    }
+
+    /// Rebuilds the lookups derived from songs, recordings and setlists.
+    fn rebuild_indexes(&mut self) {
+        self.version_owner.clear();
+        self.alias.clear();
+        self.source_owner.clear();
+        self.rec_alias.clear();
+        self.entry_owner.clear();
+        for t in self.tracks.values().cloned().collect::<Vec<_>>() {
+            self.reindex_track(&t);
+        }
+        for r in self.recordings.values().cloned().collect::<Vec<_>>() {
+            self.reindex_recording(&r);
+        }
+        for s in self.setlists.values().cloned().collect::<Vec<_>>() {
+            self.reindex_setlist(&s);
         }
     }
 
@@ -816,6 +875,60 @@ impl Store {
 
     fn save_crate(&self, c: &Crate) -> Result<()> {
         write_json(&self.lib_path("crates", &c.id), c)
+    }
+
+    /// Remembers the library before an action, to make an undo point of it.
+    pub fn snapshot(&self) -> Snapshot {
+        let inner = self.inner.read();
+        Snapshot {
+            tracks: inner.tracks.clone(),
+            recordings: inner.recordings.clone(),
+            setlists: inner.setlists.clone(),
+            crates: inner.crates.clone(),
+        }
+    }
+
+    /// What changed since `before`, to undo.
+    pub fn undo_point(&self, before: Snapshot) -> UndoPoint {
+        let inner = self.inner.read();
+        UndoPoint {
+            tracks: changed(&before.tracks, &inner.tracks),
+            recordings: changed(&before.recordings, &inner.recordings),
+            setlists: changed(&before.setlists, &inner.setlists),
+            crates: changed(&before.crates, &inner.crates),
+        }
+    }
+
+    /// Puts back what an action changed (and removes what it made).
+    pub fn undo(&self, p: UndoPoint) -> Result<()> {
+        fn put<T>(map: &mut HashMap<Id, T>, id: &Id, v: Option<T>, save: impl Fn(&T) -> Result<()>, path: PathBuf) -> Result<()> {
+            match v {
+                Some(v) => {
+                    save(&v)?;
+                    map.insert(id.clone(), v);
+                }
+                None => {
+                    map.remove(id);
+                    let _ = fs::remove_file(path);
+                }
+            }
+            Ok(())
+        }
+        let mut inner = self.inner.write();
+        for (id, v) in p.tracks {
+            put(&mut inner.tracks, &id, v, |t| self.save_track(t), self.lib_path("tracks", &id))?;
+        }
+        for (id, v) in p.recordings {
+            put(&mut inner.recordings, &id, v, |r| self.save_recording(r), self.lib_path("recordings", &id))?;
+        }
+        for (id, v) in p.setlists {
+            put(&mut inner.setlists, &id, v, |s| self.save_setlist(s), self.lib_path("setlists", &id))?;
+        }
+        for (id, v) in p.crates {
+            put(&mut inner.crates, &id, v, |c| self.save_crate(c), self.lib_path("crates", &id))?;
+        }
+        inner.rebuild_indexes();
+        Ok(())
     }
 
     pub fn save_index(&self) -> Result<()> {
@@ -2231,6 +2344,29 @@ mod tests {
         // Survives a reload from disk.
         let store2 = Store::open(&lib, &local).unwrap();
         assert_eq!(store2.recording(&rid).unwrap().rec.detected_bpm, Some(93.1));
+        let _ = fs::remove_dir_all(lib.parent().unwrap());
+    }
+
+    #[test]
+    fn combining_can_be_undone() {
+        let (lib, local) = temp_dirs();
+        let store = Store::open(&lib, &local).unwrap();
+        let a = song(&store, "A", file("ha"));
+        let b = song(&store, "B", file("hb"));
+        let (vb, _) = first(&store, &b);
+        let before = store.snapshot();
+        store.combine_songs(&a, &[b.clone()]).unwrap();
+        assert_eq!(store.version(&vb).unwrap().1, a);
+        let p = store.undo_point(before);
+        assert_eq!(p.tracks.len(), 2, "A changed, B went");
+        store.undo(p).unwrap();
+        assert_eq!(store.track(&b).unwrap().rec.title, "B");
+        assert_eq!(store.version(&vb).unwrap().1, b, "B's version is B's again");
+        assert_eq!(store.track(&a).unwrap().rec.versions.len(), 1);
+        // And on disk.
+        let store = Store::open(&lib, &local).unwrap();
+        assert_eq!(store.track(&b).unwrap().rec.versions.len(), 1);
+        assert!(store.undo_point(store.snapshot()).is_empty());
         let _ = fs::remove_dir_all(lib.parent().unwrap());
     }
 

@@ -328,6 +328,21 @@ class AppState {
   }
 
   /** Runs an API call, showing errors as toasts. */
+  /** Runs an action (one or more calls), then offers to undo all it changed. */
+  async undoable<T>(text: string, f: () => Promise<T | undefined>): Promise<T | undefined> {
+    const id = await this.run(api.undoBegin());
+    let r: T | undefined;
+    try {
+      r = await f();
+    } finally {
+      // Offered whenever something changed, even if a later step failed.
+      if (id !== undefined && (await api.undoEnd(id).catch(() => false))) {
+        this.toast(text, "info", { label: "Undo", run: () => this.run(api.undo(id)) });
+      }
+    }
+    return r;
+  }
+
   async run<T>(p: Promise<T>): Promise<T | undefined> {
     try {
       return await p;
@@ -554,12 +569,12 @@ export function startFillingSlot(entry: SetlistEntry) {
 /** Adds an edit (a version with its own audio) to a song, with Undo. */
 export async function addEdit(audio: Parameters<typeof api.addEdit>[1], trackId: Id | null = app.pickingEdit) {
   if (!trackId) return;
-  const v = await app.run(api.addEdit(trackId, audio));
+  const name = audio.spotify?.title ?? audio.path?.split(/[/\\]/).pop() ?? app.recordingMap.get(audio.recording ?? "")?.title ?? "the edit";
+  const v = await app.undoable(`Added a version with ${name}`, () => app.run(api.addEdit(trackId, audio)));
   if (!v) return;
   if (app.pickingEdit === trackId) app.pickingEdit = null;
   app.inspectTrack = trackId;
   app.rightTab = "info";
-  app.toast(`Added the version “${v.name}”`, "info", { label: "Undo", run: () => app.run(api.deleteVersion(v.id)) });
 }
 
 export async function fillSlot(versionId: Id, slotId: Id | null = app.fillingSlot) {

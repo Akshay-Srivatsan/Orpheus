@@ -411,6 +411,23 @@ pub async fn source_remove(app: S<'_>, recording_id: Id, source: SourceRef) -> R
     app.store.recording(&recording_id).map_err(ae)
 }
 
+/// Starts an action the DJ can undo (one or more calls); returns its id.
+#[tauri::command]
+pub async fn undo_begin(app: S<'_>) -> Res<u64> {
+    Ok(app.undo_begin())
+}
+
+/// Ends it: `true` if it changed anything (so there's something to undo).
+#[tauri::command]
+pub async fn undo_end(app: S<'_>, id: u64) -> Res<bool> {
+    Ok(app.undo_end(id))
+}
+
+#[tauri::command]
+pub async fn undo(app: S<'_>, id: u64) -> Res<()> {
+    app.undo(id).map_err(ae)
+}
+
 /// Combines songs into `keep` (their versions move; undo with `versions_separate`).
 #[tauri::command]
 pub async fn songs_combine(app: S<'_>, keep: Id, others: Vec<Id>) -> Res<Track> {

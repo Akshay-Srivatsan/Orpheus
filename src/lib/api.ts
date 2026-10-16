@@ -64,6 +64,10 @@ export const api = {
   removeSource: (recordingId: T.Id, source: T.SourceRef) => call<T.Recording>("source_remove", { recordingId, source }),
   /** Combines songs into `keep` (their versions move). */
   combineSongs: (keep: T.Id, others: T.Id[]) => call<T.Track>("songs_combine", { keep, others }),
+  /** Brackets an action the DJ can undo: `undoEnd` says whether it changed anything; `undo` puts it back. */
+  undoBegin: () => call<number>("undo_begin"),
+  undoEnd: (id: number) => call<boolean>("undo_end", { id }),
+  undo: (id: number) => call<null>("undo", { id }),
   /** Moves versions of one song into a new song. */
   separateVersions: (versionIds: T.Id[]) => call<T.Track>("versions_separate", { versionIds }),
   createVersion: (trackId: T.Id, version: T.VersionPatch) => call<T.Version>("version_create", { trackId, version }),

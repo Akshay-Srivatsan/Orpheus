@@ -38,6 +38,16 @@ const DEFAULT_FADE_SECS: f64 = 5.0;
 /// Find on Spotify: candidates streamed per recording to compare fingerprints
 /// (each is a whole track), closest in length first.
 const SPOTIFY_CANDIDATES: usize = 3;
+/// Recent actions that can be undone (older ones are forgotten).
+const UNDO_KEPT: usize = 10;
+
+/// Actions being made (the library before them) and made (what they changed).
+#[derive(Default)]
+pub struct UndoBook {
+    next: u64,
+    pending: std::collections::VecDeque<(u64, crate::store::Snapshot)>,
+    done: std::collections::VecDeque<(u64, crate::store::UndoPoint)>,
+}
 
 pub struct App {
     pub handle: AppHandle,
@@ -68,6 +78,8 @@ pub struct App {
     spotify_analysed: Mutex<std::collections::HashSet<Id>>,
     /// A Find on Spotify job is running (one at a time).
     spotify_finding: std::sync::atomic::AtomicBool,
+    /// Undo points of recent actions (see `undo_begin`).
+    pub(crate) undo: Mutex<UndoBook>,
     pub(crate) takeover: Mutex<crate::controls::Takeover>,
     pub(crate) deck_ctl: Mutex<[crate::controls::DeckControlState; 2]>,
     /// Pace decks by the headphone output (set when no master device is open).
@@ -156,6 +168,7 @@ impl App {
             analysis_tx,
             spotify_analysed: Mutex::new(Default::default()),
             spotify_finding: Default::default(),
+            undo: Default::default(),
             takeover: Mutex::new(Default::default()),
             deck_ctl: Mutex::new(Default::default()),
             clock_cue,
@@ -902,6 +915,60 @@ impl App {
             }
         }
         Ok(None)
+    }
+
+    /// Starts an undoable action: remembers the library before it.
+    pub fn undo_begin(&self) -> u64 {
+        let snap = self.store.snapshot();
+        let mut u = self.undo.lock();
+        u.next += 1;
+        let id = u.next;
+        u.pending.push_back((id, snap));
+        while u.pending.len() > UNDO_KEPT {
+            u.pending.pop_front();
+        }
+        id
+    }
+
+    /// Ends it: keeps what it changed. `false` if it changed nothing.
+    pub fn undo_end(&self, id: u64) -> bool {
+        let Some(snap) = ({
+            let mut u = self.undo.lock();
+            let i = u.pending.iter().position(|(x, _)| *x == id);
+            i.and_then(|i| u.pending.remove(i)).map(|(_, s)| s)
+        }) else {
+            return false;
+        };
+        let p = self.store.undo_point(snap);
+        if p.is_empty() {
+            return false;
+        }
+        let mut u = self.undo.lock();
+        u.done.push_back((id, p));
+        while u.done.len() > UNDO_KEPT {
+            u.done.pop_front();
+        }
+        true
+    }
+
+    /// Undoes an action (once).
+    pub fn undo(&self, id: u64) -> Result<()> {
+        let p = {
+            let mut u = self.undo.lock();
+            let i = u.done.iter().position(|(x, _)| *x == id).ok_or_else(|| anyhow!("that can't be undone any more"))?;
+            u.done.remove(i).map(|(_, p)| p).ok_or_else(|| anyhow!("that can't be undone any more"))?
+        };
+        self.store.undo(p)?;
+        // Recordings back without their waveform are analysed again.
+        for id in self.store.needs_analysis() {
+            self.queue_analysis(id, false);
+        }
+        for ev in ["setlists-changed", "crates-changed", "recordings-changed"] {
+            emit(&self.handle, ev, ());
+        }
+        emit(&self.handle, "library-changed", Vec::<Id>::new());
+        self.emit_perform();
+        Ok(())
     }
 
     /// Analyses a recording (from its file, else from Spotify).

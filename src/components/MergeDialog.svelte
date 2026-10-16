@@ -79,33 +79,37 @@
   async function merge() {
     busy = true;
     try {
-      if (sameRecording) {
-        // Hot cues come from the kept recording: keep the chosen one's by keeping it.
-        const kept = recordings.find((r) => r.id === picks["cues"]) ?? recordings[0];
-        const from = (f: string) => recordings.find((r) => r.id === (picks[f] ?? recordings[0].id))!;
-        const patch: RecordingPatch = {};
-        if (has("bpm")) { patch.bpm = from("bpm").bpm; patch.bpmSource = from("bpm").bpmSource ?? "user"; }
-        if (has("meter")) patch.beatsPerBar = from("meter").beatsPerBar ?? null;
-        if (has("gainDb")) patch.gainDb = from("gainDb").gainDb ?? 0;
-        const ok = await app.run(api.mergeRecordings(kept.id, recordings.filter((r) => r.id !== kept.id).map((r) => r.id)));
-        if (!ok) return;
-        if (Object.keys(patch).length) await app.run(api.updateRecording(kept.id, patch));
-      }
-      if (songs.length > 1) {
-        const [keep, ...others] = songs;
-        const from = (f: string) => songs.find((t) => t.id === (picks[f] ?? keep.id))!;
-        const patch: TrackPatch = {};
-        if (has("title")) patch.title = from("title").title;
-        if (has("artist")) patch.artist = from("artist").artist;
-        if (has("album")) patch.album = from("album").album;
-        if (has("genre")) patch.genre = from("genre").genre ?? "";
-        if (has("rating")) patch.rating = from("rating").rating;
-        if (has("notes")) patch.notes = from("notes").notes ?? "";
-        const ok = await app.run(api.combineSongs(keep.id, others.map((t) => t.id)));
-        if (!ok) return;
-        if (Object.keys(patch).length) await app.run(api.updateTrack(keep.id, patch));
-      }
-      app.mergeDialog = null;
+      const what = sameRecording ? "Combined as the same audio" : `Combined ${songs.length} songs`;
+      const done = await app.undoable(what, async () => {
+        if (sameRecording) {
+          // Hot cues come from the kept recording: keep the chosen one's by keeping it.
+          const kept = recordings.find((r) => r.id === picks["cues"]) ?? recordings[0];
+          const from = (f: string) => recordings.find((r) => r.id === (picks[f] ?? recordings[0].id))!;
+          const patch: RecordingPatch = {};
+          if (has("bpm")) { patch.bpm = from("bpm").bpm; patch.bpmSource = from("bpm").bpmSource ?? "user"; }
+          if (has("meter")) patch.beatsPerBar = from("meter").beatsPerBar ?? null;
+          if (has("gainDb")) patch.gainDb = from("gainDb").gainDb ?? 0;
+          const ok = await app.run(api.mergeRecordings(kept.id, recordings.filter((r) => r.id !== kept.id).map((r) => r.id)));
+          if (!ok) return undefined;
+          if (Object.keys(patch).length) await app.run(api.updateRecording(kept.id, patch));
+        }
+        if (songs.length > 1) {
+          const [keep, ...others] = songs;
+          const from = (f: string) => songs.find((t) => t.id === (picks[f] ?? keep.id))!;
+          const patch: TrackPatch = {};
+          if (has("title")) patch.title = from("title").title;
+          if (has("artist")) patch.artist = from("artist").artist;
+          if (has("album")) patch.album = from("album").album;
+          if (has("genre")) patch.genre = from("genre").genre ?? "";
+          if (has("rating")) patch.rating = from("rating").rating;
+          if (has("notes")) patch.notes = from("notes").notes ?? "";
+          const ok = await app.run(api.combineSongs(keep.id, others.map((t) => t.id)));
+          if (!ok) return undefined;
+          if (Object.keys(patch).length) await app.run(api.updateTrack(keep.id, patch));
+        }
+        return true;
+      });
+      if (done) app.mergeDialog = null;
     } finally {
       busy = false;
     }

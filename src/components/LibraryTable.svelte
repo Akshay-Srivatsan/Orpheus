@@ -380,7 +380,7 @@
     }
     // Versions of one song that has others: they can become a song of their own.
     if (songs.length === 1 && rows[0].track.versions.length > rows.length) {
-      items.push({ label: rows.length > 1 ? "Separate into Their Own Song" : "Separate into Its Own Song", action: () => app.run(api.separateVersions(rows.map((r) => r.version.id))) });
+      items.push({ label: rows.length > 1 ? "Separate into Their Own Song" : "Separate into Its Own Song", action: () => app.undoable(rows.length > 1 ? "Separated into their own song" : "Separated into its own song", () => app.run(api.separateVersions(rows.map((r) => r.version.id)))) });
     }
     return items;
   }

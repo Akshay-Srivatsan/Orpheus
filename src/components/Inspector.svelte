@@ -128,9 +128,10 @@
   function splitMenu(ev: MouseEvent, rec: Recording, src: SourceRef) {
     const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
     const playing = (track?.versions ?? []).filter((v) => v.recording === rec.id);
-    const split = (versions: Id[]) => app.run(api.splitSource(rec.id, src, versions));
+    const split = (versions: Id[], newSong = false) =>
+      app.undoable(newSong ? "Split off as a song of its own" : "Split off as audio of its own", () => app.run(api.splitSource(rec.id, src, versions, newSong)));
     const items: MenuItem[] = [
-      { label: "Split Off as a Song of Its Own", action: () => app.run(api.splitSource(rec.id, src, [], true)) },
+      { label: "Split Off as a Song of Its Own", action: () => split([], true) },
       ...playing.map((v) => ({ label: `Split Off for Version “${v.name}”`, action: () => split([v.id]) })),
     ];
     clubMenu = { x: r.left, y: r.bottom + 2, items };
