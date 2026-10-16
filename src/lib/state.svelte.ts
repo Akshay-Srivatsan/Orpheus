@@ -6,7 +6,7 @@ import type {
   Crate, DeckState, Id, Levels, TtsStatus, LibraryInfo, StemsStatus, OutputStatus, PerformState, Row, ScanProgress, Setlist, Club, ClubInfo, ClubRef,
   NewEntry, SetlistEntry, SetlistSummary, Settings, SpotifyStatus, StyleDef, StylesInfo, Track, Version,
 } from "./types";
-import { recordingOf, rowsOf } from "./types";
+import { primaryVersion, recordingOf, rowsOf } from "./types";
 import { NEUTRAL, clubContext, myStyle, mineShown, prettify, shownStyles, songFacts, styleDef, type ClubContext, type Shown } from "./styles";
 import { assess } from "./clubs";
 import { resolveSettings, type ClubStyleOf } from "./tempo";
@@ -510,7 +510,7 @@ export async function addToSet(versionIds: Id[], where: "next" | "end" | number)
 export async function spotifyVersions(tracks: import("./types").SpotifyTrack[], inLibrary: boolean): Promise<Id[]> {
   const ids = (await app.run(api.spotifyImport(tracks, inLibrary))) ?? [];
   await app.reloadTracks(ids);
-  return ids.map((id) => app.trackMap.get(id)?.versions[0]?.id).filter(Boolean) as Id[];
+  return ids.map((id) => { const t = app.trackMap.get(id); return t && primaryVersion(t)?.id; }).filter(Boolean) as Id[];
 }
 
 /** Loads a version onto the free deck and plays it in the headphones. */

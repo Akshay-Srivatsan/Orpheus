@@ -577,6 +577,15 @@ impl Store {
             if let Some(v) = &p.genre { t.genre = v.clone(); }
             if let Some(v) = &p.rating { t.rating = *v; }
             if let Some(v) = &p.notes { t.notes = v.clone(); }
+            if let Some(v) = &p.primary {
+                if let Some(id) = v {
+                    if !t.versions.iter().any(|x| &x.id == id) {
+                        return Err(anyhow!("that version isn't one of this song's"));
+                    }
+                }
+                // The first version is the primary anyway: no need to name it.
+                t.primary = v.clone().filter(|id| t.versions.first().map(|f| &f.id) != Some(id));
+            }
             Ok(())
         })
     }
@@ -656,6 +665,9 @@ impl Store {
                 }
             }
             t.versions = kept;
+            if let Some(k) = t.primary.as_ref().and_then(|p| into.get(p)) {
+                t.primary = Some(k.clone());
+            }
             Ok(())
         })?;
         if into.is_empty() {
@@ -714,9 +726,14 @@ impl Store {
         let moved: Vec<Version> = song.rec.versions.iter().filter(|v| version_ids.contains(&v.id)).cloned().collect();
         self.with_track(&tid, |t| {
             t.versions.retain(|v| !version_ids.contains(&v.id));
+            if t.primary.as_ref().is_some_and(|p| version_ids.contains(p)) {
+                t.primary = None;
+            }
             Ok(())
         })?;
+        let primary = song.rec.primary.clone().filter(|p| version_ids.contains(p));
         let new = TrackRecord {
+            primary,
             id: new_id(),
             title: r.title,
             artist: r.artist,
@@ -1231,6 +1248,9 @@ impl Store {
                 return Err(anyhow!("a song needs at least one version"));
             }
             t.versions.retain(|v| v.id != id);
+            if t.primary.as_deref() == Some(id) {
+                t.primary = None;
+            }
             Ok(())
         })?;
         let mut inner = self.inner.write();
@@ -2003,12 +2023,18 @@ mod tests {
         assert_eq!(store.all_tracks().len(), 1);
         assert!(store.separate_versions(&t.rec.versions.iter().map(|v| v.id.clone()).collect::<Vec<_>>()).is_err(), "one must stay");
 
+        // A primary version: kept by the song, and by the version when separated.
+        store.update_track(&a, &TrackPatch { primary: Some(Some(vb.clone())), ..Default::default() }).unwrap();
+        assert_eq!(store.track(&a).unwrap().rec.primary, Some(vb.clone()));
+        assert!(store.update_track(&a, &TrackPatch { primary: Some(Some("nope".into())), ..Default::default() }).is_err());
         // Undone: the edit is a song again, named after its recording.
         let back = store.separate_versions(&[vb.clone()]).unwrap();
         let t = store.track(&back).unwrap();
         assert_eq!(t.rec.title, "Barbie (Lucas edit)");
         assert_eq!(t.recordings[0].rec.id, rb);
         assert_eq!(store.version(&vb).unwrap().1, back);
+        assert_eq!(store.track(&a).unwrap().rec.primary, None, "the primary left with it");
+        assert_eq!(store.track(&back).unwrap().rec.primary, Some(vb.clone()));
         let _ = fs::remove_dir_all(lib.parent().unwrap());
     }
 

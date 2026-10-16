@@ -8,7 +8,7 @@
   import { allSongs, emptyClub, fmtSecs, hasCriteria, type Club, type ClubGroup, type ClubRule, type ClubStyle, type ClubTag, type Range } from "../lib/clubs";
   import { app, confirmAction, versionDate } from "../lib/state.svelte";
   import { NEUTRAL } from "../lib/styles";
-  import type { ClubInfo, ClubVersionInfo } from "../lib/types";
+  import { primaryVersion, type ClubInfo, type ClubVersionInfo } from "../lib/types";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
   import Icon from "./Icon.svelte";
   import RangeInput from "./RangeInput.svelte";
@@ -222,9 +222,11 @@
     return songs.length ? songs.map(name).join(", ") : rec ? `${name(rec)} (hidden)` : recId;
   };
 
+  const primaryOf = (trackId: string) => { const t = app.trackMap.get(trackId); return t ? primaryVersion(t)?.id : undefined; };
+
   /** Adds the song version selected in the library to a style's suggested songs. */
   async function addSelectedSong(styleId: string) {
-    const vid = app.selected[app.selected.length - 1] ?? (app.inspectTrack ? app.trackMap.get(app.inspectTrack)?.versions[0]?.id : undefined);
+    const vid = app.selected[app.selected.length - 1] ?? (app.inspectTrack ? primaryOf(app.inspectTrack) : undefined);
     if (!vid) {
       app.toast("Select a song in the library first.", "info");
       return;

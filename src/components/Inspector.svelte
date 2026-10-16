@@ -4,7 +4,7 @@
   import { api } from "../lib/api";
   import { app, audition, confirmAction } from "../lib/state.svelte";
   import { fmtBpm, fmtTime, foldBpm, playback, playedDurationMs, rateToFit, resolveSettings, styleCenter } from "../lib/tempo";
-  import { recordingOf, type Id, type Overrides, type Recording, type RecordingPatch, type SetlistEntry, type SourceRef, type Track, type Version } from "../lib/types";
+  import { primaryVersion, recordingOf, type Id, type Overrides, type Recording, type RecordingPatch, type SetlistEntry, type SourceRef, type Track, type Version } from "../lib/types";
   import Icon from "./Icon.svelte";
   import StyleChips from "./StyleChips.svelte";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
@@ -318,6 +318,11 @@
           {@const vrec = recordingOf(track, v)}
           <div class="version" class:hl={app.selected.includes(v.id) || entry?.versionId === v.id} style:--c={app.styleColor(v.styles?.[0])}>
             <div class="vhead">
+              {#if track.versions.length > 1}
+                {@const isPrimary = primaryVersion(track)?.id === v.id}
+                <button class="plain icon star" class:on={isPrimary} title={isPrimary ? "The primary version: it stands for the song in the library" : "Make this the primary version"}
+                  disabled={isPrimary} onclick={() => patchTrack({ primary: v.id })}>{isPrimary ? "★" : "☆"}</button>
+              {/if}
               <input type="text" class="vname" value={v.name} onchange={(e) => patchVersion(v, { name: e.currentTarget.value })} />
               <button class="plain icon" title="Preview this version on the free deck" onclick={() => audition(v.id)}><Icon name="headphones" size={13} /></button>
               <button class="plain icon" title="Duplicate" onclick={() => duplicateVersion(v)}><Icon name="copy" size={13} /></button>
@@ -557,6 +562,8 @@
   .version.hl { outline: 1px solid var(--blue); }
   .vhead { display: flex; gap: 4px; align-items: center; }
   .vname { flex: 1; font-weight: 600; }
+  .star { color: var(--text-faint); font-size: 14px; }
+  .star.on { color: var(--yellow); opacity: 1; }
   .tags { display: flex; flex-wrap: wrap; gap: 4px; }
   .tagbtn { cursor: pointer; height: 20px; }
   .tagbtn.off { opacity: 0.4; filter: grayscale(0.7); }

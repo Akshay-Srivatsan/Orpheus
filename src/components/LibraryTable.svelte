@@ -2,7 +2,7 @@
   import { api, on } from "../lib/api";
   import { evaluate } from "../lib/smart";
   import { NO_STYLE, addToSet, app, audition, confirmAction, fillSlot, loadDeck } from "../lib/state.svelte";
-  import { rowsOf, type SetlistEntry } from "../lib/types";
+  import { primaryVersion, rowsOf, type SetlistEntry } from "../lib/types";
   import { fmtBpm, fmtPct, fmtTime, playback, playedDurationMs, tempoFit } from "../lib/tempo";
   import type { HistoryItem, Id, Row } from "../lib/types";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
@@ -67,7 +67,7 @@
         return history.flatMap((h, i) => {
           const r = h.versionId ? app.versionMap.get(h.versionId) : undefined;
           const t = app.trackMap.get(h.trackId);
-          const row = r ?? (t ? rowsOf(t)[0] : undefined);
+          const row = r ?? (t ? rowsOf(t).find((x) => x.version.id === primaryVersion(t)?.id) : undefined);
           return row ? [mk(row, { key: `${h.entryId}-${i}`, playedAt: h.playedAt, historyEntryId: h.entryId })] : [];
         });
       default:
@@ -158,9 +158,12 @@
     const out: Item[] = [];
     for (const g of groups.values()) {
       if (g.length === 1) { out.push(g[0]); continue; }
-      const open = isOpen(g[0].r.track.id);
-      out.push({ ...g[0], fold: { count: g.length, open } });
-      if (open) for (const x of g.slice(1)) out.push({ ...x, child: true });
+      // The primary version stands for the song (if it's among those shown), the rest in this order.
+      const p = primaryVersion(g[0].r.track)?.id;
+      const head = g.find((x) => x.r.version.id === p) ?? g[0];
+      const open = isOpen(head.r.track.id);
+      out.push({ ...head, fold: { count: g.length, open } });
+      if (open) for (const x of g) if (x !== head) out.push({ ...x, child: true });
     }
     return out;
   });
@@ -355,6 +358,10 @@
     if (songs.length > 1) items.push({ label: "Combine (Same Song)…", action: () => (app.mergeDialog = { songs, recordings: [] }) });
     // The same audio is the same song too (a version can be separated again, keeping the recording).
     if (recs.length > 1) items.push({ label: "Combine (Same Recording)…", action: () => (app.mergeDialog = { songs, recordings: recs }) });
+    // One version of a song with several: it can stand for the song.
+    if (rows.length === 1 && rows[0].track.versions.length > 1 && primaryVersion(rows[0].track)?.id !== rows[0].version.id) {
+      items.push({ label: "Make Primary Version", action: () => app.run(api.updateTrack(rows[0].track.id, { primary: rows[0].version.id })) });
+    }
     // Versions of one song that has others: they can become a song of their own.
     if (songs.length === 1 && rows[0].track.versions.length > rows.length) {
       items.push({ label: rows.length > 1 ? "Separate into Their Own Song" : "Separate into Its Own Song", action: () => app.run(api.separateVersions(rows.map((r) => r.version.id))) });
@@ -439,7 +446,7 @@
             {r.track.title}
           </span>
           <span class="c artist" title={r.track.artist}>{r.track.artist}</span>
-          <span class="c version faint" title={r.version.comment ?? ""}>{app.versionLabel(r.version, r.track)}</span>
+          <span class="c version faint" title={r.version.comment ?? ""}>{#if r.track.versions.length > 1 && primaryVersion(r.track)?.id === r.version.id}<span class="primary" title="Primary version">★</span>{/if}{app.versionLabel(r.version, r.track)}</span>
           <span class="c style">{#if r.suggested}<span class="sugg">tempo fits</span>{:else}<StyleBadge styles={(r.version.styles ?? []).map((k) => app.mine(k))} short />{/if}</span>
           <span class="c bpm num" class:fit-sweet={fit === "sweet"} class:fit-out={fit === "outside"}>
             {fmtBpm(inf.pb.target ?? r.rec.bpm)}
@@ -505,6 +512,7 @@
   /* The disclosure slot: the same width on every row, so titles line up. */
   .fold, .fold-pad { width: 26px; min-width: 26px; flex: none; }
   .fold { padding: 0; height: 16px; justify-content: flex-start; color: var(--text-dim); font-size: 10px; gap: 1px; }
+  .primary { color: var(--yellow); margin-right: 3px; font-size: 10px; }
   .fold .n { font-size: var(--fs-xs); color: var(--text-faint); font-variant-numeric: tabular-nums; }
   .fold-pad { display: inline-block; }
   .indent { display: inline-block; width: 16px; flex: none; }

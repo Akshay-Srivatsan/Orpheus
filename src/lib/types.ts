@@ -90,6 +90,8 @@ export interface Track {
   notes?: string;
   addedAt: number;
   versions: Version[];
+  /** The version that stands for the song (folded rows, default choice); absent: the first. Use `primaryVersion`. */
+  primary?: Id | null;
   aliases?: Id[];
   /** false = used only in setlists (e.g. a Spotify song added straight to a set). Absent = true. */
   inLibrary?: boolean;
@@ -101,7 +103,12 @@ export interface Track {
   lastPlayedAt: number | null;
 }
 
-export type TrackPatch = Partial<Pick<Track, "title" | "artist" | "album" | "genre" | "rating" | "notes">>;
+export type TrackPatch = Partial<Pick<Track, "title" | "artist" | "album" | "genre" | "rating" | "notes" | "primary">>;
+
+/** A song's primary version: the one chosen, else the first. */
+export function primaryVersion(track: Track): Version | undefined {
+  return track.versions.find((v) => v.id === track.primary) ?? track.versions[0];
+}
 
 export type RecordingPatch = Partial<Pick<Recording, "bpm" | "bpmSource" | "beatsPerBar" | "gainDb" | "preferredSource">>;
 

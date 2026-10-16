@@ -333,6 +333,10 @@ pub struct TrackRecord {
     pub notes: String,
     pub added_at: i64,
     pub versions: Vec<Version>,
+    /// The version that stands for the song (folded library rows, songs
+    /// added without a version chosen); absent: the first.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary: Option<Id>,
     /// IDs of songs combined into this one (keeps history references valid).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<Id>,
@@ -442,6 +446,9 @@ pub struct TrackPatch {
     #[serde(default, with = "double_option")]
     pub rating: Option<Option<i64>>,
     pub notes: Option<String>,
+    /// The primary version (`null`: the first).
+    #[serde(default, with = "double_option")]
+    pub primary: Option<Option<Id>>,
 }
 
 /// Partial update for a recording. Missing fields are left alone; `null` clears.
