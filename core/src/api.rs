@@ -1494,6 +1494,58 @@ pub fn midi_learn_cancel(app: &Arc<App>) -> Res<()> {
     Ok(())
 }
 
+/// The mapping to change: a custom one as it is, a built-in one as a custom
+/// copy (which then becomes the mapping in use).
+fn editable_mapping(app: &Arc<App>, settings: &Settings, id: &str) -> Res<Mapping> {
+    let m = app.all_mappings_with(settings).into_iter().find(|m| m.id == id).ok_or("No such mapping")?;
+    if !m.builtin {
+        return Ok(m);
+    }
+    let stamp = crate::model::now_ms();
+    Ok(Mapping { id: format!("{}-custom-{stamp:x}", m.id), name: format!("{} (custom)", m.name), builtin: false, ..m })
+}
+
+fn save_mapping(app: &Arc<App>, mut settings: Settings, m: Mapping) -> Res<String> {
+    let id = m.id.clone();
+    settings.midi.custom_mappings.retain(|x| x.id != id);
+    settings.midi.custom_mappings.push(m);
+    settings.midi.mapping_id = id.clone();
+    settings_set(app, settings)?;
+    Ok(id)
+}
+
+/// Sets a control of a mapping (`index`: replace it; none: add it). Editing a
+/// built-in mapping makes a custom copy. Returns the mapping's id.
+pub fn midi_control_set(app: &Arc<App>, mapping_id: String, index: Option<usize>, control: crate::midi::Control) -> Res<String> {
+    let settings = app.settings.read().clone();
+    let mut m = editable_mapping(app, &settings, &mapping_id)?;
+    match index {
+        Some(i) if i < m.controls.len() => m.controls[i] = control,
+        _ => m.controls.push(control),
+    }
+    save_mapping(app, settings, m)
+}
+
+/// Removes a control from a mapping (a built-in one is copied first). Returns the mapping's id.
+pub fn midi_control_remove(app: &Arc<App>, mapping_id: String, index: usize) -> Res<String> {
+    let settings = app.settings.read().clone();
+    let mut m = editable_mapping(app, &settings, &mapping_id)?;
+    if index < m.controls.len() {
+        m.controls.remove(index);
+    }
+    save_mapping(app, settings, m)
+}
+
+/// Deletes one of your mappings (back to automatic).
+pub fn midi_mapping_delete(app: &Arc<App>, mapping_id: String) -> Res<()> {
+    let mut settings = app.settings.read().clone();
+    settings.midi.custom_mappings.retain(|m| m.id != mapping_id);
+    if settings.midi.mapping_id == mapping_id {
+        settings.midi.mapping_id = String::new();
+    }
+    settings_set(app, settings)
+}
+
 /// Lets the UI trigger the same actions as a controller (used by keyboard shortcuts).
 pub fn midi_action(app: &Arc<App>, action: String, value: Option<f64>, delta: Option<i32>) -> Res<()> {
     let v = match (value, delta) {
@@ -1705,6 +1757,471 @@ pub fn version_fit_tempo(app: &Arc<App>, id: Id) -> Res<Version> {
     version_update(app, id, serde_json::json!({ "targetBpm": target }))
 }
 
+// ---------------------------------------------------------------- styles & tags settings
+
+/// A style or tag key songs carry that isn't in your list, and how many versions carry it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyUse {
+    pub key: String,
+    pub name: String,
+    pub count: usize,
+}
+
+/// Settings → Styles & Tags: your styles and tags, keys songs carry that
+/// aren't in your lists, and (for one club) what its styles are called.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StylesPage {
+    #[serde(flatten)]
+    pub info: StylesInfo,
+    pub undefined_styles: Vec<KeyUse>,
+    pub undefined_tags: Vec<KeyUse>,
+    /// The club shown, its styles, your rules for it, and the pairs that need no rule (same names).
+    pub club: Option<crate::views::Choice>,
+    pub club_styles: Vec<crate::views::StyleDef>,
+    pub rules: Vec<ClubRule>,
+    pub same_named: Vec<ClubRule>,
+    /// The club's styles not among yours (by key or name).
+    pub importable: Vec<crate::views::StyleDef>,
+}
+
+pub fn styles_page(app: &Arc<App>, club_id: Option<String>) -> Res<StylesPage> {
+    let info = styles_get(app)?;
+    let lib = &info.library;
+    let undefined = |usage: &std::collections::BTreeMap<String, usize>, known: &dyn Fn(&str) -> bool| -> Vec<KeyUse> {
+        usage
+            .iter()
+            .filter(|(k, _)| !known(k))
+            .map(|(k, n)| KeyUse { key: k.clone(), name: crate::views::prettify(k), count: *n })
+            .collect()
+    };
+    let undefined_styles = undefined(&info.usage, &|k| lib.styles.iter().any(|s| s.key == k));
+    let undefined_tags = undefined(&info.tag_usage, &|k| lib.tags.iter().any(|t| t.key == k));
+    let clubs = app.clubs().list();
+    let ci = club_id.as_deref().and_then(|id| clubs.iter().find(|c| c.id == id)).or(clubs.first());
+    let club = ci.and_then(|c| app.club(&ClubRef { id: c.id.clone(), version: c.versions.first()?.id.clone() }));
+    let club_styles: Vec<crate::views::StyleDef> = club.as_ref().map(|c| c.styles.iter().map(|(id, s)| crate::views::style_def(id, s)).collect()).unwrap_or_default();
+    let same_named = lib
+        .styles
+        .iter()
+        .flat_map(|m| club_styles.iter().filter(|c| crate::views::same_name(&c.name, &m.name)).map(|c| ClubRule { mine: m.key.clone(), club: c.key.clone() }))
+        .collect();
+    let importable = club_styles.iter().filter(|c| !lib.styles.iter().any(|s| s.key == c.key || crate::views::same_name(&s.name, &c.name))).cloned().collect();
+    Ok(StylesPage {
+        undefined_styles,
+        undefined_tags,
+        club: ci.map(|c| crate::views::Choice { id: c.id.clone(), label: c.name.clone() }),
+        rules: ci.and_then(|c| lib.club_rules.get(&c.id)).cloned().unwrap_or_default(),
+        same_named,
+        importable,
+        club_styles,
+        info,
+    })
+}
+
+/// How announcements say words (saved with your styles).
+pub fn pronunciations_save(app: &Arc<App>, list: Vec<Pronunciation>) -> Res<()> {
+    edit_styles(app, |l| l.pronunciations = list)
+}
+
+/// A new, blank item in a club's draft guidelines (`kind`: style, group,
+/// rule or tag) with an id of its own; returns the draft.
+pub fn club_add_item(mut club: Club, kind: String) -> Res<Club> {
+    fn free(taken: &[&String], base: &str) -> String {
+        let mut id = base.to_string();
+        let mut i = 2;
+        while taken.iter().any(|t| *t == &id) {
+            id = format!("{base}-{i}");
+            i += 1;
+        }
+        id
+    }
+    match kind.as_str() {
+        "style" => {
+            let id = free(&club.styles.keys().collect::<Vec<_>>(), "new-style");
+            club.styles.insert(id, club::Style { name: "New style".into(), ..Default::default() });
+        }
+        "group" => {
+            let first = club.styles.keys().next().cloned().ok_or("Add a style first")?;
+            let id = free(&club.groups.keys().collect::<Vec<_>>(), "group");
+            club.groups.insert(id, club::Group { name: "New group".into(), styles: vec![first], ..Default::default() });
+        }
+        "rule" => {
+            let id = free(&club.rules.keys().collect::<Vec<_>>(), "rule");
+            let rule = club::Rule {
+                name: "First songs".into(),
+                songs: Some(club::Range { min: Some(1.0), max: Some(NEW_RULE_SONGS) }),
+                length: Some(club::Range { min: None, max: Some(NEW_RULE_LENGTH_SECS) }),
+                ..Default::default()
+            };
+            club.rules.insert(id, rule);
+        }
+        "tag" => {
+            let id = free(&club.tags.keys().collect::<Vec<_>>(), "tag");
+            club.tags.insert(id, club::Tag { name: "New tag".into(), announce: true, ..Default::default() });
+        }
+        other => return Err(format!("unknown kind: {other}")),
+    }
+    Ok(club)
+}
+
+/// A new rule for part of the set starts as "the first 10 songs at most 3:30".
+const NEW_RULE_SONGS: f64 = 10.0;
+const NEW_RULE_LENGTH_SECS: f64 = 210.0;
+
+/// A club's suggested song as you have it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SuggestedHere {
+    pub have: bool,
+    /// The songs playing it ("Title — Artist", …).
+    pub songs: String,
+}
+
+/// For each style with suggested songs: whether you have each (in order) and as which songs.
+pub fn club_song_status(app: &Arc<App>, club_id: String, version_id: String) -> Res<HashMap<String, Vec<SuggestedHere>>> {
+    let entries = club_song_entries(app, club_id, version_id)?;
+    let tracks = app.store.all_tracks();
+    let name = |title: &str, artist: &str| if artist.is_empty() { title.to_string() } else { format!("{title} — {artist}") };
+    let label = |rec: &str| -> String {
+        let songs: Vec<String> = tracks.iter().filter(|t| t.rec.versions.iter().any(|v| v.recording == rec)).map(|t| name(&t.rec.title, &t.rec.artist)).collect();
+        if !songs.is_empty() {
+            return songs.join(", ");
+        }
+        app.store.recording(rec).map(|r| format!("{} (hidden)", name(&r.rec.title, &r.rec.artist))).unwrap_or_else(|_| rec.to_string())
+    };
+    Ok(entries
+        .into_iter()
+        .map(|(style, songs)| {
+            let here = songs.into_iter().map(|recs| SuggestedHere { have: !recs.is_empty(), songs: recs.iter().map(|r| label(r)).collect::<Vec<_>>().join("\n") }).collect();
+            (style, here)
+        })
+        .collect())
+}
+
+// ---------------------------------------------------------------- combining
+
+/// A field the songs (or audio) to combine differ in, with each one's value.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CombineField {
+    pub key: String,
+    pub label: String,
+    /// `id`: the song or audio it's from; `text`: its value; `of`: which one that is.
+    pub values: Vec<CombineValue>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CombineValue {
+    pub id: Id,
+    pub text: String,
+    pub of: String,
+}
+
+/// What combining some songs (and their audio) would do.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CombinePreview {
+    /// Their audio by fingerprint: "same", "different", "unknown" (not all analysed), or "single" (one audio).
+    pub verdict: String,
+    /// How much of it lines up (the least), and how much it differs there (the most).
+    pub coverage: f64,
+    pub error: f64,
+    /// "FLAC file + Spotify" for each audio.
+    pub sources: Vec<String>,
+    /// Song fields that differ, and audio fields that differ (when combined as the same audio).
+    pub song_fields: Vec<CombineField>,
+    pub audio_fields: Vec<CombineField>,
+}
+
+fn source_text(r: &Recording) -> String {
+    let ext = r.files.first().and_then(|p| std::path::Path::new(p).extension()).map(|e| e.to_string_lossy().to_uppercase());
+    r.rec
+        .sources
+        .iter()
+        .map(|s| if s.kind == "spotify" { "Spotify".to_string() } else { ext.as_ref().map_or("file".to_string(), |e| format!("{e} file")) })
+        .collect::<Vec<_>>()
+        .join(" + ")
+}
+
+fn differing(key: &str, label: &str, values: Vec<CombineValue>) -> Option<CombineField> {
+    let first = values.first()?.text.clone();
+    values.iter().any(|v| v.text != first).then(|| CombineField { key: key.into(), label: label.into(), values })
+}
+
+pub fn combine_preview(app: &Arc<App>, songs: Vec<Id>, recordings: Vec<Id>) -> Res<CombinePreview> {
+    let tracks: Vec<Track> = songs.iter().filter_map(|id| app.store.track(id).ok()).collect();
+    let recs: Vec<Recording> = recordings.iter().filter_map(|id| app.store.recording(id).ok()).collect();
+    let (mut verdict, mut coverage, mut error) = ("single".to_string(), 0.0, 0.0);
+    if recs.len() > 1 {
+        let m = recordings_compare(app, recordings.clone())?;
+        coverage = m.iter().map(|x| x.coverage).fold(f64::INFINITY, f64::min);
+        error = m.iter().map(|x| x.error).fold(0.0, f64::max);
+        verdict = if !m.iter().all(|x| x.known) { "unknown" } else if m.iter().all(|x| x.same) { "same" } else { "different" }.into();
+    }
+    let mut song_fields = vec![];
+    if tracks.len() > 1 {
+        let v = |f: &dyn Fn(&Track) -> String| tracks.iter().map(|t| CombineValue { id: t.rec.id.clone(), text: f(t), of: t.rec.title.clone() }).collect();
+        song_fields.extend(differing("title", "Title", v(&|t| t.rec.title.clone())));
+        song_fields.extend(differing("artist", "Artist", v(&|t| t.rec.artist.clone())));
+        song_fields.extend(differing("album", "Album", v(&|t| t.rec.album.clone())));
+        song_fields.extend(differing("genre", "Genre", v(&|t| t.rec.genre.clone())));
+        song_fields.extend(differing("rating", "Rating", v(&|t| t.rec.rating.map(|r| "★".repeat(r.max(0) as usize)).unwrap_or_default())));
+        song_fields.extend(differing("notes", "Notes", v(&|t| t.rec.notes.clone())));
+    }
+    let mut audio_fields = vec![];
+    if recs.len() > 1 {
+        let v = |f: &dyn Fn(&Recording) -> String| {
+            recs.iter().map(|r| CombineValue { id: r.rec.id.clone(), text: f(r), of: format!("{} ({})", r.rec.title, source_text(r)) }).collect()
+        };
+        audio_fields.extend(differing(
+            "bpm",
+            "BPM",
+            v(&|r| format!("{}{}", r.rec.bpm.map(crate::matching::num).unwrap_or_else(|| "–".into()), r.rec.bpm_source.as_ref().map(|s| format!(" ({s})")).unwrap_or_default())),
+        ));
+        audio_fields.extend(differing(
+            "meter",
+            "Meter",
+            v(&|r| match r.rec.beats_per_bar {
+                Some(b) => format!("{b} beats a bar{}", if r.rec.meter_source.as_deref() == Some("user") { " (set by you)" } else { "" }),
+                None => "unknown".into(),
+            }),
+        ));
+        audio_fields.extend(differing("gainDb", "Gain", v(&|r| format!("{} dB", r.rec.gain_db))));
+        audio_fields.extend(differing(
+            "cues",
+            "Hot cues",
+            v(&|r| {
+                let c: Vec<String> = r.rec.hot_cues.iter().map(|c| c.slot.to_string()).collect();
+                if c.is_empty() { "none".into() } else { c.join(", ") }
+            }),
+        ));
+    }
+    Ok(CombinePreview { verdict, coverage: if coverage.is_finite() { coverage } else { 0.0 }, error, sources: recs.iter().map(source_text).collect(), song_fields, audio_fields })
+}
+
+/// Combines songs into the first (their versions become its versions) and,
+/// with `same_audio`, their audio into one. `picks`: for each differing field,
+/// the song or audio whose value is kept (default: the first's).
+pub fn combine(app: &Arc<App>, songs: Vec<Id>, recordings: Vec<Id>, same_audio: bool, picks: HashMap<String, Id>) -> Res<()> {
+    if same_audio && recordings.len() > 1 {
+        let recs: Vec<Recording> = recordings.iter().filter_map(|id| app.store.recording(id).ok()).collect();
+        let from = |field: &str| picks.get(field).and_then(|id| recs.iter().find(|r| &r.rec.id == id)).or(recs.first());
+        // Hot cues come from the kept audio: keep the chosen one's by keeping it.
+        let kept = from("cues").map(|r| r.rec.id.clone()).ok_or("No audio to combine")?;
+        let mut patch = serde_json::Map::new();
+        if let Some(r) = picks.get("bpm").and(from("bpm")) {
+            patch.insert("bpm".into(), serde_json::json!(r.rec.bpm));
+            patch.insert("bpmSource".into(), serde_json::json!(r.rec.bpm_source.clone().unwrap_or_else(|| "user".into())));
+        }
+        if let Some(r) = picks.get("meter").and(from("meter")) {
+            patch.insert("beatsPerBar".into(), serde_json::json!(if r.rec.meter_source.as_deref() == Some("user") { r.rec.beats_per_bar } else { None }));
+        }
+        if let Some(r) = picks.get("gainDb").and(from("gainDb")) {
+            patch.insert("gainDb".into(), serde_json::json!(r.rec.gain_db));
+        }
+        recordings_merge(app, kept.clone(), recordings.iter().filter(|id| **id != kept).cloned().collect())?;
+        if !patch.is_empty() {
+            recording_update(app, kept, serde_json::Value::Object(patch))?;
+        }
+    }
+    if songs.len() > 1 {
+        let tracks: Vec<Track> = songs.iter().filter_map(|id| app.store.track(id).ok()).collect();
+        let from = |field: &str| picks.get(field).and_then(|id| tracks.iter().find(|t| &t.rec.id == id));
+        let mut patch = serde_json::Map::new();
+        if let Some(t) = from("title") { patch.insert("title".into(), serde_json::json!(t.rec.title)); }
+        if let Some(t) = from("artist") { patch.insert("artist".into(), serde_json::json!(t.rec.artist)); }
+        if let Some(t) = from("album") { patch.insert("album".into(), serde_json::json!(t.rec.album)); }
+        if let Some(t) = from("genre") { patch.insert("genre".into(), serde_json::json!(t.rec.genre)); }
+        if let Some(t) = from("rating") { patch.insert("rating".into(), serde_json::json!(t.rec.rating)); }
+        if let Some(t) = from("notes") { patch.insert("notes".into(), serde_json::json!(t.rec.notes)); }
+        let keep = songs[0].clone();
+        songs_combine(app, keep.clone(), songs[1..].to_vec())?;
+        if !patch.is_empty() {
+            track_update(app, keep, serde_json::Value::Object(patch))?;
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------- Files view
+
+/// A file in the Files view, ready to show.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileRow {
+    #[serde(flatten)]
+    pub file: LibraryFile,
+    /// Its name, and its folder within its library folder ("" at the top; none: added from elsewhere).
+    pub name: String,
+    pub folder: Option<String>,
+    /// Not in the library: removed, or (e.g. its audio now plays from Spotify) not added.
+    pub out: bool,
+    /// The songs playing it.
+    pub song_titles: Vec<crate::views::Choice>,
+    /// Its audio has another source ("file" or "spotify"), so removing this file keeps it playable.
+    pub other_source: Option<String>,
+}
+
+/// A file here that sounds like missing audio songs still play.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReconnectRow {
+    #[serde(flatten)]
+    pub found: Reconnect,
+    pub found_title: String,
+    pub song_title: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilesView {
+    pub files: Vec<FileRow>,
+    pub matches: Vec<ReconnectRow>,
+}
+
+pub fn files_view(app: &Arc<App>) -> Res<FilesView> {
+    let files = library_files(app)?;
+    let tracks = app.store.all_tracks();
+    let title = |id: &str| tracks.iter().find(|t| t.rec.id == id).map_or_else(|| id.to_string(), |t| t.rec.title.clone());
+    let rows = files
+        .into_iter()
+        .map(|f| {
+            let rel = match &f.root {
+                Some(root) if f.path.starts_with(root.as_str()) => f.path[root.len()..].trim_start_matches(['/', '\\']).to_string(),
+                _ => f.path.clone(),
+            };
+            let p = std::path::Path::new(&rel);
+            let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| rel.clone());
+            let folder = f.root.as_ref().map(|_| p.parent().map(|d| d.to_string_lossy().replace('\\', "/")).unwrap_or_default());
+            let other_source = f.recording.as_ref().and_then(|r| app.store.recording(r).ok()).and_then(|r| {
+                (r.rec.sources.len() > 1).then(|| if r.rec.sources.iter().any(|s| s.kind == "spotify") { "spotify".to_string() } else { "file".to_string() })
+            });
+            FileRow {
+                name,
+                folder,
+                out: f.removed || f.recording.is_none(),
+                song_titles: f.songs.iter().map(|id| crate::views::Choice { id: id.clone(), label: title(id) }).collect(),
+                other_source,
+                file: f,
+            }
+        })
+        .collect();
+    let rec_title = |id: &str| app.store.recording(id).map_or_else(|_| id.to_string(), |r| r.rec.title);
+    let matches = app
+        .store
+        .reconnect_matches(None)
+        .into_iter()
+        .map(|m| {
+            let song = app.store.recording(&m.missing).ok().and_then(|r| r.songs.first().cloned()).map(|s| title(&s)).unwrap_or_else(|| rec_title(&m.missing));
+            ReconnectRow { found_title: rec_title(&m.found), song_title: song, found: m }
+        })
+        .collect();
+    Ok(FilesView { files: rows, matches })
+}
+
+// ---------------------------------------------------------------- Spotify tracks
+
+/// Makes Spotify tracks playable and returns each one's version to play (its
+/// song's primary). `in_library: false`: only for sets and the decks (songs
+/// already in the library stay there).
+pub fn spotify_versions(app: &Arc<App>, tracks: Vec<SpotifyTrack>, in_library: bool) -> Res<Vec<Id>> {
+    let songs = spotify_import(app, tracks, Some(in_library))?;
+    Ok(songs
+        .iter()
+        .filter_map(|id| app.store.track(id).ok())
+        .filter_map(|t| crate::views::primary_version(&t).map(|v| v.id.clone()))
+        .collect())
+}
+
+/// Which of these Spotify tracks (by URI) are in your library.
+pub fn spotify_in_library(app: &Arc<App>, uris: Vec<String>) -> Res<Vec<bool>> {
+    Ok(uris
+        .iter()
+        .map(|uri| {
+            app.store
+                .recording_for_source(&SourceRef { kind: "spotify".into(), key: uri.clone() })
+                .is_some_and(|rid| app.store.songs_for_recording(&rid).iter().any(|s| app.store.track(s).is_ok_and(|t| t.rec.in_library)))
+        })
+        .collect())
+}
+
+/// A planned set of a playlist's songs (only in the set, not the library), opened.
+pub fn setlist_from_spotify(app: &Arc<App>, name: String, tracks: Vec<SpotifyTrack>) -> Res<usize> {
+    let versions = spotify_versions(app, tracks, false)?;
+    let club = app.settings.read().default_club.clone();
+    let set = setlist_create(app, name, "preset".into(), Some(club), None)?;
+    let n = versions.len();
+    entries_insert(app, set.id.clone(), None, versions.into_iter().map(|v| NewEntry { version_id: Some(v), ..Default::default() }).collect())?;
+    perform_open(app, Some(set.id))?;
+    Ok(n)
+}
+
+/// A key for a new style or tag: from its name, not taken yet.
+fn unique_key(name: &str, taken: &[&str]) -> String {
+    let base = club::slug(name);
+    let base = if base == "club" && !name.to_lowercase().contains("club") { "item".to_string() } else { base };
+    let mut key = base.clone();
+    let mut i = 2;
+    while taken.contains(&key.as_str()) {
+        key = format!("{base}-{i}");
+        i += 1;
+    }
+    key
+}
+
+fn edit_styles(app: &Arc<App>, change: impl FnOnce(&mut StyleLibrary)) -> Res<()> {
+    let mut lib = app.style_library();
+    change(&mut lib);
+    styles_save(app, lib)
+}
+
+/// Adds one of your styles (`key`: keep a key songs already carry). Returns its key.
+pub fn style_create(app: &Arc<App>, name: String, short: Option<String>, color: Option<String>, key: Option<String>) -> Res<String> {
+    let lib = app.style_library();
+    let taken: Vec<&str> = lib.styles.iter().map(|s| s.key.as_str()).collect();
+    let key = key.filter(|k| !taken.contains(&k.as_str())).unwrap_or_else(|| unique_key(&name, &taken));
+    let style = LibraryStyle { key: key.clone(), name, short: short.unwrap_or_default(), color: color.unwrap_or_else(|| crate::views::NEUTRAL.into()), ..Default::default() };
+    edit_styles(app, |l| l.styles.push(style))?;
+    Ok(key)
+}
+
+/// Adds one of your tags (`key`: keep a key songs already carry). Returns its key.
+pub fn tag_create(app: &Arc<App>, name: String, key: Option<String>) -> Res<String> {
+    let lib = app.style_library();
+    let taken: Vec<&str> = lib.tags.iter().map(|t| t.key.as_str()).collect();
+    let key = key.filter(|k| !taken.contains(&k.as_str())).unwrap_or_else(|| unique_key(&name, &taken));
+    let tag = LibraryTag { key: key.clone(), name, color: crate::views::NEUTRAL.into(), ..Default::default() };
+    edit_styles(app, |l| l.tags.push(tag))?;
+    Ok(key)
+}
+
+/// "What I call `mine`, the club may call `theirs`": adds the rule, or with `on: false` removes it.
+pub fn club_rule_set(app: &Arc<App>, club_id: String, mine: String, theirs: String, on: bool) -> Res<()> {
+    edit_styles(app, |l| {
+        let list = l.club_rules.entry(club_id.clone()).or_default();
+        list.retain(|r| !(r.mine == mine && r.club == theirs));
+        if on {
+            list.push(ClubRule { mine, club: theirs });
+        }
+        if list.is_empty() {
+            l.club_rules.remove(&club_id);
+        }
+    })
+}
+
+/// Adds a club's styles you don't have (by key or name) to yours. Returns how many.
+pub fn styles_import_club(app: &Arc<App>, club_id: String) -> Res<usize> {
+    let page = styles_page(app, Some(club_id))?;
+    let n = page.importable.len();
+    for s in page.importable {
+        style_create(app, s.name, Some(s.short), Some(s.color), Some(s.key))?;
+    }
+    Ok(n)
+}
+
 /// What smart crate rules can test (for the rule editor).
 pub fn smart_fields() -> Res<Vec<crate::smart::FieldDef>> {
     Ok(crate::smart::fields())
@@ -1713,6 +2230,33 @@ pub fn smart_fields() -> Res<Vec<crate::smart::FieldDef>> {
 /// A new condition for a field, with a value to start from.
 pub fn smart_default_condition(field: String) -> Res<crate::smart::Condition> {
     Ok(crate::smart::default_condition(&field))
+}
+
+/// Songs some rules match now (for the editor): how many, and the first titles.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartPreview {
+    pub count: usize,
+    pub titles: Vec<String>,
+}
+
+/// Titles a smart crate's preview lists.
+const SMART_PREVIEW_TITLES: usize = 5;
+
+/// What `rules` match in the library now, leaving out crate `editing` (so a
+/// smart crate can't test itself).
+pub fn smart_preview(app: &Arc<App>, rules: crate::smart::Rules, editing: Option<Id>) -> Res<SmartPreview> {
+    let ctx = app.view_context(None);
+    let tracks = app.store.all_tracks();
+    let crates: Vec<Crate> = app.store.crates().into_iter().filter(|c| Some(&c.id) != editing.as_ref()).collect();
+    let candidates: Vec<crate::smart::Candidate> = tracks
+        .iter()
+        .filter(|t| t.rec.in_library)
+        .flat_map(|t| t.rec.versions.iter().filter(|v| !v.hidden).map(move |v| crate::smart::Candidate { track: t, version: v }))
+        .collect();
+    let ev = crate::smart::Evaluator { ctx: &ctx, crates: &crates, library: &candidates, now: crate::model::now_ms() };
+    let hits: Vec<&crate::smart::Candidate> = candidates.iter().filter(|c| ev.matches(&rules, c, 0)).collect();
+    Ok(SmartPreview { count: hits.len(), titles: hits.iter().take(SMART_PREVIEW_TITLES).map(|c| c.track.rec.title.clone()).collect() })
 }
 
 /// Each condition of some rules in words.
@@ -2857,7 +3401,173 @@ pub fn call(app: &Arc<App>, name: &str, args: serde_json::Value) -> Res<serde_js
             json(set_view(app, a.id))
         }
         "smart_fields" => json(smart_fields()),
+        "smart_preview" => {
+            #[derive(Deserialize)]
+            struct A {
+                rules: crate::smart::Rules,
+                editing: Option<Id>,
+            }
+            let a: A = parse(args)?;
+            json(smart_preview(app, a.rules, a.editing))
+        }
         "active_club" => json(active_club(app)),
+        "files_view" => json(files_view(app)),
+        "spotify_versions" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                tracks: Vec<SpotifyTrack>,
+                in_library: bool,
+            }
+            let a: A = parse(args)?;
+            json(spotify_versions(app, a.tracks, a.in_library))
+        }
+        "spotify_in_library" => {
+            #[derive(Deserialize)]
+            struct A {
+                uris: Vec<String>,
+            }
+            let a: A = parse(args)?;
+            json(spotify_in_library(app, a.uris))
+        }
+        "setlist_from_spotify" => {
+            #[derive(Deserialize)]
+            struct A {
+                name: String,
+                tracks: Vec<SpotifyTrack>,
+            }
+            let a: A = parse(args)?;
+            json(setlist_from_spotify(app, a.name, a.tracks))
+        }
+        "combine_preview" => {
+            #[derive(Deserialize)]
+            struct A {
+                songs: Vec<Id>,
+                recordings: Vec<Id>,
+            }
+            let a: A = parse(args)?;
+            json(combine_preview(app, a.songs, a.recordings))
+        }
+        "combine" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                songs: Vec<Id>,
+                recordings: Vec<Id>,
+                same_audio: bool,
+                #[serde(default)]
+                picks: HashMap<String, Id>,
+            }
+            let a: A = parse(args)?;
+            json(combine(app, a.songs, a.recordings, a.same_audio, a.picks))
+        }
+        "club_add_item" => {
+            #[derive(Deserialize)]
+            struct A {
+                club: Club,
+                kind: String,
+            }
+            let a: A = parse(args)?;
+            json(club_add_item(a.club, a.kind))
+        }
+        "club_song_status" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                club_id: String,
+                version_id: String,
+            }
+            let a: A = parse(args)?;
+            json(club_song_status(app, a.club_id, a.version_id))
+        }
+        "pronunciations_save" => {
+            #[derive(Deserialize)]
+            struct A {
+                list: Vec<Pronunciation>,
+            }
+            let a: A = parse(args)?;
+            json(pronunciations_save(app, a.list))
+        }
+        "midi_control_set" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                mapping_id: String,
+                index: Option<usize>,
+                control: crate::midi::Control,
+            }
+            let a: A = parse(args)?;
+            json(midi_control_set(app, a.mapping_id, a.index, a.control))
+        }
+        "midi_control_remove" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                mapping_id: String,
+                index: usize,
+            }
+            let a: A = parse(args)?;
+            json(midi_control_remove(app, a.mapping_id, a.index))
+        }
+        "midi_mapping_delete" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                mapping_id: String,
+            }
+            let a: A = parse(args)?;
+            json(midi_mapping_delete(app, a.mapping_id))
+        }
+        "styles_page" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                club_id: Option<String>,
+            }
+            let a: A = parse(args)?;
+            json(styles_page(app, a.club_id))
+        }
+        "style_create" => {
+            #[derive(Deserialize)]
+            struct A {
+                name: String,
+                short: Option<String>,
+                color: Option<String>,
+                key: Option<String>,
+            }
+            let a: A = parse(args)?;
+            json(style_create(app, a.name, a.short, a.color, a.key))
+        }
+        "tag_create" => {
+            #[derive(Deserialize)]
+            struct A {
+                name: String,
+                key: Option<String>,
+            }
+            let a: A = parse(args)?;
+            json(tag_create(app, a.name, a.key))
+        }
+        "club_rule_set" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                club_id: String,
+                mine: String,
+                theirs: String,
+                on: bool,
+            }
+            let a: A = parse(args)?;
+            json(club_rule_set(app, a.club_id, a.mine, a.theirs, a.on))
+        }
+        "styles_import_club" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                club_id: String,
+            }
+            let a: A = parse(args)?;
+            json(styles_import_club(app, a.club_id))
+        }
         "song_view" => {
             #[derive(Deserialize)]
             #[serde(rename_all = "camelCase")]

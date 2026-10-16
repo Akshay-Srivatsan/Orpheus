@@ -9,8 +9,9 @@ Stanford's [Dancebreak](https://dancebreak.stanford.edu/info/djing/), Jammix
 (Powers' tips) and Friday Night Waltz (Lucas Garron's
 [tempos](https://garron.net/dance/tempos/))).
 
-A Rust engine (`core/`) with a Qt Quick interface (in progress; Linux first, then
-macOS, Windows, Android and the web).
+A Rust engine (`core/`) with a Qt Quick interface (`app/`) that follows each
+platform's look: Linux now; macOS, Windows, Android and the web (Qt for
+WebAssembly) to follow.
 
 ## How it differs from club DJ software
 
@@ -257,24 +258,26 @@ deck.
 
 ## Development
 
-You need Rust (stable), and **libclang**, which `signalsmith-stretch` uses for bindgen:
+You need Rust (stable), **Qt 6** (6.8 or later, with Qt Quick and Qt Quick
+Controls) and **libclang**, which `signalsmith-stretch` uses for bindgen:
 
-| OS | libclang |
-|---|---|
-| macOS | Included with the Xcode command-line tools. |
-| Linux | Your distribution's `clang` package. |
-| Windows | Install LLVM. |
-
-The Tauri/Svelte interface has been removed, and the Qt Quick one replacing
-it is being built. Until it lands, the engine runs in its tests and examples:
+| OS | Qt 6 | libclang |
+|---|---|---|
+| Linux | Your distribution's Qt 6 packages (e.g. `qt6-base qt6-declarative qt6-svg`), with `qmake6` on the path | Your distribution's `clang` package |
+| macOS | The Qt online installer or `brew install qt` | Included with the Xcode command-line tools |
+| Windows | The Qt online installer | Install LLVM |
 
 ```sh
+cargo run -p orpheus                # the app
 cargo test -p orpheus-core          # engine tests
-cargo run -p orpheus-core --example scan -- <music dir> <library dir> <local dir>
 ```
 
-The old Svelte code (`src/`) stays as the reference for the port, with its tests
-(`npm test`: style mapping, smart crates), until the Qt interface replaces it.
+The interface (`app/`) only lays out what the engine (`core/`) gives it:
+every command goes through `orpheus_core::api::call` (a name and JSON in, JSON
+out), and the engine's events (deck state, library changes…) come back as
+named JSON payloads. The engine works out everything the interface shows:
+which styles a song is in a club's set, how it plays, library and set views,
+the set check, smart crates, the projector's names.
 
 Useful environment variables:
 
@@ -313,14 +316,14 @@ core/src/       the engine (crate `orpheus-core`): everything but the interface
   tts.rs        Kokoro text-to-speech for announcements (download, phonemes, synthesis)
   midi.rs       midir hot-plug, mappings (DJ2GO2 built in), learn, LEDs
 examples/clubs/ example club guidelines (Dancebreak, Jammix, Friday Night Waltz), bundled with the app
+  matching.rs   club styles a song matches, what it shows in a club's set, checking a set against the guidelines
+  views.rs      what the interface shows: styles, tempo and length, library and set views, decks, the Info panel
+  smart.rs      smart crate rules and their vocabulary
+app/            the interface (Qt Quick, via cxx-qt)
+  src/engine.rs the engine as a QML object: commands on worker threads, events as signals
+  qml/          the windows: main window (decks, transport, sidebar, library, set panel, Info), settings, projector
+  icons/        icons for when the system's icon theme has none
 icons/          app icons
-src/            the former Svelte interface (reference for the Qt port; to be removed)
-  components/   main window (decks, transport, library, set panel, inspector, settings)
-  components/projector/  public display
-  lib/clubs.ts  matching songs to club styles and checking sets (the only implementation; used by both windows)
-  lib/styles.ts what a song shows: your styles, or the club's
-  lib/smart.ts  smart crate rules
-  lib/tempo.ts  tempo/duration helpers shared with the backend's logic
 ```
 
 ## License

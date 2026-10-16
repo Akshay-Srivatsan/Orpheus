@@ -15,6 +15,8 @@ Pane {
     signal combine(var songs, var recordings)
     signal editSmartCrate(string id)
 
+    readonly property bool spotifyView: Session.view.kind === "spotify-search" || Session.view.kind === "spotify-playlist"
+    readonly property bool filesView: Session.view.kind === "files"
     readonly property var crate: Session.view.kind === "crate" ? Session.crates.find(c => c.id === Session.view.id) : null
     readonly property string title: {
         const v = Session.view;
@@ -25,6 +27,7 @@ Pane {
         case "history": return qsTr("History");
         case "missing": return qsTr("Missing Files");
         case "club-songs": return Session.activeClub ? qsTr("%1's Songs").arg(Session.activeClub.name) : qsTr("Club Songs");
+        case "files": return qsTr("Files");
         }
         return "";
     }
@@ -44,6 +47,7 @@ Pane {
         };
     }
     function reload() {
+        if (spotifyView || filesView) return;
         const q = query();
         Backend.call("library_view", { query: q }).then(v => root.view = v, e => Session.toast(String(e)));
     }
@@ -68,7 +72,13 @@ Pane {
     }
     Component.onCompleted: reload()
 
+    SpotifyBrowser {
+        visible: root.spotifyView
+        anchors.fill: parent
+    }
+
     ColumnLayout {
+        visible: !root.spotifyView
         anchors.fill: parent
         spacing: 4
 
@@ -105,7 +115,14 @@ Pane {
             }
         }
 
+        FilesView {
+            visible: root.filesView
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+        }
+
         StyleFilterBar {
+            visible: !root.filesView
             Layout.fillWidth: true
             Layout.leftMargin: Theme.spacing
             Layout.rightMargin: Theme.spacing
@@ -132,10 +149,17 @@ Pane {
         }
 
         LibraryTable {
+            visible: !root.filesView
             Layout.fillWidth: true
             Layout.fillHeight: true
             view: root.view
             onCombine: (songs, recordings) => root.combine(songs, recordings)
+        }
+
+        SpotifySearchSection {
+            visible: !root.filesView && !!Session.spotify && Session.spotify.connected && query.trim().length >= minLength
+            Layout.fillWidth: true
+            query: Session.search
         }
     }
 }

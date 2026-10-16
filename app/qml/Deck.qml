@@ -50,7 +50,9 @@ Pane {
         enabled: !(root.d && root.d.audible)
         onDropped: drop => {
             const ids = JSON.parse(drop.getDataAsString("application/x-orpheus-versions") || "[]");
-            if (ids.length) Session.loadDeck(root.deck, ids[0], null);
+            // A set entry dragged here plays as that entry.
+            const entries = drop.formats.includes("application/x-orpheus-entries") ? JSON.parse(drop.getDataAsString("application/x-orpheus-entries")) : [];
+            if (ids.length) Session.loadDeck(root.deck, ids[0], entries.length === 1 ? entries[0] : null);
         }
     }
 

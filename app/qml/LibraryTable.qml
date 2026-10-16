@@ -72,6 +72,26 @@ FocusScope {
         return rows.filter(r => Session.selected.includes(r.versionId));
     }
 
+    // A controller's browse knob and buttons. Its press loads (or fills the slot);
+    // it never plays, so choosing songs stays silent.
+    Connections {
+        target: Backend
+        function onEvent(name, p) {
+            if (name !== "midi-ui") return;
+            const i = list.currentIndex;
+            const row = i >= 0 && i < root.rows.length ? root.rows[i] : null;
+            if (p.action === "browse.scroll") root.move(p.delta || 0);
+            else if (p.action === "browse.audition" && row) root.choose(row);
+            else if (p.action === "deck.load" && p.deck !== undefined && row) Session.loadDeck(p.deck, row.versionId, null);
+            else if (p.action === "browse.queueNext" && Session.selected.length) Session.addToSet(Session.selected, "next");
+            else if (p.action === "browse.queueEnd" && Session.selected.length) Session.addToSet(Session.selected, "end");
+        }
+    }
+
+    Keys.onDeletePressed: {
+        const c = Session.view.kind === "crate" ? Session.crates.find(x => x.id === Session.view.id) : null;
+        if (c && !c.smart && Session.selected.length) Session.run("crate_remove", { id: c.id, versionIds: Session.selected });
+    }
     Keys.onUpPressed: move(-1)
     Keys.onDownPressed: move(1)
     Keys.onReturnPressed: { const i = list.currentIndex; if (i >= 0) choose(rows[i]); }

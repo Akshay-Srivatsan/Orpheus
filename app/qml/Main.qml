@@ -14,6 +14,8 @@ ApplicationWindow {
     title: Session.set ? qsTr("%1 — Orpheus").arg(Session.set.setlist.name) : "Orpheus"
 
     Component.onCompleted: Session.start()
+    // Closing the main window quits (the projector and settings with it).
+    onClosing: Qt.quit()
 
     // ------------------------------------------------------------ menus
 
@@ -52,8 +54,8 @@ ApplicationWindow {
     // ------------------------------------------------------------ layout
 
     header: TopBar {
-        onOpenProjector: (screen, fullscreen) => Session.toast(qsTr("The projector isn't available in this build yet."), "info")
-        onCloseProjector: {}
+        onOpenProjector: (screen, fullscreen) => projector.showOn(screen, fullscreen)
+        onCloseProjector: projector.close()
     }
 
     Label {
@@ -92,14 +94,14 @@ ApplicationWindow {
                 SplitView.preferredWidth: Theme.sidebarWidth
                 SplitView.minimumWidth: 160
                 onNewSetlist: newSetlist.open()
-                onEditSmartCrate: id => Session.toast(qsTr("The smart crate editor isn't available in this build yet."), "info")
+                onEditSmartCrate: id => smartCrate.edit(id)
             }
             LibraryPane {
                 id: library
                 SplitView.fillWidth: true
                 SplitView.minimumWidth: 400
-                onCombine: (songs, recordings) => Session.toast(qsTr("Combining isn't available in this build yet."), "info")
-                onEditSmartCrate: id => Session.toast(qsTr("The smart crate editor isn't available in this build yet."), "info")
+                onCombine: (songs, recordings) => combine.show(songs, recordings)
+                onEditSmartCrate: id => smartCrate.edit(id)
             }
             Pane {
                 SplitView.preferredWidth: Theme.rightPanelWidth
@@ -147,6 +149,10 @@ ApplicationWindow {
     // ------------------------------------------------------------ dialogs
 
     NewSetlistDialog { id: newSetlist }
+    CombineDialog { id: combine }
+    SmartCrateDialog { id: smartCrate }
+    ProjectorWindow { id: projector }
+    SettingsWindow {}
 
     FileDialog {
         id: importMusic
@@ -162,6 +168,12 @@ ApplicationWindow {
         buttons: MessageDialog.Ok | MessageDialog.Cancel
         onButtonClicked: (button, role) => { if (callback) callback(role === MessageDialog.AcceptRole); callback = null; }
     }
+    FolderDialog {
+        id: folders
+        property var callback
+        onAccepted: { if (callback) callback(decodeURIComponent(String(selectedFolder).replace(/^file:\/\//, ""))); callback = null; }
+        onRejected: callback = null
+    }
     FileDialog {
         id: files
         property var callback
@@ -176,6 +188,12 @@ ApplicationWindow {
             confirm.open();
         }
         function onFileRequested(options, callback) {
+            if (options.folder) {
+                folders.title = options.title || "";
+                folders.callback = callback;
+                folders.open();
+                return;
+            }
             files.title = options.title || "";
             files.nameFilters = options.nameFilters || [];
             files.fileMode = options.save ? FileDialog.SaveFile : FileDialog.OpenFile;

@@ -210,77 +210,81 @@ Pane {
             }
         }
 
-        // The entries.
-        ListView {
-            id: entries
+        // The entries. Songs dropped below them (or on an empty set) go at the end.
+        Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            clip: true
-            focus: true
-            model: root.v ? root.v.rows : []
-            ScrollBar.vertical: ScrollBar {}
-            property int dropIndex: -1
-
-            // Keep what's playing in view.
-            Connections {
-                target: root
-                function onPChanged() {
-                    if (!root.p || !root.v) return;
-                    const i = root.v.rows.findIndex(r => r.entry.id === root.p.currentEntryId);
-                    if (i >= 0) entries.positionViewAtIndex(i, ListView.Contain);
-                }
-            }
-
-            delegate: SetEntry {
-                required property var modelData
-                required property int index
-                width: entries.width
-                row: modelData
-                rowIndex: index
-                current: !!root.p && modelData.entry.id === root.p.currentEntryId
-                next: !!root.p && modelData.entry.id === root.p.nextEntryId
-                selected: Session.selectedEntries.includes(modelData.entry.id)
-                dropAbove: entries.dropIndex === index
-                onPicked: modifiers => { entries.forceActiveFocus(); root.select(modelData.entry, modifiers); }
-                onChosen: root.choose(modelData.entry)
-                onDropHover: i => entries.dropIndex = i
-                onSongsDropped: (ids, at, slot) => {
+            DropArea {
+                anchors.fill: parent
+                keys: ["application/x-orpheus-versions", "application/x-orpheus-entries"]
+                onEntered: entries.dropIndex = root.v ? root.v.rows.length : 0
+                onExited: entries.dropIndex = -1
+                onDropped: d => {
+                    const at = root.v.rows.length;
                     entries.dropIndex = -1;
-                    if (slot) Session.fillSlot(ids[0], modelData.entry.id);
-                    else root.insertSongs(ids, at);
+                    if (d.formats.includes("application/x-orpheus-entries")) root.moveEntries(JSON.parse(d.getDataAsString("application/x-orpheus-entries")), at);
+                    else root.insertSongs(JSON.parse(d.getDataAsString("application/x-orpheus-versions") || "[]"), at);
                 }
-                onEntriesDropped: (ids, at) => { entries.dropIndex = -1; root.moveEntries(ids, at); }
-                onRemove: root.remove(Session.selectedEntries.includes(modelData.entry.id) ? Session.selectedEntries : [modelData.entry.id])
-                onMoveNext: Session.run("entries_move_next", { setlistId: root.set.id, ids: Session.selectedEntries.length ? Session.selectedEntries : [modelData.entry.id] })
-                club: root.v ? root.v.club : null
             }
+            ListView {
+                id: entries
+                anchors.fill: parent
+                clip: true
+                focus: true
+                model: root.v ? root.v.rows : []
+                ScrollBar.vertical: ScrollBar {}
+                property int dropIndex: -1
 
-            footer: Item {
-                width: entries.width
-                height: Theme.rowHeight * 3
-                Rectangle { visible: entries.dropIndex === (root.v ? root.v.rows.length : 0); width: parent.width; height: 2; color: palette.highlight }
-                Label {
-                    visible: !!root.v && !root.v.rows.length
-                    anchors.centerIn: parent
-                    width: parent.width - Theme.spacing * 4
-                    wrapMode: Text.WordWrap
-                    horizontalAlignment: Text.AlignHCenter
-                    opacity: 0.6
-                    text: qsTr("Drag songs here, press + on a song, or add style slots below.")
+                // Keep what's playing in view.
+                Connections {
+                    target: root
+                    function onPChanged() {
+                        if (!root.p || !root.v) return;
+                        const i = root.v.rows.findIndex(r => r.entry.id === root.p.currentEntryId);
+                        if (i >= 0) entries.positionViewAtIndex(i, ListView.Contain);
+                    }
                 }
-                DropArea {
-                    anchors.fill: parent
-                    keys: ["application/x-orpheus-versions", "application/x-orpheus-entries"]
-                    onEntered: entries.dropIndex = root.v ? root.v.rows.length : 0
-                    onExited: entries.dropIndex = -1
-                    onDropped: d => {
-                        const at = root.v.rows.length;
+
+                delegate: SetEntry {
+                    required property var modelData
+                    required property int index
+                    width: entries.width
+                    row: modelData
+                    rowIndex: index
+                    current: !!root.p && modelData.entry.id === root.p.currentEntryId
+                    next: !!root.p && modelData.entry.id === root.p.nextEntryId
+                    selected: Session.selectedEntries.includes(modelData.entry.id)
+                    dropAbove: entries.dropIndex === index
+                    onPicked: modifiers => { entries.forceActiveFocus(); root.select(modelData.entry, modifiers); }
+                    onChosen: root.choose(modelData.entry)
+                    onDropHover: i => entries.dropIndex = i
+                    onSongsDropped: (ids, at, slot) => {
                         entries.dropIndex = -1;
-                        if (d.formats.includes("application/x-orpheus-entries")) root.moveEntries(JSON.parse(d.getDataAsString("application/x-orpheus-entries")), at);
-                        else root.insertSongs(JSON.parse(d.getDataAsString("application/x-orpheus-versions") || "[]"), at);
+                        if (slot) Session.fillSlot(ids[0], modelData.entry.id);
+                        else root.insertSongs(ids, at);
+                    }
+                    onEntriesDropped: (ids, at) => { entries.dropIndex = -1; root.moveEntries(ids, at); }
+                    onRemove: root.remove(Session.selectedEntries.includes(modelData.entry.id) ? Session.selectedEntries : [modelData.entry.id])
+                    onMoveNext: Session.run("entries_move_next", { setlistId: root.set.id, ids: Session.selectedEntries.length ? Session.selectedEntries : [modelData.entry.id] })
+                    club: root.v ? root.v.club : null
+                }
+
+                footer: Item {
+                    width: entries.width
+                    height: Theme.rowHeight * 3
+                    Rectangle { visible: entries.dropIndex === (root.v ? root.v.rows.length : 0); width: parent.width; height: 2; color: palette.highlight }
+                    Label {
+                        visible: !!root.v && !root.v.rows.length
+                        anchors.centerIn: parent
+                        width: parent.width - Theme.spacing * 4
+                        wrapMode: Text.WordWrap
+                        horizontalAlignment: Text.AlignHCenter
+                        opacity: 0.6
+                        text: qsTr("Drag songs here, press + on a song, or add style slots below.")
                     }
                 }
             }
+
         }
 
         // How the set follows its club's guidelines.

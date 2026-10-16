@@ -128,6 +128,14 @@ QtObject {
         }).catch(e => { toast(String(e)); return undefined; });
     }
 
+    /// Changes some settings (the rest stay as they are).
+    function saveSettings(patch) {
+        if (!settings) return;
+        const next = Object.assign({}, settings, patch);
+        settings = next;
+        run("settings_set", { settings: next });
+    }
+
     function refreshSet() {
         const id = perform ? perform.setlistId : null;
         if (!id) { set = null; return; }
@@ -150,6 +158,7 @@ QtObject {
         Backend.call("scan_progress").then(v => scan = v);
         Backend.call("audio_status").then(v => outputs = v);
         Backend.call("stems_status").then(v => stems = v);
+        Backend.call("tts_status").then(v => tts = v);
         Backend.call("library_info").then(v => {
             if (v.loadErrors.length) toast(qsTr("%1 library file(s) could not be read — see Settings → Library").arg(v.loadErrors.length));
         });
