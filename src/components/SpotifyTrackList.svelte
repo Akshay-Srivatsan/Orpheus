@@ -47,7 +47,7 @@
       { label: "Add to End of Set", action: () => toSet(t, "end") },
       { separator: true },
       ...(k?.inLibrary ? [] : [{ label: "Add to Library", action: () => toLibrary(t) }]),
-      ...app.myStyles.map((s) => ({ label: `Add to Library as ${s.name}`, action: () => tagStyle(t, s.key) })),
+      { label: "Add to Library as", items: app.myStyles.map((s) => ({ label: s.name, action: () => tagStyle(t, s.key) })) },
     ];
     menu = { x: e.clientX, y: e.clientY, items };
   }

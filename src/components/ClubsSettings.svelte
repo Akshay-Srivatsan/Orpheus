@@ -88,13 +88,13 @@
         { label: "Import File…", action: importFile },
         { label: "Import from a Web Address…", action: () => (urlOpen = true) },
         { separator: true },
-        ...examples.map(([id, name]) => ({
-          label: `Example: ${name}`,
+        { label: "Examples", items: examples.map(([id, name]) => ({
+          label: name,
           action: async () => {
             const r = await app.run(api.clubImportExample(id));
             if (r) picked(r, name);
           },
-        })),
+        })) },
       ],
     };
   }

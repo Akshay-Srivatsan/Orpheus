@@ -38,7 +38,6 @@
 
   let playlists = $state<SpotifyPlaylist[] | null>(null);
   let loadingPlaylists = $state(false);
-  let renaming = $state<Id | null>(null);
   let dropTarget = $state<string | null>(null);
   let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
@@ -71,7 +70,7 @@
 
   async function newCrate() {
     const id = await app.run(api.createCrate("New crate"));
-    if (id) renaming = id;
+    if (id) app.renamingCrate = id;
   }
 
   function addMenu(e: MouseEvent) {
@@ -93,7 +92,7 @@
       x: e.clientX,
       y: e.clientY,
       items: [
-        { label: "Rename", action: () => (renaming = c.id) },
+        { label: "Rename", action: () => (app.renamingCrate = c.id) },
         ...(c.smart ? [{ label: "Edit Rules…", action: () => (app.smartEditor = c.id) }] : []),
         { separator: true },
         { label: "Export Crate…", action: () => exportCrate(c) },
@@ -175,14 +174,14 @@
       </button>
     {/if}
     {#each app.crates as c (c.id)}
-      {#if renaming === c.id}
+      {#if app.renamingCrate === c.id}
         <!-- svelte-ignore a11y_autofocus -->
-        <input class="rename" value={c.name} autofocus
+        <input class="rename" value={c.name} autofocus onfocus={(e) => e.currentTarget.select()}
           onkeydown={(e) => {
-            if (e.key === "Enter") { api.renameCrate(c.id, e.currentTarget.value); renaming = null; }
-            if (e.key === "Escape") renaming = null;
+            if (e.key === "Enter") { api.renameCrate(c.id, e.currentTarget.value); app.renamingCrate = null; }
+            if (e.key === "Escape") app.renamingCrate = null;
           }}
-          onblur={(e) => { api.renameCrate(c.id, e.currentTarget.value); renaming = null; }} />
+          onblur={(e) => { api.renameCrate(c.id, e.currentTarget.value); app.renamingCrate = null; }} />
       {:else if c.smart}
         <button class="item" class:sel={is({ kind: "crate", id: c.id })}
           onclick={() => go({ kind: "crate", id: c.id })} ondblclick={() => (app.smartEditor = c.id)}
@@ -191,7 +190,7 @@
         </button>
       {:else}
         <button class="item" class:sel={is({ kind: "crate", id: c.id })} class:drop={dropTarget === "c:" + c.id}
-          onclick={() => go({ kind: "crate", id: c.id })} ondblclick={() => (renaming = c.id)}
+          onclick={() => go({ kind: "crate", id: c.id })} ondblclick={() => (app.renamingCrate = c.id)}
           oncontextmenu={(e) => crateMenu(e, c)}
           ondragover={(e) => { e.preventDefault(); dropTarget = "c:" + c.id; }}
           ondragleave={() => (dropTarget = null)}

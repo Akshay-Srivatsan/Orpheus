@@ -155,11 +155,11 @@
       ...(!entry.versionId ? [{ label: "Choose Song for This Slot…", action: () => startFillingSlot(entry) }, { separator: true } as MenuItem] : []),
       { label: "Play Now", disabled: !entry.versionId || isCurrent, action: () => app.run(api.playEntry(entry.id)) },
       { label: "Preview in Headphones (free deck)", disabled: !entry.versionId, action: () => preview(entry) },
-      ...([0, 1] as const).map((d) => ({
-        label: `Load onto Deck ${d === 0 ? "A" : "B"}`,
-        disabled: !entry.versionId || (app.decks[d].onAir && app.decks[d].status === "playing"),
+      { label: "Load onto", disabled: !entry.versionId, items: ([0, 1] as const).map((d) => ({
+        label: `Deck ${d === 0 ? "A" : "B"}`,
+        disabled: app.decks[d].onAir && app.decks[d].status === "playing",
         action: () => entry.versionId && api.deckLoad(d, entry.versionId, { entryId: entry.id }),
-      })),
+      })) },
       { label: "Move to Play Next", disabled: isCurrent, action: () => moveNext(ids) },
       { label: "Auto Mode Stops Before This Song", checked: !!entry.hold, action: () => api.updateEntry(entry.id, { hold: !entry.hold }) },
       { separator: true },
@@ -168,10 +168,10 @@
         : { label: "Skip", disabled: isCurrent, action: () => ids.forEach((id) => api.updateEntry(id, { status: "skipped" })) },
       ...(entry.status === "played" ? [{ label: "Mark as Not Played", action: () => api.updateEntry(entry.id, { status: "pending" }) }] : []),
       { separator: true },
-      ...Object.entries(app.club?.tag ?? {}).map(([id, t]) => ({
+      { label: "Show As", items: styleItems(entry) },
+      { label: "Tags", items: Object.entries(app.club?.tag ?? {}).map(([id, t]) => ({
         label: t.name, checked: (entry.tags ?? []).includes(id), action: () => toggleTag(entry, id),
-      })),
-      ...styleItems(entry),
+      })) },
       { separator: true },
       { label: "Edit Overrides for This Set…", action: () => { app.inspectEntry = entry.id; app.rightTab = "info"; } },
       { label: "Remove from Set", danger: true, disabled: isCurrent, action: () => remove(ids) },
@@ -193,12 +193,11 @@
       const set = (next: string[]) => api.updateEntry(entry.id, { clubStyles: next.length ? next : null });
       const toggle = (id: string) => set(shown.includes(id) ? shown.filter((x) => x !== id) : [...shown, id]);
       const item = (id: string): MenuItem => ({
-        label: ok(id) ? `Show as ${club.style[id].name}` : `Show as ${club.style[id].name} (doesn't fit)`,
+        label: ok(id) ? club.style[id].name : `${club.style[id].name} (doesn't fit)`,
         checked: shown.includes(id),
         action: () => toggle(id),
       });
       return [
-        { separator: true },
         ...ids.filter(ok).map(item),
         ...(entry.clubStyles ? [{ label: "Show What It Matches", action: () => api.updateEntry(entry.id, { clubStyles: null }) }] : []),
         ...(ids.some((id) => !ok(id)) ? [{ separator: true } as MenuItem, ...ids.filter((id) => !ok(id)).map(item)] : []),
@@ -212,7 +211,7 @@
       const next = shown.includes(k) ? shown.filter((x) => x !== k) : all.filter((x) => x === k || shown.includes(x));
       return api.updateEntry(entry.id, { styles: next.length === all.length || !next.length ? null : next });
     };
-    return [{ separator: true }, ...all.map((k) => ({ label: `Show as ${app.styleName(k)}`, checked: shown.includes(k), action: () => toggle(k) }))];
+    return [...all.map((k) => ({ label: app.styleName(k), checked: shown.includes(k), action: () => toggle(k) }))];
   }
 
   async function moveNext(ids: Id[]) {
@@ -323,9 +322,11 @@
       { label: "Duplicate", action: () => api.duplicateSetlist(s.id, `${s.name} (copy)`) },
       { label: "Reset Played / Skipped", action: () => confirmAction("Mark every song in this set as not played?", "Reset").then((ok) => { if (ok) api.resetSetlist(s.id); }) },
       { separator: true },
-      { label: "Export Set…", action: exportSet },
-      { label: "Export as CSV…", action: exportCsv },
-      { label: "Print Setlist…", action: () => window.print() },
+      { label: "Export", items: [
+        { label: "Set File…", action: exportSet },
+        { label: "CSV…", action: exportCsv },
+        { label: "Print…", action: () => window.print() },
+      ] },
       { separator: true },
       { label: "Close Set", action: () => api.performOpen(null) },
       { label: "Delete Set…", danger: true, action: () => confirmAction(`Delete “${s.name}”?`).then((ok) => { if (ok) api.deleteSetlist(s.id); }) },

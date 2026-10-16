@@ -186,6 +186,14 @@
   const start = $derived(Math.max(0, Math.floor(scrollTop / ROW_H) - 10));
   const end = $derived(Math.min(sorted.length, Math.ceil((scrollTop + viewH) / ROW_H) + 10));
   const visible = $derived(sorted.slice(start, end));
+  /** A new crate with these songs, named in the sidebar. */
+  async function newCrateWith(ids: Id[]) {
+    const id = await app.run(api.createCrate("New crate"));
+    if (!id) return;
+    await app.run(api.addToCrate(id, ids));
+    app.renamingCrate = id;
+  }
+
   /** Links the selected songs' audio to the same audio on Spotify, where it's there. */
   async function findOnSpotify(ids: Id[]) {
     const recs = [...new Set(ids.map((id) => app.versionMap.get(id)?.rec).filter((r) => r && !r.sources.some((s) => s.kind === "spotify")).map((r) => r!.id))];
@@ -309,26 +317,33 @@
       ...historyItems,
       ...(app.fillingSlot ? [{ label: "Use for the Slot", action: () => fillSlot(r.version.id) }, { separator: true } as MenuItem] : []),
       ...(editFor ? [{ label: `Add Its Audio to “${editFor.title}”`, action: () => addEdit({ recording: r.rec.id }) }, { separator: true } as MenuItem] : []),
-      { label: "Preview in Headphones (free deck)", action: () => preview(r) },
-      { label: "Load onto Deck A", disabled: app.decks[0].onAir && app.decks[0].status === "playing", action: () => loadDeck(0, r.version.id) },
-      { label: "Load onto Deck B", disabled: app.decks[1].onAir && app.decks[1].status === "playing", action: () => loadDeck(1, r.version.id) },
       { label: "Play Next", action: () => addToSet(ids, "next") },
       { label: "Add to End of Set", action: () => addToSet(ids, "end") },
+      { label: "Preview in Headphones (free deck)", action: () => preview(r) },
+      { label: "Load onto", items: ([0, 1] as const).map((d) => ({
+        label: `Deck ${d === 0 ? "A" : "B"}`,
+        disabled: app.decks[d].onAir && app.decks[d].status === "playing",
+        action: () => loadDeck(d, r.version.id),
+      })) },
       { separator: true },
-      ...app.crates.filter((c) => !c.smart).map((c) => ({ label: `Add to Crate “${c.name}”`, action: () => api.addToCrate(c.id, ids) })),
+      { label: "Add to Crate", items: [
+        ...app.crates.filter((c) => !c.smart).map((c) => ({ label: c.name, action: () => api.addToCrate(c.id, ids) })),
+        { separator: true },
+        { label: "New Crate…", action: () => newCrateWith(ids) },
+      ] },
       ...(plainCrate ? [{ label: "Remove from Crate", action: () => api.removeFromCrate(plainCrate.id, ids) }] : []),
+      { label: "Dance Styles", items: styleMenu(ids, r) },
+      ...(app.myTags.length ? [{ label: "Tags", items: tagMenu(ids) }] : []),
       { separator: true },
-      ...styleMenu(ids, r),
-      ...tagMenu(ids),
-      { separator: true },
-      { label: "New Version of This Song…", action: () => { app.inspectTrack = r.track.id; app.rightTab = "info"; } },
-      { label: "Re-analyze", action: () => api.analyze([...new Set(ids.map((id) => app.versionMap.get(id)?.rec.id).filter(Boolean) as Id[])]) },
-      ...(app.spotify?.connected ? [{
-        label: "Find on Spotify",
-        disabled: ids.every((id) => app.versionMap.get(id)?.rec.sources.some((s) => s.kind === "spotify")),
-        action: () => findOnSpotify(ids),
-      }] : []),
       ...mergeMenu(ids),
+      { label: "Audio", items: [
+        { label: "Re-analyze", action: () => api.analyze([...new Set(ids.map((id) => app.versionMap.get(id)?.rec.id).filter(Boolean) as Id[])]) },
+        ...(app.spotify?.connected ? [{
+          label: "Find on Spotify",
+          disabled: ids.every((id) => app.versionMap.get(id)?.rec.sources.some((s) => s.kind === "spotify")),
+          action: () => findOnSpotify(ids),
+        }] : []),
+      ] },
       { separator: true },
       { label: "Remove from Library…", danger: true, action: () => deleteSelected(ids) },
     ];
@@ -337,15 +352,11 @@
 
   /** Add / remove your tags on the selected songs. */
   function tagMenu(ids: Id[]): MenuItem[] {
-    if (!app.myTags.length) return [];
     const versions = ids.map((id) => app.versionMap.get(id)?.version).filter(Boolean) as { tags?: string[] }[];
-    return [
-      { separator: true },
-      ...app.myTags.map((t) => {
-        const all = versions.every((v) => v.tags?.includes(t.key));
-        return { label: `Tag: ${t.name}`, checked: all, action: () => app.run(api.setTag(t.key, ids, !all)) };
-      }),
-    ];
+    return app.myTags.map((t) => {
+      const all = versions.every((v) => v.tags?.includes(t.key));
+      return { label: t.name, checked: all, action: () => app.run(api.setTag(t.key, ids, !all)) };
+    });
   }
 
   /** Add / remove your dance styles on the selected songs. */
@@ -360,8 +371,9 @@
         action: () => app.run(all ? api.styleRemove(ids, s.key) : api.styleAdd(s.key, ids)),
       };
     });
-    if (versions.some((v) => v.styles?.length)) items.push({ label: "Remove All Dance Styles", action: () => app.run(api.styleRemove(ids, null)) });
-    if (!items.length) items.push({ label: "Add Dance Styles…", action: () => (app.settingsOpen = "styles") });
+    items.push({ separator: true });
+    if (versions.some((v) => v.styles?.length)) items.push({ label: "Remove All", action: () => app.run(api.styleRemove(ids, null)) });
+    if (!app.myStyles.length) items.push({ label: "Create Dance Styles…", action: () => (app.settingsOpen = "styles") });
     else items.push({ label: "More in Info…", action: () => { app.inspectTrack = r.track.id; app.rightTab = "info"; } });
     return items;
   }
@@ -372,16 +384,18 @@
     const songs = [...new Set(rows.map((r) => r.track.id))];
     const recs = [...new Set(rows.map((r) => r.rec.id))];
     const items: MenuItem[] = [];
+    const versions: MenuItem[] = [{ label: "New Version…", action: () => { app.inspectTrack = rows[0].track.id; app.rightTab = "info"; } }];
     // One song either way; the dialog suggests whether they're also the same audio (fingerprints).
     if (songs.length > 1 || recs.length > 1) items.push({ label: "Combine…", action: () => (app.mergeDialog = { songs, recordings: recs }) });
     // One version of a song with several: it can stand for the song.
     if (rows.length === 1 && rows[0].track.versions.length > 1 && primaryVersion(rows[0].track)?.id !== rows[0].version.id) {
-      items.push({ label: "Make Primary Version", action: () => app.run(api.updateTrack(rows[0].track.id, { primary: rows[0].version.id })) });
+      versions.push({ label: "Make Primary Version", action: () => app.run(api.updateTrack(rows[0].track.id, { primary: rows[0].version.id })) });
     }
     // Versions of one song that has others: they can become a song of their own.
     if (songs.length === 1 && rows[0].track.versions.length > rows.length) {
-      items.push({ label: rows.length > 1 ? "Separate into Their Own Song" : "Separate into Its Own Song", action: () => app.undoable(rows.length > 1 ? "Separated into their own song" : "Separated into its own song", () => app.run(api.separateVersions(rows.map((r) => r.version.id)))) });
+      versions.push({ label: rows.length > 1 ? "Separate into Their Own Song" : "Separate into Its Own Song", action: () => app.undoable(rows.length > 1 ? "Separated into their own song" : "Separated into its own song", () => app.run(api.separateVersions(rows.map((r) => r.version.id)))) });
     }
+    if (songs.length === 1) items.push({ label: "Versions", items: versions });
     return items;
   }
 
@@ -469,7 +483,7 @@
             {r.track.title}
           </span>
           <span class="c artist" title={r.track.artist}>{r.track.artist}</span>
-          <span class="c version faint" title={r.version.comment ?? ""}>{#if r.track.versions.length > 1 && primaryVersion(r.track)?.id === r.version.id}<span class="primary" title="Primary version">★</span>{/if}{app.versionLabel(r.version, r.track)}</span>
+          <span class="c version faint" title={r.version.comment ?? ""}>{app.versionLabel(r.version, r.track)}</span>
           <span class="c style">{#if r.suggested}<span class="sugg">tempo fits</span>{:else}<StyleBadge styles={(r.version.styles ?? []).map((k) => app.mine(k))} short />{/if}</span>
           <span class="c bpm num" class:fit-sweet={fit === "sweet"} class:fit-out={fit === "outside"}>
             {fmtBpm(inf.pb.target ?? r.rec.bpm)}
@@ -535,7 +549,6 @@
   /* The disclosure slot: the same width on every row, so titles line up. */
   .fold, .fold-pad { width: 26px; min-width: 26px; flex: none; }
   .fold { padding: 0; height: 16px; justify-content: flex-start; color: var(--text-dim); font-size: 10px; gap: 1px; }
-  .primary { color: var(--yellow); margin-right: 3px; font-size: 10px; }
   .fold .n { font-size: var(--fs-xs); color: var(--text-faint); font-variant-numeric: tabular-nums; }
   .fold-pad { display: inline-block; }
   .indent { display: inline-block; width: 16px; flex: none; }

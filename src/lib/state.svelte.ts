@@ -111,6 +111,8 @@ class AppState {
   fillingSlot = $state<Id | null>(null);
   /** A song the DJ is choosing library audio for, to add as an edit (a version). */
   pickingEdit = $state<Id | null>(null);
+  /** A crate whose name is being edited in the sidebar. */
+  renamingCrate = $state<Id | null>(null);
   /** Smart crate being edited: its id, or "new". */
   smartEditor = $state<string | false>(false);
   /** Bumped by MIDI browse actions; the library table reacts. */
