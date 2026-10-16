@@ -1132,6 +1132,14 @@ struct VersionsFile {
     versions: IndexMap<String, VersionMeta>,
 }
 
+const DAY_FORMAT: &str = "%b %-d, %Y";
+const DAY_TIME_FORMAT: &str = "%b %-d, %Y, %-I:%M %p";
+
+/// An epoch-ms time in this computer's time zone.
+fn local_time(ms: i64, format: &str) -> String {
+    jiff::Timestamp::from_millisecond(ms).map(|t| t.to_zoned(jiff::tz::TimeZone::system()).strftime(format).to_string()).unwrap_or_default()
+}
+
 /// A club and its versions, for lists.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1150,6 +1158,8 @@ pub struct ClubInfo {
 pub struct VersionInfo {
     pub id: String,
     pub name: String,
+    /// How it's called in lists: its name, else when it was imported.
+    pub label: String,
     pub imported: i64,
     pub from: String,
     /// The file couldn't be read; the error.
@@ -1229,10 +1239,21 @@ impl Clubs {
                 if latest.is_none() {
                     latest = parsed.ok();
                 }
-                versions.push(VersionInfo { id: vid.clone(), name: meta.name.clone(), imported: meta.imported, from: meta.from.clone(), error });
+                versions.push(VersionInfo { id: vid.clone(), name: meta.name.clone(), label: String::new(), imported: meta.imported, from: meta.from.clone(), error });
             }
             if versions.is_empty() {
                 continue;
+            }
+            // Unnamed versions go by their date (and time, when several share a day).
+            let days: Vec<String> = versions.iter().map(|v| local_time(v.imported, DAY_FORMAT)).collect();
+            for (i, v) in versions.iter_mut().enumerate() {
+                v.label = if !v.name.is_empty() {
+                    v.name.clone()
+                } else if days.iter().enumerate().any(|(j, d)| j != i && *d == days[i]) {
+                    local_time(v.imported, DAY_TIME_FORMAT)
+                } else {
+                    days[i].clone()
+                };
             }
             let l = latest.unwrap_or_default();
             out.push(ClubInfo { name: if l.name.is_empty() { prettify(&id) } else { l.name }, description: l.description, url: l.url, id, versions });

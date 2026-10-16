@@ -37,6 +37,44 @@ const DEFAULT_FADE_SECS: f64 = 5.0;
 /// Find on Spotify: candidates streamed per recording to compare fingerprints
 /// (each is a whole track), closest in length first.
 const SPOTIFY_CANDIDATES: usize = 3;
+/// A deck's song facts are worked out again after this long (the library or
+/// the club may have changed).
+const DECK_SONG_TTL: Duration = Duration::from_secs(1);
+/// A deck on air this close to its end is flagged (ms).
+const NEAR_END_MS: f64 = 15_000.0;
+
+struct DeckSongCache {
+    key: (Option<Id>, Option<Id>),
+    at: Instant,
+    song: Option<crate::views::DeckSong>,
+}
+
+/// A deck as the interface shows it: its engine state and what it means.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeckState {
+    #[serde(flatten)]
+    pub snapshot: DeckSnapshot,
+    pub song: Option<crate::views::DeckSong>,
+    /// The tempo it plays at now, and how that fits its style.
+    pub bpm: Option<f64>,
+    pub tempo_fit: crate::views::TempoFit,
+    /// Slower than its style allows.
+    pub too_slow: bool,
+    /// Where it ends (its end point, or the fade-out), and the time left and played.
+    pub ends_at_ms: f64,
+    pub remaining_ms: f64,
+    pub elapsed_ms: f64,
+    pub loaded: bool,
+    /// The room hears it now.
+    pub audible: bool,
+    /// On air and protected from seeking (Settings → General).
+    pub protected: bool,
+    pub near_end: bool,
+    /// It holds the set's next entry.
+    pub up_next: bool,
+}
+
 /// Recent actions that can be undone (older ones are forgotten).
 const UNDO_KEPT: usize = 10;
 
@@ -80,6 +118,8 @@ pub struct App {
     spotify_finding: std::sync::atomic::AtomicBool,
     /// Undo points of recent actions (see `undo_begin`).
     pub(crate) undo: Mutex<UndoBook>,
+    /// What each deck shows about its song, with what it was worked out for and when.
+    deck_songs: Mutex<[Option<DeckSongCache>; 2]>,
     pub(crate) takeover: Mutex<crate::controls::Takeover>,
     pub(crate) deck_ctl: Mutex<[crate::controls::DeckControlState; 2]>,
     /// Pace decks by the headphone output (set when no master device is open).
@@ -191,6 +231,7 @@ impl App {
             spotify_analysed: Mutex::new(Default::default()),
             spotify_finding: Default::default(),
             undo: Default::default(),
+            deck_songs: Default::default(),
             takeover: Mutex::new(Default::default()),
             deck_ctl: Mutex::new(Default::default()),
             clock_cue,
@@ -693,6 +734,68 @@ impl App {
         [self.decks[0].snapshot(), self.decks[1].snapshot()]
     }
 
+    /// Both decks as the interface shows them.
+    pub fn deck_states(&self) -> [DeckState; 2] {
+        let next = self.next_entry().map(|e| e.id);
+        let protect = self.settings.read().protect_on_air;
+        let fade_ms = self.fade_secs() * 1000.0;
+        let snaps = self.deck_snapshots();
+        let states = snaps.map(|snap| {
+            let song = self.deck_song(&snap);
+            let tempo = if snap.tempo > 0.0 { snap.tempo } else { 1.0 };
+            let bpm = song.as_ref().and_then(|s| s.base_bpm).map(|b| b * tempo);
+            let tempo_fit = crate::views::tempo_fit(bpm, song.as_ref().and_then(|s| s.style.as_ref()));
+            let too_slow = song.as_ref().is_some_and(|s| tempo < 1.0 - s.slower_pct / 100.0 - 1e-6);
+            let mut ends_at = snap.end_ms.unwrap_or(snap.duration_ms) as f64;
+            if let Some(f) = snap.fade_at_ms {
+                ends_at = ends_at.min(f as f64 + fade_ms);
+            }
+            let remaining = ((ends_at - snap.position_ms as f64) / tempo).max(0.0);
+            let elapsed = ((snap.position_ms - snap.start_ms) as f64 / tempo).max(0.0);
+            let loaded = snap.status != "empty" && snap.status != "error";
+            let audible = snap.on_air && (snap.status == "playing" || snap.status == "loading");
+            DeckState {
+                song,
+                bpm,
+                tempo_fit,
+                too_slow,
+                ends_at_ms: ends_at,
+                remaining_ms: remaining,
+                elapsed_ms: elapsed,
+                loaded,
+                audible,
+                protected: audible && protect,
+                near_end: audible && remaining < NEAR_END_MS && !snap.fading,
+                up_next: snap.entry_id.is_some() && snap.entry_id == next,
+                snapshot: snap,
+            }
+        });
+        states
+    }
+
+    /// What a deck shows about its song (cached briefly).
+    fn deck_song(&self, snap: &DeckSnapshot) -> Option<crate::views::DeckSong> {
+        let key = (snap.version_id.clone(), snap.entry_id.clone());
+        {
+            let cache = self.deck_songs.lock();
+            if let Some(c) = &cache[snap.deck.min(1)] {
+                if c.key == key && c.at.elapsed() < DECK_SONG_TTL {
+                    return c.song.clone();
+                }
+            }
+        }
+        let song = snap.version_id.as_ref().and_then(|vid| {
+            let (version, tid) = self.store.version(vid).ok()?;
+            let track = self.store.track(&tid).ok()?;
+            let entry = snap.entry_id.as_ref().and_then(|e| self.store.entry(e).ok()).map(|(e, _)| e);
+            let set = self.perform.lock().setlist_id.clone().and_then(|id| self.store.setlist(&id).ok());
+            let ctx = self.view_context(set.and_then(|s| s.club));
+            Some(crate::views::deck_song(&ctx, &track, &version, entry.as_ref()))
+        });
+        self.deck_songs.lock()[snap.deck.min(1)] = Some(DeckSongCache { key, at: Instant::now(), song: song.clone() });
+        song
+    }
+
     fn on_deck_event(&self, ev: DeckEvent) {
         match ev {
             DeckEvent::Ended { deck, .. } => self.on_deck_ended(deck),
@@ -809,7 +912,7 @@ impl App {
                         app.log_audio_problems();
                         app.tts.unload_if_idle();
                     }
-                    let snaps = app.deck_snapshots();
+                    let snaps = app.deck_states();
                     let key = serde_json::to_string(&snaps).unwrap_or_default();
                     let lv = LevelsSnapshot {
                         master: app.levels.master_peak.get(),

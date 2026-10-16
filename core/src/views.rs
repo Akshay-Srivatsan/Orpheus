@@ -491,6 +491,9 @@ pub struct LibraryRow {
     pub fold_open: bool,
     /// One of a song's other versions, shown under it.
     pub child: bool,
+    /// The song's versions, and whether this one stands for it.
+    pub version_count: usize,
+    pub is_primary: bool,
 }
 
 /// A style filter chip: how many songs here have it.
@@ -517,6 +520,8 @@ pub struct LibraryView {
     pub sort: SortKey,
     /// Songs in the library at all (for the empty view's hint).
     pub library_songs: usize,
+    /// With one style filtered on: the club styles it's called at the club.
+    pub filter_targets: Vec<StyleDef>,
 }
 
 /// Inputs to a library view besides the query.
@@ -827,6 +832,8 @@ pub fn library_view(ctx: &ViewContext, data: &LibraryData, q: &LibraryQuery) -> 
         fold_count: 0,
         fold_open: false,
         child: false,
+        version_count: it.track.rec.versions.len(),
+        is_primary: primary_version(it.track).is_some_and(|p| p.id == it.version.id),
     };
 
     // Views listing songs fold a song's versions under the one standing for it.
@@ -863,7 +870,40 @@ pub fn library_view(ctx: &ViewContext, data: &LibraryData, q: &LibraryQuery) -> 
         out
     };
 
-    LibraryView { rows: out_rows, style_counts, no_style_songs: count(NO_STYLE), foldable, sort, library_songs: in_library.len() }
+    LibraryView { rows: out_rows, style_counts, no_style_songs: count(NO_STYLE), foldable, sort, library_songs: in_library.len(), filter_targets }
+}
+
+/// Counts the sidebar shows.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibrarySummary {
+    pub songs: usize,
+    /// Songs whose audio is missing here.
+    pub missing: usize,
+    /// The club's suggested songs that you have.
+    pub club_songs: usize,
+    /// Songs (versions) in each crate, smart crates evaluated.
+    pub crates: HashMap<Id, usize>,
+}
+
+pub fn library_summary(ctx: &ViewContext, tracks: &[Track], crates: &[Crate], now: i64) -> LibrarySummary {
+    let in_library: Vec<&Track> = tracks.iter().filter(|t| t.rec.in_library).collect();
+    let candidates: Vec<crate::smart::Candidate> = in_library
+        .iter()
+        .flat_map(|t| t.rec.versions.iter().filter(|v| !v.hidden).map(move |v| crate::smart::Candidate { track: t, version: v }))
+        .collect();
+    let ev = crate::smart::Evaluator { ctx, crates, library: &candidates, now };
+    let club_songs: std::collections::HashSet<&str> = tracks
+        .iter()
+        .filter(|t| t.recordings.iter().any(|r| ctx.song_matches.get(&r.rec.id).is_some_and(|m| !m.is_empty())))
+        .map(|t| t.rec.id.as_str())
+        .collect();
+    LibrarySummary {
+        songs: in_library.len(),
+        missing: in_library.iter().filter(|t| t.missing).count(),
+        club_songs: club_songs.len(),
+        crates: crates.iter().map(|c| (c.id.clone(), ev.members(c, 0).len())).collect(),
+    }
 }
 
 // ---------------------------------------------------------------- set view
@@ -904,6 +944,20 @@ pub struct SetRow {
     pub heard_as: Option<String>,
     /// Club tags on it: name and colour.
     pub tags: Vec<TagShown>,
+    /// The styles it can be shown as (Show As): the club's in a club's set
+    /// (those it fits first), else the version's own.
+    pub show_as: Vec<ShowAs>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShowAs {
+    pub key: String,
+    pub name: String,
+    /// The song fits it (a club style it doesn't fit can still be chosen, with a warning).
+    pub fits: bool,
+    /// Shown now.
+    pub on: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -918,6 +972,8 @@ pub struct TagShown {
 #[serde(rename_all = "camelCase")]
 pub struct SetView {
     pub setlist: Setlist,
+    /// The club whose guidelines it follows.
+    pub club: Option<ClubSummary>,
     pub rows: Vec<SetRow>,
     /// Everything not skipped, with pauses between songs (ms).
     pub total_ms: f64,
@@ -1016,7 +1072,28 @@ pub fn set_view(ctx: &ViewContext, set: &Setlist, tracks: &[Track], gap_secs: f6
                     }
                 })
                 .collect();
+            let on = |k: &str| shown.iter().any(|s| s.key == k);
+            let show_as: Vec<ShowAs> = if is_pause {
+                vec![]
+            } else if let Some(club) = club {
+                let facts = tv.and_then(|(t, v)| song_facts(ctx, t, v, Some(e)));
+                let mut all: Vec<ShowAs> = club
+                    .styles
+                    .iter()
+                    .map(|(id, st)| ShowAs {
+                        key: id.clone(),
+                        name: st.name.clone(),
+                        fits: facts.as_ref().map_or(true, |f| crate::matching::assess(id, st, f, ctx.tempo_change).ok),
+                        on: on(id),
+                    })
+                    .collect();
+                all.sort_by_key(|x| !x.fits);
+                all
+            } else {
+                tv.map(|(_, v)| v.styles.iter().map(|k| ShowAs { key: k.clone(), name: style_name(&ctx.styles, k), fits: true, on: on(k) }).collect()).unwrap_or_default()
+            };
             SetRow {
+                show_as,
                 entry: e.clone(),
                 number: num,
                 is_pause,
@@ -1107,7 +1184,101 @@ pub fn set_view(ctx: &ViewContext, set: &Setlist, tracks: &[Track], gap_secs: f6
         result
     });
     let warnings = check.as_ref().map_or(0, |c| c.issues.iter().filter(|i| i.level == crate::matching::Level::Warn).count());
-    SetView { setlist: set.clone(), rows, total_ms, remaining_ms, check, warnings }
+    SetView { setlist: set.clone(), club: None, rows, total_ms, remaining_ms, check, warnings }
+}
+
+// ---------------------------------------------------------------- clubs
+
+/// What the interface shows of a club's guidelines (one version).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClubSummary {
+    pub id: String,
+    pub version: String,
+    /// "Dancebreak", or "Dancebreak (Spring 2026)" for an older version.
+    pub label: String,
+    pub name: String,
+    /// A newer version exists: its id.
+    pub newer_version: Option<String>,
+    /// Planned set length (minutes).
+    pub set_minutes: Option<f64>,
+    pub announcements: Vec<String>,
+    pub styles: Vec<StyleDef>,
+    pub tags: Vec<TagShown>,
+}
+
+pub fn club_summary(club: &Club, r: &ClubRef, info: Option<&crate::club::ClubInfo>) -> ClubSummary {
+    let versions = info.map(|i| i.versions.as_slice()).unwrap_or_default();
+    let i = versions.iter().position(|v| v.id == r.version);
+    let label = match i {
+        Some(0) if versions[0].name.is_empty() => club.name.clone(),
+        Some(i) => format!("{} ({})", club.name, versions[i].label),
+        None => format!("{} (missing version)", club.name),
+    };
+    ClubSummary {
+        id: r.id.clone(),
+        version: r.version.clone(),
+        label,
+        name: club.name.clone(),
+        newer_version: versions.first().filter(|v| v.id != r.version).map(|v| v.id.clone()),
+        set_minutes: club.set.minutes.as_ref().and_then(|m| m.max.or(m.min)),
+        announcements: club.announcements.clone(),
+        styles: club.styles.iter().map(|(id, s)| style_def(id, s)).collect(),
+        tags: club
+            .tags
+            .iter()
+            .map(|(k, t)| TagShown { key: k.clone(), name: t.name.clone(), color: t.color.clone().unwrap_or_else(|| NEUTRAL.into()) })
+            .collect(),
+    }
+}
+
+// ---------------------------------------------------------------- deck
+
+/// What a deck shows about its song: worked out when it loads.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeckSong {
+    pub title: String,
+    pub artist: String,
+    pub version_label: String,
+    /// A custom label, or the styles it shows (short), for the artwork's place.
+    pub label: String,
+    pub styles: Vec<Shown>,
+    pub color: String,
+    /// Its tempo before the tempo slider (in its style's counting).
+    pub base_bpm: Option<f64>,
+    /// The club style it's danced as (tempo ranges), if any.
+    pub style: Option<StyleDef>,
+    pub hot_cues: Vec<HotCue>,
+    /// It has a file here (stems can be made).
+    pub has_file: bool,
+    /// The club's (or your) allowed slowdown (percent).
+    pub slower_pct: f64,
+}
+
+pub fn deck_song(ctx: &ViewContext, track: &Track, version: &Version, entry: Option<&SetlistEntry>) -> DeckSong {
+    let rec = track.recording_of(&version.id);
+    let shown = shown_for(ctx, track, version, entry);
+    let style = club_style_of(&shown).cloned();
+    let pb = playback(rec, version, entry, style.as_ref());
+    let base_bpm = rec.and_then(|r| r.rec.bpm).map(|b| match pb.target {
+        Some(t) if resolve_settings(Some(version), entry).target_bpm.is_some() => fold_bpm(b, t),
+        _ => pb.base.unwrap_or(b),
+    });
+    let custom = custom_label(Some(version), entry);
+    DeckSong {
+        title: track.rec.title.clone(),
+        artist: track.rec.artist.clone(),
+        version_label: version_label(version, track),
+        label: custom.unwrap_or_else(|| shown.first().map(|s| s.short.clone()).unwrap_or_default()),
+        color: shown.first().map_or_else(|| NEUTRAL.to_string(), |s| s.color.clone()),
+        styles: shown,
+        base_bpm,
+        style,
+        hot_cues: rec.map(|r| r.rec.hot_cues.clone()).unwrap_or_default(),
+        has_file: rec.is_some_and(|r| !r.files.is_empty()),
+        slower_pct: ctx.tempo_change.slower,
+    }
 }
 
 #[cfg(test)]

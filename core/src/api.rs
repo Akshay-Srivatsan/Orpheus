@@ -7,7 +7,6 @@ use crate::app::{App, PerformState, ProjectorPayload};
 use crate::club::{self, Club, ClubInfo, ClubVersion, Imported};
 use std::collections::HashMap;
 use crate::audio::output::OutputStatus;
-use crate::audio::DeckSnapshot;
 use crate::store::NewTrack;
 use crate::midi::{LearnedMessage, Mapping, PortInfo};
 use crate::model::*;
@@ -1115,8 +1114,8 @@ pub fn audio_test(app: &Arc<App>, deck: usize) -> Res<()> {
     Ok(())
 }
 
-pub fn deck_states(app: &Arc<App>) -> Res<[DeckSnapshot; 2]> {
-    Ok(app.deck_snapshots())
+pub fn deck_states(app: &Arc<App>) -> Res<[crate::app::DeckState; 2]> {
+    Ok(app.deck_states())
 }
 
 /// Loads a version onto a deck (paused unless `play`). Refused for the deck
@@ -1510,6 +1509,103 @@ pub fn midi_action(app: &Arc<App>, action: String, value: Option<f64>, delta: Op
 }
 
 
+/// Where songs go in the set.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SetPosition {
+    /// After what's playing (and what's been played).
+    Next,
+    End,
+    At(usize),
+}
+
+/// Adds songs to the open set (opening a new live set if none is): after
+/// what's playing, at the end, or at a position. While filtering on a style
+/// (`style`), a song added is danced as that style. With one song and a style
+/// slot selected (`slot`), it fills the slot instead.
+pub fn set_add(app: &Arc<App>, version_ids: Vec<Id>, position: SetPosition, style: Option<String>, slot: Option<Id>) -> Res<()> {
+    let open = app.perform.lock().setlist_id.clone().and_then(|id| app.store.setlist(&id).ok());
+    let set = match open {
+        Some(s) => s,
+        None => {
+            let date = jiff::Zoned::now().strftime("%b %-d, %Y").to_string();
+            let club = app.clubs().latest(&app.settings.read().default_club).map(|v| ClubRef { id: app.settings.read().default_club.clone(), version: v });
+            let id = app.store.setlist_create(&format!("Live set — {date}"), "live", club, None).map_err(ae)?;
+            app.open_setlist(Some(id.clone())).map_err(ae)?;
+            crate::app::emit(&app.handle, "setlists-changed", ());
+            app.store.setlist(&id).map_err(ae)?
+        }
+    };
+    if let (Some(slot), [one], false) = (&slot, version_ids.as_slice(), matches!(position, SetPosition::End)) {
+        if set.entries.iter().any(|e| &e.id == slot && e.version_id.is_none()) {
+            entry_update(app, slot.clone(), serde_json::json!({ "versionId": one }))?;
+            return Ok(());
+        }
+    }
+    let at = match position {
+        SetPosition::Next => {
+            let current = app.current_entry_id();
+            let cur = set.entries.iter().position(|e| Some(&e.id) == current.as_ref());
+            let last_done = set.entries.iter().rposition(|e| e.status != "pending");
+            Some(cur.max(last_done).map_or(0, |i| i + 1))
+        }
+        SetPosition::End => None,
+        SetPosition::At(i) => Some(i),
+    };
+    let entries = version_ids
+        .iter()
+        .map(|id| {
+            let styles = app.store.version(id).map(|(v, _)| v.styles).unwrap_or_default();
+            // An unlabelled song, or one danced as several styles, is danced as the filtered one.
+            let pick = style.as_ref().filter(|f| styles.is_empty() || (styles.len() > 1 && styles.contains(f)));
+            NewEntry { version_id: Some(id.clone()), styles: pick.map(|f| vec![f.clone()]), ..Default::default() }
+        })
+        .collect();
+    entries_insert(app, set.id, at, entries).map(|_| ())
+}
+
+/// Moves entries to play next: after what's playing (and what's been played).
+pub fn entries_move_next(app: &Arc<App>, setlist_id: Id, ids: Vec<Id>) -> Res<()> {
+    let set = app.store.setlist(&setlist_id).map_err(ae)?;
+    let current = app.current_entry_id();
+    let mut rest: Vec<&SetlistEntry> = set.entries.iter().filter(|e| !ids.contains(&e.id)).collect();
+    let cur = rest.iter().position(|e| Some(&e.id) == current.as_ref());
+    let last_done = rest.iter().rposition(|e| e.status != "pending");
+    let at = cur.max(last_done).map_or(0, |i| i + 1);
+    let moving: Vec<&SetlistEntry> = set.entries.iter().filter(|e| ids.contains(&e.id)).collect();
+    rest.splice(at..at, moving);
+    entries_reorder(app, setlist_id, rest.into_iter().map(|e| e.id.clone()).collect())
+}
+
+/// Writes a set as a CSV file (number, style, title, artist, version, BPM, length, tags, note, status).
+pub fn setlist_export_csv(app: &Arc<App>, id: Id, path: String) -> Res<()> {
+    let view = set_view(app, id)?;
+    let esc = |v: &str| format!("\"{}\"", v.replace('"', "\"\""));
+    let mut out = String::new();
+    let head = ["#", "Style", "Title", "Artist", "Version", "BPM", "Length", "Tags", "Note", "Status"];
+    out.push_str(&head.iter().map(|h| esc(h)).collect::<Vec<_>>().join(","));
+    out.push('\n');
+    for r in &view.rows {
+        let style = if r.label.is_empty() { r.styles.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(" / ") } else { r.label.clone() };
+        let secs = (r.duration_ms / 1000.0).round() as i64;
+        let cells = [
+            r.number.map(|n| n.to_string()).unwrap_or_default(),
+            style,
+            if r.track_id.is_some() || r.is_pause { r.title.clone() } else { "(slot)".into() },
+            r.artist.clone(),
+            r.version_label.clone(),
+            r.bpm.map(crate::matching::num).unwrap_or_default(),
+            if secs > 0 { format!("{}:{:02}", secs / 60, secs % 60) } else { String::new() },
+            r.tags.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join("; "),
+            r.entry.note.clone(),
+            r.entry.status.clone(),
+        ];
+        out.push_str(&cells.iter().map(|c| esc(c)).collect::<Vec<_>>().join(","));
+        out.push('\n');
+    }
+    crate::store::write_atomic(std::path::Path::new(&path), out.as_bytes()).map_err(ae)
+}
+
 // ---------------------------------------------------------------- views
 
 /// History rows a library view lists at most.
@@ -1541,7 +1637,26 @@ pub fn library_view(app: &Arc<App>, query: crate::views::LibraryQuery) -> Res<cr
 pub fn set_view(app: &Arc<App>, id: Id) -> Res<crate::views::SetView> {
     let set = app.store.setlist(&id).map_err(ae)?;
     let ctx = app.view_context(set.club.clone());
-    Ok(crate::views::set_view(&ctx, &set, &app.store.all_tracks(), app.gap_seconds()))
+    let mut view = crate::views::set_view(&ctx, &set, &app.store.all_tracks(), app.gap_seconds());
+    view.club = set.club.as_ref().and_then(|r| club_summary_of(app, r));
+    Ok(view)
+}
+
+fn club_summary_of(app: &Arc<App>, r: &ClubRef) -> Option<crate::views::ClubSummary> {
+    let club = app.club(r)?;
+    let info = app.clubs().list().into_iter().find(|c| c.id == r.id);
+    Some(crate::views::club_summary(&club, r, info.as_ref()))
+}
+
+/// The club in effect: the open set's, else your default club's latest.
+pub fn active_club(app: &Arc<App>) -> Res<Option<crate::views::ClubSummary>> {
+    Ok(app.active_club_ref().and_then(|r| club_summary_of(app, &r)))
+}
+
+/// Songs, missing ones, the club's songs and each crate's size.
+pub fn library_summary(app: &Arc<App>) -> Res<crate::views::LibrarySummary> {
+    let ctx = app.view_context(None);
+    Ok(crate::views::library_summary(&ctx, &app.store.all_tracks(), &app.store.crates(), crate::model::now_ms()))
 }
 
 /// What smart crate rules can test (for the rule editor).
@@ -2648,6 +2763,37 @@ pub fn call(app: &Arc<App>, name: &str, args: serde_json::Value) -> Res<serde_js
             let a: A = parse(args)?;
             json(midi_action(app, a.action, a.value, a.delta))
         }
+        "set_add" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                version_ids: Vec<Id>,
+                position: SetPosition,
+                style: Option<String>,
+                slot: Option<Id>,
+            }
+            let a: A = parse(args)?;
+            json(set_add(app, a.version_ids, a.position, a.style, a.slot))
+        }
+        "entries_move_next" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                setlist_id: Id,
+                ids: Vec<Id>,
+            }
+            let a: A = parse(args)?;
+            json(entries_move_next(app, a.setlist_id, a.ids))
+        }
+        "setlist_export_csv" => {
+            #[derive(Deserialize)]
+            struct A {
+                id: Id,
+                path: String,
+            }
+            let a: A = parse(args)?;
+            json(setlist_export_csv(app, a.id, a.path))
+        }
         "library_view" => {
             #[derive(Deserialize)]
             struct A {
@@ -2665,6 +2811,8 @@ pub fn call(app: &Arc<App>, name: &str, args: serde_json::Value) -> Res<serde_js
             json(set_view(app, a.id))
         }
         "smart_fields" => json(smart_fields()),
+        "active_club" => json(active_club(app)),
+        "library_summary" => json(library_summary(app)),
         "smart_default_condition" => {
             #[derive(Deserialize)]
             struct A {

@@ -1,0 +1,141 @@
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import Orpheus
+
+// The middle of the window: the view's title and search, the style filter,
+// and its songs (`library_view`, asked for again when anything it shows changes).
+Pane {
+    id: root
+    padding: 0
+
+    property var view: null
+    property alias searchField: search
+
+    signal combine(var songs, var recordings)
+    signal editSmartCrate(string id)
+
+    readonly property var crate: Session.view.kind === "crate" ? Session.crates.find(c => c.id === Session.view.id) : null
+    readonly property string title: {
+        const v = Session.view;
+        switch (v.kind) {
+        case "all": return qsTr("All Songs");
+        case "crate": return crate ? crate.name : qsTr("Crate");
+        case "setlist": { const s = Session.setlists.find(x => x.id === v.id); return s ? s.name : qsTr("Setlist"); }
+        case "history": return qsTr("History");
+        case "missing": return qsTr("Missing Files");
+        case "club-songs": return Session.activeClub ? qsTr("%1's Songs").arg(Session.activeClub.name) : qsTr("Club Songs");
+        }
+        return "";
+    }
+
+    function query() {
+        const kind = Session.view.kind;
+        const v = kind === "crate" || kind === "setlist" ? { kind: kind, id: Session.view.id } : { kind: kind };
+        return {
+            view: v,
+            styleFilter: Session.styleFilter,
+            search: Session.search,
+            sort: Session.sort || null,
+            descending: Session.descending,
+            fold: Session.fold,
+            toggled: Session.toggled,
+            suggestByTempo: Session.suggestByTempo,
+        };
+    }
+    function reload() {
+        const q = query();
+        Backend.call("library_view", { query: q }).then(v => root.view = v, e => Session.toast(String(e)));
+    }
+
+    // Anything the view depends on: ask again (once, shortly after).
+    Timer { id: later; interval: 30; onTriggered: root.reload() }
+    Connections {
+        target: Session
+        function onViewChanged() { Session.sort = ""; Session.descending = false; later.restart(); }
+        function onStyleFilterChanged() { later.restart(); }
+        function onSearchChanged() { later.restart(); }
+        function onSortChanged() { later.restart(); }
+        function onDescendingChanged() { later.restart(); }
+        function onFoldChanged() { later.restart(); }
+        function onToggledChanged() { later.restart(); }
+        function onSuggestByTempoChanged() { later.restart(); }
+        function onLibraryChanged() { later.restart(); }
+        function onSetlistChanged(id) { if (Session.view.kind === "setlist" || Session.view.kind === "history") later.restart(); }
+        function onHistoryChanged() { if (Session.view.kind === "history") later.restart(); }
+        function onActiveClubChanged() { later.restart(); }
+        function onPerformChanged() { later.restart(); }
+    }
+    Component.onCompleted: reload()
+
+    ColumnLayout {
+        anchors.fill: parent
+        spacing: 4
+
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.margins: Theme.spacing
+            Layout.bottomMargin: 0
+            Label { text: root.title; font.bold: true; font.pixelSize: 15 }
+            Label {
+                visible: !!root.crate && !!root.crate.smart
+                text: qsTr("smart crate")
+                opacity: 0.6
+            }
+            Button {
+                visible: !!root.crate && !!root.crate.smart
+                flat: true
+                text: qsTr("Edit Rules…")
+                onClicked: root.editSmartCrate(root.crate.id)
+            }
+            Button {
+                visible: Session.view.kind === "club-songs"
+                flat: true
+                text: qsTr("Get the club's other songs…")
+                onClicked: Session.settingsPage = "clubs"
+            }
+            Item { Layout.fillWidth: true }
+            TextField {
+                id: search
+                Layout.preferredWidth: 240
+                placeholderText: qsTr("Search")
+                text: Session.search
+                onTextEdited: Session.search = text
+                Keys.onEscapePressed: { text = ""; Session.search = ""; focus = false; }
+            }
+        }
+
+        StyleFilterBar {
+            Layout.fillWidth: true
+            Layout.leftMargin: Theme.spacing
+            Layout.rightMargin: Theme.spacing
+            view: root.view
+        }
+
+        // Choosing a song for a style slot, or audio for an edit.
+        Pane {
+            visible: !!Session.fillingSlot || !!Session.pickingEdit
+            Layout.fillWidth: true
+            padding: 6
+            background: Rectangle { color: Qt.alpha(palette.highlight, 0.18) }
+            RowLayout {
+                anchors.fill: parent
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    text: Session.fillingSlot ? qsTr("Choosing a song for the slot: double-click a song, press ✓, or drag it onto the slot.")
+                        : qsTr("Choosing audio for a new version: double-click a song to add its audio.")
+                }
+                Button { flat: true; text: qsTr("Show All Songs"); visible: !!Session.fillingSlot && Session.styleFilter.length > 0; onClicked: Session.styleFilter = [] }
+                Button { flat: true; text: qsTr("Cancel"); onClicked: { Session.fillingSlot = ""; Session.pickingEdit = ""; } }
+            }
+        }
+
+        LibraryTable {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            view: root.view
+            onCombine: (songs, recordings) => root.combine(songs, recordings)
+        }
+    }
+}
