@@ -133,6 +133,19 @@
     clubMenu = { x: r.left, y: r.bottom + 2, items };
   }
 
+  /** Version id → its audio details shown (default: when the song has one version). */
+  let openAudio = $state<Record<Id, boolean>>({});
+  const audioOpen = (v: Version) => openAudio[v.id] ?? (track?.versions.length ?? 0) === 1;
+
+  /** "FLAC" / "Spotify" chips for an audio's files and Spotify link. */
+  function sourceChips(rec: Recording): { label: string; title: string }[] {
+    const ext = (p: string) => p.match(/\.([a-z0-9]+)$/i)?.[1]?.toUpperCase() ?? "file";
+    const out = rec.files.map((p) => ({ label: ext(p), title: p }));
+    if (!rec.files.length && rec.sources.some((x) => x.kind === "file")) out.push({ label: "file missing", title: "Not found on this computer: add its folder in Settings → Library" });
+    for (const x of rec.sources) if (x.kind === "spotify") out.push({ label: "Spotify", title: x.key });
+    return out;
+  }
+
   /** Other songs playing a recording. */
   const otherSongs = (rec: Recording) => rec.songs.filter((id) => id !== track?.id).map((id) => app.trackMap.get(id)).filter(Boolean) as Track[];
 
@@ -171,6 +184,121 @@
   }
 
 </script>
+
+{#snippet audioDetails(rec: Recording)}
+  {@const preferred = rec.preferredSource ?? ""}
+  {@const job = app.stems?.jobs[rec.id]}
+    <div class="grid">
+      <span class="lbl">BPM</span>
+      <span class="row">
+        <input type="number" step="0.1" value={rec.bpm ?? ""} onchange={(e) => patchRecording(rec, { bpm: e.currentTarget.value ? +e.currentTarget.value : null })} />
+        <button class="small" onclick={() => tap(rec)} title="Tap along to the beat (4+ taps)">Tap</button>
+        <span class="mult">
+          <button class="plain small" onclick={() => scaleBpm(rec, 0.5)} title="Half">½</button>
+          <button class="plain small" onclick={() => scaleBpm(rec, 2 / 3)} title="×⅔ (triple meter)">⅔</button>
+          <button class="plain small" onclick={() => scaleBpm(rec, 1.5)} title="×1.5 (triple meter)">1½</button>
+          <button class="plain small" onclick={() => scaleBpm(rec, 2)} title="Double">2×</button>
+        </span>
+      </span>
+      <span></span>
+      <span class="row">
+        {#if rec.bpmSource !== "detected"}
+          <button class="plain small" title="Use the BPM found by analysis"
+            onclick={() => app.run(api.resetBpm(rec.id, "detected"))}>
+            ↺ Analysed{rec.detectedBpm != null ? ` (${fmtBpm(rec.detectedBpm)})` : ""}
+          </button>
+        {/if}
+        {#if rec.bpmSource !== "tag" && (rec.tagBpm != null || rec.files.length)}
+          <button class="plain small" title="Use the BPM stored in the file's tags"
+            onclick={() => app.run(api.resetBpm(rec.id, "tag"))}>
+            ↺ File tag{rec.tagBpm != null ? ` (${fmtBpm(rec.tagBpm)})` : ""}
+          </button>
+        {/if}
+      </span>
+      <span></span>
+      <span class="faint small">{rec.bpmSource ? `from ${({ detected: "analysis", tag: "file tag", tap: "tapping", user: "you" } as Record<string, string>)[rec.bpmSource] ?? rec.bpmSource}` : rec.analyzed ? "not detected" : "analysing…"}{#if rec.loudnessDb != null}{" · "}{rec.loudnessDb.toFixed(1)} LUFS{/if} · {fmtTime(rec.durationMs)}</span>
+      <span class="lbl" title="Beats per bar. Detected from the audio, on the beat grid of the BPM above (fix the BPM first if it's off)">Meter</span>
+      <span class="row">
+        <select value={rec.meterSource === "user" ? String(rec.beatsPerBar ?? "") : "auto"}
+          onchange={(e) => { const v = e.currentTarget.value; patchRecording(rec, { beatsPerBar: v === "auto" ? null : +v }); }}>
+          <option value="auto">Detected{rec.detectedMeter ? `: ${meterName(rec.detectedMeter)}` : rec.analyzed ? ": unclear" : ""}</option>
+          <option value="3">Triple (3/4, 6/8)</option>
+          <option value="4">Duple (2/4, 4/4)</option>
+        </select>
+      </span>
+      <span class="lbl">Gain</span>
+      <span class="row"><input type="number" step="0.5" value={rec.gainDb ?? 0} onchange={(e) => patchRecording(rec, { gainDb: +e.currentTarget.value })} /> dB</span>
+    </div>
+    <div class="section-title sub">Files &amp; Spotify</div>
+    {#each rec.sources as s}
+      <div class="source">
+        <Icon name={s.kind === "spotify" ? "spotify" : "music"} size={13} />
+        {#if s.kind === "file"}
+          <div class="src-body">
+            {#if rec.files.length}
+              {#each rec.files as p}<div class="path" title={p}>{p}</div>{/each}
+            {:else}
+              <div class="warn small">File not found on this computer (content id {s.key.slice(0, 10)}…). Add its folder to your library to relink it.</div>
+            {/if}
+          </div>
+        {:else}
+          <div class="src-body path" title={s.key}>{s.key}</div>
+        {/if}
+        {#if rec.sources.length > 1}
+          <button class="plain small" title="This is different audio: give it its own (undoes Combine as the same recording)"
+            onclick={(ev) => splitMenu(ev, rec, s)}>Split off…</button>
+          <button class="plain icon" title="Remove source" onclick={() => app.run(api.removeSource(rec.id, s))}><Icon name="x" size={12} /></button>
+        {/if}
+      </div>
+    {/each}
+    {#if !rec.sources.some((s) => s.kind === "spotify")}
+      <div class="row">
+        <input type="text" placeholder="Link a Spotify track (URL or URI) of this audio" bind:value={linkInput} style="flex:1" />
+        <button class="small" disabled={!linkInput.trim()} onclick={async () => { if (await app.run(api.linkSpotify(rec.id, linkInput))) linkInput = ""; }}>
+          <Icon name="link" size={12} /> Link
+        </button>
+      </div>
+    {/if}
+    {#if rec.sources.length > 1}
+      <div class="row small">
+        Play from
+        <div class="segmented">
+          <button class:on={preferred !== "spotify"} onclick={() => patchRecording(rec, { preferredSource: null })}>File</button>
+          <button class:on={preferred === "spotify"} onclick={() => patchRecording(rec, { preferredSource: "spotify" })}>Spotify</button>
+        </div>
+      </div>
+    {/if}
+    {#if rec.files.length}
+      <div class="row small">
+        {#if app.stemsReady.has(rec.id)}
+          Stems ready
+          <button class="plain small" onclick={() => app.run(api.stemsDelete(rec.id))}>Delete stems</button>
+        {:else if job && job.state !== "failed"}
+          <span class="num">Preparing stems… {job.state === "running" ? `${Math.round(job.percent)}%` : "(queued)"}</span>
+        {:else}
+          <button class="small" onclick={() => app.run(api.stemsPrepare([rec.id]))}>Prepare Stems</button>
+          {#if job?.state === "failed"}<span class="warn">{job.message}</span>{/if}
+        {/if}
+      </div>
+    {/if}
+    <div class="row small faint">
+      {rec.analyzed ? "Analysed" : "Not analysed yet"}
+      <button class="plain small" onclick={() => api.analyze([rec.id])}><Icon name="reload" size={11} /> Re-analyse</button>
+      <button class="plain small" title="A new song (in your library) playing this audio, e.g. for another line dance"
+        onclick={() => app.run(api.songFromRecording(rec.id)).then((t) => { if (t) app.inspectTrack = t.id; })}>Make a Song from It</button>
+    </div>
+    <div class="row small" title="To suggest it in a club's file: the fingerprint recognises this audio in any format; the hash, exactly this file">
+      <span class="faint">For a club file:</span>
+      <button class="plain small" disabled={!rec.fingerprint} title={rec.fingerprint ? "" : "Analyse it first"}
+        onclick={() => copy(rec.fingerprint, "Fingerprint")}>Fingerprint</button>
+      {#if rec.sources.find((x) => x.kind === "file")}
+        <button class="plain small" onclick={() => copy(rec.sources.find((x) => x.kind === "file")?.key, "File hash")}>Hash</button>
+      {/if}
+      {#if app.songMatches[rec.id]?.length && app.club}
+        <span class="ok" title="{app.club.name} suggests this recording">★ {app.songMatches[rec.id].map((id) => app.club?.style[id]?.name ?? id).join(", ")}</span>
+      {/if}
+    </div>
+{/snippet}
 
 <div class="insp">
   {#if !track && !entry}
@@ -307,7 +435,7 @@
         <input type="text" value={track.artist} placeholder="Artist" onchange={(e) => patchTrack({ artist: e.currentTarget.value })} />
         <input type="text" value={track.album} placeholder="Album" onchange={(e) => patchTrack({ album: e.currentTarget.value })} />
         <textarea rows="2" placeholder="Notes" value={track.notes ?? ""} onchange={(e) => patchTrack({ notes: e.currentTarget.value })}></textarea>
-        <div class="row small faint">played {track.playCount}×</div>
+        <div class="row small faint">{track.versions.length} version{track.versions.length === 1 ? "" : "s"} · {track.recordings.length} audio · played {track.playCount}×</div>
       </section>
 
       <section class="box">
@@ -328,13 +456,35 @@
               <button class="plain icon danger" title="Delete version" disabled={track.versions.length < 2}
                 onclick={() => confirmAction(`Delete version “${v.name}”?`).then((ok) => { if (ok) app.run(api.deleteVersion(v.id)); })}><Icon name="trash" size={13} /></button>
             </div>
-            <div class="grid">
-              {#if track.recordings.length > 1}
-                <span class="lbl" title="The audio this version plays">Recording</span>
-                <select value={v.recording} onchange={(e) => patchVersion(v, { recording: e.currentTarget.value })}>
-                  {#each track.recordings as r (r.id)}<option value={r.id}>{r.title}{r.artist ? ` — ${r.artist}` : ""} ({fmtTime(r.durationMs)}{r.bpm ? `, ${fmtBpm(r.bpm)} BPM` : ""})</option>{/each}
-                </select>
+            {#if vrec}
+              {@const open = audioOpen(v)}
+              {@const sharedHere = track.versions.filter((x) => x.id !== v.id && x.recording === vrec.id)}
+              {@const others = otherSongs(vrec)}
+              <div class="audio">
+                <button class="plain small atoggle" title={open ? "Hide the audio's details" : "BPM, meter, files, stems… of the audio this version plays"}
+                  onclick={() => (openAudio = { ...openAudio, [v.id]: !open })}>{open ? "▾" : "▸"} Audio</button>
+                {#if track.recordings.length > 1}
+                  <select class="apick" value={v.recording} title="The audio this version plays" onchange={(e) => patchVersion(v, { recording: e.currentTarget.value })}>
+                    {#each track.recordings as r (r.id)}<option value={r.id}>{r.title}</option>{/each}
+                  </select>
+                {:else}<span class="atitle" title={vrec.title}>{vrec.title}</span>{/if}
+                <span class="faint num">{fmtTime(vrec.durationMs)}{vrec.bpm ? ` · ${fmtBpm(vrec.bpm)} BPM` : ""}</span>
+                {#each sourceChips(vrec) as c}<span class="chip" title={c.title}>{c.label}</span>{/each}
+              </div>
+              {#if open}
+                <div class="audiobox">
+                  {#if sharedHere.length || others.length}
+                    <div class="small warn">
+                      Shared: changes here also apply to {#each sharedHere as x, i (x.id)}{i ? ", " : ""}“{x.name}”{/each}{#if sharedHere.length && others.length}, and {/if}{#each others as o, i (o.id)}{i ? ", " : ""}<button class="plain link small" onclick={() => (app.inspectTrack = o.id)}>{o.title}</button>{/each}.
+                    </div>
+                  {/if}
+                  {@render audioDetails(vrec)}
+                </div>
               {/if}
+            {:else}
+              <div class="audio warn small">Its audio isn't in the library.</div>
+            {/if}
+            <div class="grid">
               <span class="lbl">Styles</span>
               <StyleChips value={v.styles ?? []} bpm={pb.target} onchange={(keys) => patchVersion(v, { styles: keys })} />
               <span class="lbl" title="Shown to dancers instead of the style names, e.g. the name of a line dance">Shown as</span>
@@ -400,135 +550,6 @@
         {/each}
       </section>
 
-      {#each track.recordings as rec (rec.id)}
-        {@const preferred = rec.preferredSource ?? ""}
-        {@const job = app.stems?.jobs[rec.id]}
-        {@const others = otherSongs(rec)}
-        <section class="box">
-          <div class="section-title">
-            Recording{#if track.recordings.length > 1}: {rec.title}{/if}
-          </div>
-          {#if track.recordings.length > 1 || others.length}
-            <div class="small faint">
-              {#if track.recordings.length > 1}Played by {track.versions.filter((v) => v.recording === rec.id).map((v) => v.name).join(", ")}.{/if}
-              {#if others.length}
-                Also used by
-                {#each others as o, i (o.id)}{i ? ", " : ""}<button class="plain link small" onclick={() => (app.inspectTrack = o.id)}>{o.title}</button>{/each}.
-              {/if}
-            </div>
-          {/if}
-          <div class="grid">
-            <span class="lbl">BPM</span>
-            <span class="row">
-              <input type="number" step="0.1" value={rec.bpm ?? ""} onchange={(e) => patchRecording(rec, { bpm: e.currentTarget.value ? +e.currentTarget.value : null })} />
-              <button class="small" onclick={() => tap(rec)} title="Tap along to the beat (4+ taps)">Tap</button>
-              <span class="mult">
-                <button class="plain small" onclick={() => scaleBpm(rec, 0.5)} title="Half">½</button>
-                <button class="plain small" onclick={() => scaleBpm(rec, 2 / 3)} title="×⅔ (triple meter)">⅔</button>
-                <button class="plain small" onclick={() => scaleBpm(rec, 1.5)} title="×1.5 (triple meter)">1½</button>
-                <button class="plain small" onclick={() => scaleBpm(rec, 2)} title="Double">2×</button>
-              </span>
-            </span>
-            <span></span>
-            <span class="row">
-              {#if rec.bpmSource !== "detected"}
-                <button class="plain small" title="Use the BPM found by analysis"
-                  onclick={() => app.run(api.resetBpm(rec.id, "detected"))}>
-                  ↺ Analysed{rec.detectedBpm != null ? ` (${fmtBpm(rec.detectedBpm)})` : ""}
-                </button>
-              {/if}
-              {#if rec.bpmSource !== "tag" && (rec.tagBpm != null || rec.files.length)}
-                <button class="plain small" title="Use the BPM stored in the file's tags"
-                  onclick={() => app.run(api.resetBpm(rec.id, "tag"))}>
-                  ↺ File tag{rec.tagBpm != null ? ` (${fmtBpm(rec.tagBpm)})` : ""}
-                </button>
-              {/if}
-            </span>
-            <span></span>
-            <span class="faint small">{rec.bpmSource ? `from ${({ detected: "analysis", tag: "file tag", tap: "tapping", user: "you" } as Record<string, string>)[rec.bpmSource] ?? rec.bpmSource}` : rec.analyzed ? "not detected" : "analysing…"}{#if rec.loudnessDb != null}{" · "}{rec.loudnessDb.toFixed(1)} LUFS{/if} · {fmtTime(rec.durationMs)}</span>
-            <span class="lbl" title="Beats per bar. Detected from the audio, on the beat grid of the BPM above (fix the BPM first if it's off)">Meter</span>
-            <span class="row">
-              <select value={rec.meterSource === "user" ? String(rec.beatsPerBar ?? "") : "auto"}
-                onchange={(e) => { const v = e.currentTarget.value; patchRecording(rec, { beatsPerBar: v === "auto" ? null : +v }); }}>
-                <option value="auto">Detected{rec.detectedMeter ? `: ${meterName(rec.detectedMeter)}` : rec.analyzed ? ": unclear" : ""}</option>
-                <option value="3">Triple (3/4, 6/8)</option>
-                <option value="4">Duple (2/4, 4/4)</option>
-              </select>
-            </span>
-            <span class="lbl">Gain</span>
-            <span class="row"><input type="number" step="0.5" value={rec.gainDb ?? 0} onchange={(e) => patchRecording(rec, { gainDb: +e.currentTarget.value })} /> dB</span>
-          </div>
-          <div class="section-title sub">Sources</div>
-          {#each rec.sources as s}
-            <div class="source">
-              <Icon name={s.kind === "spotify" ? "spotify" : "music"} size={13} />
-              {#if s.kind === "file"}
-                <div class="src-body">
-                  {#if rec.files.length}
-                    {#each rec.files as p}<div class="path" title={p}>{p}</div>{/each}
-                  {:else}
-                    <div class="warn small">File not found on this computer (content id {s.key.slice(0, 10)}…). Add its folder to your library to relink it.</div>
-                  {/if}
-                </div>
-              {:else}
-                <div class="src-body path" title={s.key}>{s.key}</div>
-              {/if}
-              {#if rec.sources.length > 1}
-                <button class="plain small" title="This source is different audio: make it a recording of its own (undoes Same Recording)"
-                  onclick={(ev) => splitMenu(ev, rec, s)}>Split off…</button>
-                <button class="plain icon" title="Remove source" onclick={() => app.run(api.removeSource(rec.id, s))}><Icon name="x" size={12} /></button>
-              {/if}
-            </div>
-          {/each}
-          {#if !rec.sources.some((s) => s.kind === "spotify")}
-            <div class="row">
-              <input type="text" placeholder="Link a Spotify track (URL or URI) of this audio" bind:value={linkInput} style="flex:1" />
-              <button class="small" disabled={!linkInput.trim()} onclick={async () => { if (await app.run(api.linkSpotify(rec.id, linkInput))) linkInput = ""; }}>
-                <Icon name="link" size={12} /> Link
-              </button>
-            </div>
-          {/if}
-          {#if rec.sources.length > 1}
-            <div class="row small">
-              Play from
-              <div class="segmented">
-                <button class:on={preferred !== "spotify"} onclick={() => patchRecording(rec, { preferredSource: null })}>File</button>
-                <button class:on={preferred === "spotify"} onclick={() => patchRecording(rec, { preferredSource: "spotify" })}>Spotify</button>
-              </div>
-            </div>
-          {/if}
-          {#if rec.files.length}
-            <div class="row small">
-              {#if app.stemsReady.has(rec.id)}
-                Stems ready
-                <button class="plain small" onclick={() => app.run(api.stemsDelete(rec.id))}>Delete stems</button>
-              {:else if job && job.state !== "failed"}
-                <span class="num">Preparing stems… {job.state === "running" ? `${Math.round(job.percent)}%` : "(queued)"}</span>
-              {:else}
-                <button class="small" onclick={() => app.run(api.stemsPrepare([rec.id]))}>Prepare Stems</button>
-                {#if job?.state === "failed"}<span class="warn">{job.message}</span>{/if}
-              {/if}
-            </div>
-          {/if}
-          <div class="row small faint">
-            {rec.analyzed ? "Analysed" : "Not analysed yet"}
-            <button class="plain small" onclick={() => api.analyze([rec.id])}><Icon name="reload" size={11} /> Re-analyse</button>
-            <button class="plain small" title="A new song (in your library) playing this recording, e.g. for another line dance"
-              onclick={() => app.run(api.songFromRecording(rec.id)).then((t) => { if (t) app.inspectTrack = t.id; })}>Make a Song from It</button>
-          </div>
-          <div class="row small" title="To suggest it in a club's file: the fingerprint recognises this recording in any audio format; the hash, exactly this file">
-            <span class="faint">For a club file:</span>
-            <button class="plain small" disabled={!rec.fingerprint} title={rec.fingerprint ? "" : "Analyse it first"}
-              onclick={() => copy(rec.fingerprint, "Fingerprint")}>Fingerprint</button>
-            {#if rec.sources.find((x) => x.kind === "file")}
-              <button class="plain small" onclick={() => copy(rec.sources.find((x) => x.kind === "file")?.key, "File hash")}>Hash</button>
-            {/if}
-            {#if app.songMatches[rec.id]?.length && app.club}
-              <span class="ok" title="{app.club.name} suggests this recording">★ {app.songMatches[rec.id].map((id) => app.club?.style[id]?.name ?? id).join(", ")}</span>
-            {/if}
-          </div>
-        </section>
-      {/each}
     {/if}
   {/if}
 </div>
@@ -562,6 +583,13 @@
   .vhead { display: flex; gap: 4px; align-items: center; }
   .vname { flex: 1; font-weight: 600; }
   .star { color: var(--text-faint); font-size: 14px; }
+  .audio { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-sm); }
+  .atoggle { padding: 0 2px; height: 20px; color: var(--text-dim); flex: none; }
+  .atitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
+  .apick { min-width: 0; flex: 1 1 auto; height: 22px; }
+  .audio .num { flex: none; }
+  .chip { flex: none; font-size: var(--fs-xs); padding: 0 5px; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--text-dim); }
+  .audiobox { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 6px; background: var(--bg-elev-2); border: 1px solid var(--border); }
   .star.on { color: var(--yellow); opacity: 1; }
   .tags { display: flex; flex-wrap: wrap; gap: 4px; }
   .tagbtn { cursor: pointer; height: 20px; }
