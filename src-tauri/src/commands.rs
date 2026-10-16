@@ -225,8 +225,10 @@ pub async fn reconnect(app: S<'_>, missing: Id, found: Id) -> Res<()> {
 /// Writes a set as a set file (`*.orpheus-set.toml`).
 #[tauri::command]
 pub async fn setlist_export(app: S<'_>, id: Id, path: String) -> Res<()> {
-    let club_name = app.store.setlist(&id).ok().and_then(|s| s.club).and_then(|c| app.club(&c)).map(|c| c.name.clone());
-    let text = crate::setfile::export(&app.store, &id, club_name).map_err(ae)?;
+    // The club guidelines it was planned with travel with it.
+    let club = app.store.setlist(&id).ok().and_then(|s| s.club).and_then(|c| app.club(&c));
+    let rules = club.as_deref().map(|c| club::to_toml(&club::self_contained(c)));
+    let text = crate::setfile::export(&app.store, &id, club.map(|c| c.name.clone()), rules).map_err(ae)?;
     crate::store::write_atomic(std::path::Path::new(&path), text.as_bytes()).map_err(ae)
 }
 
@@ -235,13 +237,22 @@ pub async fn setlist_export(app: S<'_>, id: Id, path: String) -> Res<()> {
 pub async fn setlist_import(app: S<'_>, path: String) -> Res<crate::setfile::ImportReport> {
     let text = std::fs::read_to_string(&path).map_err(err)?;
     let file: crate::setfile::SetFile = toml::from_str(&text).map_err(|e| format!("Not an Orpheus set file: {e}"))?;
-    // Its club, if you have it: that version of its guidelines, else the latest.
-    let club = file.club.as_ref().and_then(|c| {
-        let clubs = app.clubs();
-        let have = clubs.club(&c.id, Some(&c.version)).is_ok();
-        let version = if have { Some(c.version.clone()) } else { clubs.latest(&c.id) };
-        version.map(|v| ClubRef { id: c.id.clone(), version: v })
-    });
+    // Its club guidelines: that version if you have it, else added from the
+    // file (into the club of that id if you have it), else your latest.
+    let clubs = app.clubs();
+    let club = match file.club.as_ref() {
+        None => None,
+        Some(c) if clubs.club(&c.id, Some(&c.version)).is_ok() => Some(ClubRef { id: c.id.clone(), version: c.version.clone() }),
+        Some(c) => match c.rules.as_deref() {
+            Some(rules) => {
+                let into = clubs.latest(&c.id).map(|_| c.id.clone());
+                let r = clubs.add(rules, "set file", "", into.as_deref(), &HashMap::new(), &Default::default(), now_ms()).map_err(ae)?;
+                clubs_changed(&app);
+                Some(ClubRef { id: r.club_id, version: r.version_id })
+            }
+            None => clubs.latest(&c.id).map(|v| ClubRef { id: c.id.clone(), version: v }),
+        },
+    };
     let report = crate::setfile::import(&app.store, &text, club).map_err(ae)?;
     crate::app::emit(&app.handle, "setlists-changed", ());
     crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
@@ -1059,9 +1070,11 @@ pub async fn club_delete(app: S<'_>, club_id: String) -> Res<()> {
 
 /// Writes a version's file (to share it, or publish it on a website).
 #[tauri::command]
+/// Writes a club's guidelines as one self-contained file (to publish on the
+/// club's website): suggested songs and their fingerprints written in.
 pub async fn club_export(app: S<'_>, club_id: String, version_id: String, path: String) -> Res<()> {
-    let v = app.clubs().get(&club_id, &version_id).map_err(ae)?;
-    std::fs::write(&path, v.text).map_err(|e| format!("{path}: {e}"))
+    let club = app.clubs().club(&club_id, Some(&version_id)).map_err(ae)?;
+    std::fs::write(&path, club::to_toml(&club::self_contained(&club))).map_err(|e| format!("{path}: {e}"))
 }
 
 // ---------------------------------------------------------------- settings

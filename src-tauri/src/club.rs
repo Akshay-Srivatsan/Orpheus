@@ -104,6 +104,27 @@ impl Club {
     }
 }
 
+/// The club as one self-contained file (to publish, or to embed in a set
+/// file): the song libraries' suggested songs written into their styles, and
+/// fingerprint references replaced by the fingerprints.
+pub fn self_contained(club: &Club) -> Club {
+    let mut c = club.clone();
+    for st in c.styles.values_mut() {
+        let from_library: Vec<ClubSong> = std::mem::take(&mut st.library_songs).into_iter().map(|s| ClubSong { id: None, ..s }).collect();
+        st.songs.extend(from_library);
+        st.suggested.clear();
+        for s in st.songs.iter_mut() {
+            if let Some(f) = s.fingerprint.clone().filter(|f| is_fingerprint_ref(f)) {
+                s.fingerprint = club.fingerprints.get(&f).cloned();
+            }
+        }
+    }
+    c.song_library.clear();
+    c.library.clear();
+    c.fingerprints.clear();
+    c
+}
+
 /// A fingerprint value that points elsewhere (fingerprint text itself is
 /// letters, digits, `-` and `_` only).
 pub fn is_fingerprint_ref(s: &str) -> bool {
@@ -1450,6 +1471,33 @@ pub async fn fetch(url: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_club_exports_as_one_self_contained_file() {
+        let text = r#"
+name = "Club"
+song_library = "songs.toml"
+
+[style.barbie]
+name = "Barbie Line Dance"
+suggested = ["barbie-rp"]
+
+[[style.barbie.song]]
+title = "Own song"
+fingerprint = "fingerprints/own.txt"
+"#;
+        let mut club = parse(text).unwrap();
+        club.library.insert("barbie-rp".into(), ClubSong { title: Some("Barbie (RP edit)".into()), hash: Some("a0123456789abcdef0123456789abcdef".into()), ..Default::default() });
+        let fp = crate::fingerprint::encode(&(0..200u32).map(|i| i.wrapping_mul(2654435761)).collect::<Vec<_>>());
+        club.fingerprints.insert("fingerprints/own.txt".into(), fp.clone());
+        club.attach_library();
+        let out = to_toml(&self_contained(&club));
+        assert!(!out.contains("song_library") && !out.contains("suggested") && !out.contains("fingerprints/"), "{out}");
+        let back = parse(&out).unwrap();
+        let songs = &back.styles["barbie"].songs;
+        assert_eq!(songs.iter().map(|s| s.title.clone().unwrap()).collect::<Vec<_>>(), ["Own song", "Barbie (RP edit)"]);
+        assert_eq!(songs[0].fingerprint.as_deref(), Some(fp.as_str()));
+    }
+
     use super::*;
 
     const SAMPLE: &str = r##"

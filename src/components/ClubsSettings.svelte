@@ -315,7 +315,7 @@
         <button class="small" disabled={busy} onclick={checkUpdates} title={sel.url ? `Fetch ${sel.url} again` : "Fetch the file again from where it was imported"}>
           <Icon name="reload" size={12} /> {busy ? "Checking…" : "Check for Updates"}
         </button>
-        <button class="small" onclick={exportVersion} title="Save this version as a file (to share or publish)">Export…</button>
+        <button class="small" onclick={exportVersion} title="Save this version as one self-contained file (its suggested songs and fingerprints written in), to share or put on the club's website">Export…</button>
         {#if unusedOld.length}
           <button class="small" onclick={deleteUnused} title="Delete the {unusedOld.length} older version(s) no set uses">Delete Unused Old Versions</button>
         {/if}

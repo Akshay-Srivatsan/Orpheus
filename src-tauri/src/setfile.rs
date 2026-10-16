@@ -37,6 +37,10 @@ pub struct SetClub {
     pub version: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub name: String,
+    /// That version of its guidelines, as a self-contained club file (added
+    /// on import if the library doesn't have it).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rules: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -109,7 +113,7 @@ pub struct SetSong {
 }
 
 /// A set as a set file.
-pub fn export(store: &Store, setlist_id: &str, club_name: Option<String>) -> Result<String> {
+pub fn export(store: &Store, setlist_id: &str, club_name: Option<String>, club_rules: Option<String>) -> Result<String> {
     let set = store.setlist(setlist_id)?;
     let mut entries = vec![];
     for e in &set.entries {
@@ -156,7 +160,7 @@ pub fn export(store: &Store, setlist_id: &str, club_name: Option<String>) -> Res
         date: set.event_date,
         mode: set.mode,
         notes: set.notes,
-        club: set.club.map(|c| SetClub { id: c.id, version: c.version, name: club_name.unwrap_or_default() }),
+        club: set.club.map(|c| SetClub { id: c.id, version: c.version, name: club_name.unwrap_or_default(), rules: club_rules }),
         entries,
     };
     let body = toml::to_string_pretty(&file)?;
@@ -320,7 +324,7 @@ mod tests {
         let mk = |v: &Id| NewEntry { version_id: Some(v.clone()), ..Default::default() };
         let ids = a.entries_insert(&sid, None, &[mk(&same), mk(&enc), mk(&sp), mk(&gone), NewEntry { styles: Some(vec!["waltz".into()]), ..Default::default() }, NewEntry { kind: EntryKind::Pause, pause_before: Some(30.0), ..Default::default() }]).unwrap();
         a.entry_update(&ids[0], &EntryPatch { overrides: Some(Overrides { target_bpm: Some(150.0), ..Default::default() }), hold: Some(true), ..Default::default() }).unwrap();
-        let text = export(&a, &sid, None).unwrap();
+        let text = export(&a, &sid, None, None).unwrap();
         assert!(text.contains("h-same") && text.contains("spotify:track:abc") && text.contains("targetBpm = 150"), "{text}");
 
         // Another library: the same file, and an MP3 of the FLAC (another hash, same audio).
