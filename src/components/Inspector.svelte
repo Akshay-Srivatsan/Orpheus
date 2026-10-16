@@ -58,7 +58,7 @@
     const rec = recordingOf(t, v);
     const len = rec ? fmtTime(playedDurationMs(t, v, at, pb.rate, { fadeSeconds: app.fadeSeconds, trimSilence: app.settings?.trimSilence })) : "";
     const warn = shown.some((x) => x.problems.length) ? " ⚠" : "";
-    return `${v.name} — ${fmtBpm(pb.target ?? rec?.bpm)} BPM, ${len}${warn}`;
+    return `${v.name} — ${fmtBpm(pb.target ?? rec?.bpm)} BPM, ${len}${warn}${v.hidden ? " (not in the library)" : ""}`;
   }
 
   function setClubStyles(entryId: Id, ids: string[]) {
@@ -455,9 +455,19 @@
               <input type="text" class="vname" value={v.name} onchange={(e) => patchVersion(v, { name: e.currentTarget.value })} />
               <button class="plain icon" title="Preview this version on the free deck" onclick={() => audition(v.id)}><Icon name="headphones" size={13} /></button>
               <button class="plain icon" title="Duplicate" onclick={() => duplicateVersion(v)}><Icon name="copy" size={13} /></button>
-              <button class="plain icon danger" title="Delete version" disabled={track.versions.length < 2}
-                onclick={() => confirmAction(`Delete version “${v.name}”?`).then((ok) => { if (ok) app.run(api.deleteVersion(v.id)); })}><Icon name="trash" size={13} /></button>
+              {#if !v.hidden}
+                <button class="plain icon danger" title="Remove this version from the library (sets that play it keep it)"
+                  onclick={() => confirmAction(track.versions.filter((x) => !x.hidden).length < 2
+                    ? `Remove “${track.title}” from the library? Sets that play it keep it.`
+                    : `Remove version “${v.name}” from the library? Sets that play it keep it.`, "Remove").then((ok) => { if (ok) app.run(api.deleteVersion(v.id)); })}><Icon name="trash" size={13} /></button>
+              {/if}
             </div>
+            {#if v.hidden}
+              <div class="row small warn">
+                Not in the library: only the sets that play it keep it.
+                <button class="plain small" onclick={() => patchVersion(v, { hidden: false })}>Show in Library</button>
+              </div>
+            {/if}
             {#if vrec}
               {@const open = audioOpen(v)}
               {@const sharedHere = track.versions.filter((x) => x.id !== v.id && x.recording === vrec.id)}

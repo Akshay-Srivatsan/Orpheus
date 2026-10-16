@@ -58,8 +58,10 @@ pub async fn track_update(app: S<'_>, id: Id, patch: serde_json::Value) -> Res<T
 }
 
 #[tauri::command]
+/// Takes songs out of the library; sets that play them keep them (hidden).
 pub async fn tracks_delete(app: S<'_>, ids: Vec<Id>) -> Res<()> {
-    app.store.delete_tracks(&ids).map_err(ae)?;
+    let keep: Vec<Id> = app.decks.iter().filter_map(|d| d.track_id()).collect();
+    app.store.remove_tracks(&ids, &keep).map_err(ae)?;
     crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
     crate::app::emit(&app.handle, "setlists-changed", ());
     crate::app::emit(&app.handle, "crates-changed", ());
@@ -417,9 +419,11 @@ pub async fn version_update(app: S<'_>, id: Id, patch: serde_json::Value) -> Res
 }
 
 #[tauri::command]
+/// Takes a version out of the library (hidden while a set plays it).
 pub async fn version_delete(app: S<'_>, id: Id) -> Res<()> {
     let (_, tid) = app.store.version(&id).map_err(ae)?;
-    app.store.version_delete(&id).map_err(ae)?;
+    let keep: Vec<Id> = app.decks.iter().filter_map(|d| d.track_id()).collect();
+    app.store.remove_version(&id, &keep).map_err(ae)?;
     crate::app::emit(&app.handle, "library-changed", vec![tid]);
     crate::app::emit(&app.handle, "crates-changed", ());
     Ok(())

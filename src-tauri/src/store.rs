@@ -174,6 +174,7 @@ fn original_version(recording: &str) -> Version {
         settings: Overrides::default(),
         comment: String::new(),
         tags: vec![],
+        hidden: false,
     }
 }
 
@@ -1070,9 +1071,78 @@ impl Store {
         Ok(id)
     }
 
-    /// Deletes set-only songs that no setlist or crate references any more.
-    /// `keep` protects songs that are loaded on a deck.
+    /// Version ids that setlists play.
+    fn versions_in_sets(&self) -> std::collections::HashSet<Id> {
+        let inner = self.inner.read();
+        inner.setlists.values().flat_map(|s| s.entries.iter().filter_map(|e| e.version_id.clone())).collect()
+    }
+
+    /// Takes songs out of the library: they leave crates and library views;
+    /// those no set plays are deleted, the others stay (hidden) for those
+    /// sets, until no set plays them. `keep` protects songs on a deck.
+    pub fn remove_tracks(&self, ids: &[Id], keep: &[Id]) -> Result<usize> {
+        for id in ids {
+            self.set_in_library(id, false)?;
+        }
+        let vids: Vec<Id> = ids.iter().filter_map(|id| self.track(id).ok()).flat_map(|t| t.rec.versions.into_iter().map(|v| v.id)).collect();
+        self.leave_crates(&vids)?;
+        self.prune_unused(keep)
+    }
+
+    /// Takes a version out of the library: deleted, or hidden while a set
+    /// plays it. The last one shown takes the song out of the library.
+    pub fn remove_version(&self, id: &str, keep: &[Id]) -> Result<()> {
+        let (_, tid) = self.version(id)?;
+        let t = self.track(&tid)?;
+        let shown: Vec<&Version> = t.rec.versions.iter().filter(|v| !v.hidden).collect();
+        if shown.len() == 1 && shown[0].id == id {
+            self.remove_tracks(&[tid], keep)?;
+            return Ok(());
+        }
+        if self.versions_in_sets().contains(id) {
+            self.version_update(id, &VersionPatch { hidden: Some(true), ..Default::default() })?;
+            self.leave_crates(&[id.to_string()])?;
+            if t.rec.primary.as_deref() == Some(id) {
+                self.update_track(&tid, &TrackPatch { primary: Some(None), ..Default::default() })?;
+            }
+            Ok(())
+        } else {
+            self.version_delete(id)
+        }
+    }
+
+    /// Plain crates (part of the library) stop listing versions.
+    fn leave_crates(&self, vids: &[Id]) -> Result<()> {
+        let changed: Vec<Crate> = {
+            let mut inner = self.inner.write();
+            let mut out = vec![];
+            for c in inner.crates.values_mut() {
+                let before = c.version_ids.len();
+                c.version_ids.retain(|v| !vids.contains(v));
+                if c.version_ids.len() != before {
+                    out.push(c.clone());
+                }
+            }
+            out
+        };
+        for c in &changed {
+            self.save_crate(c)?;
+        }
+        Ok(())
+    }
+
+    /// Deletes songs out of the library (and hidden versions) that no
+    /// setlist or crate plays any more. `keep` protects songs on a deck.
     pub fn prune_unused(&self, keep: &[Id]) -> Result<usize> {
+        // Hidden versions no set plays any more.
+        let in_sets = self.versions_in_sets();
+        let hidden: Vec<Id> = {
+            let inner = self.inner.read();
+            inner.tracks.values().filter(|t| t.in_library && !keep.contains(&t.id)).flat_map(|t| t.versions.iter().filter(|v| v.hidden && !in_sets.contains(&v.id)).map(|v| v.id.clone())).collect()
+        };
+        for v in &hidden {
+            self.version_delete(v)?;
+        }
         let doomed: Vec<Id> = {
             let inner = self.inner.read();
             let mut used: std::collections::HashSet<&str> = std::collections::HashSet::new();
@@ -1098,9 +1168,9 @@ impl Store {
         Ok(doomed.len())
     }
 
-    /// Deletes songs (their versions leave setlists and crates). Their
-    /// recordings stay, hidden, unless they're Spotify-only and nothing else
-    /// plays them (they can be added from Spotify again).
+    /// Deletes songs (their versions leave setlists and crates); recordings
+    /// nothing plays any more leave the library. (Removing songs from the
+    /// library is `remove_tracks`: sets keep them.)
     pub fn delete_tracks(&self, ids: &[Id]) -> Result<()> {
         let mut changed_setlists = vec![];
         let mut changed_crates = vec![];
@@ -1539,6 +1609,7 @@ impl Store {
             if let Some(x) = &p.stems { v.settings.stems = x.clone(); }
             if let Some(x) = &p.comment { v.comment = x.clone(); }
             if let Some(x) = &p.tags { v.tags = x.clone(); }
+            if let Some(x) = p.hidden { v.hidden = x; }
             Ok(v.clone())
         })
     }
@@ -2237,6 +2308,7 @@ mod tests {
                     settings: Overrides { target_bpm: Some(150.0), ..Default::default() },
                     comment: String::new(),
                     tags: vec![],
+                    hidden: false,
                 },
             )
             .unwrap();
@@ -2367,7 +2439,7 @@ mod tests {
         let (va, ra) = first(&store, &a);
         let (vb, rb) = first(&store, &b);
         let teaching = store
-            .version_create(&b, Version { id: String::new(), name: "Teaching".into(), recording: String::new(), display_name: None, styles: vec![], legacy_style: None, settings: Overrides { target_bpm: Some(100.0), ..Default::default() }, comment: String::new(), tags: vec![] })
+            .version_create(&b, Version { id: String::new(), name: "Teaching".into(), recording: String::new(), display_name: None, styles: vec![], legacy_style: None, settings: Overrides { target_bpm: Some(100.0), ..Default::default() }, comment: String::new(), tags: vec![], hidden: false })
             .unwrap();
         let sid = store.setlist_create("Set", "live", None, None).unwrap();
         let eid = store.entries_insert(&sid, None, &[NewEntry { version_id: Some(vb.clone()), ..Default::default() }]).unwrap()[0].clone();
@@ -2535,6 +2607,41 @@ mod tests {
         assert!(store.track(&c).map(|t| t.rec.id == a).unwrap_or(true));
         assert_eq!(store.all_tracks().len(), 2);
         assert!(store.reconnect_matches(None).is_empty());
+        let _ = fs::remove_dir_all(lib.parent().unwrap());
+    }
+
+    #[test]
+    fn removing_from_the_library_keeps_what_sets_play() {
+        let (lib, local) = temp_dirs();
+        let store = Store::open(&lib, &local).unwrap();
+        let a = song(&store, "In a set", file("a"));
+        let b = song(&store, "Not in a set", file("b"));
+        let (va, ra) = first(&store, &a);
+        let sid = store.setlist_create("Set", "live", None, None).unwrap();
+        let eid = store.entries_insert(&sid, None, &[NewEntry { version_id: Some(va.clone()), ..Default::default() }]).unwrap()[0].clone();
+        let cr = store.crate_create("C", None).unwrap();
+        store.crate_add(&cr, &[va.clone()]).unwrap();
+        store.remove_tracks(&[a.clone(), b.clone()], &[]).unwrap();
+        // The set still plays it (hidden from the library, out of the crate); the other is gone.
+        assert!(!store.track(&a).unwrap().rec.in_library);
+        assert_eq!(store.entry(&eid).unwrap().0.version_id, Some(va.clone()));
+        assert!(store.crates()[0].version_ids.is_empty());
+        assert!(store.track(&b).is_err());
+        // Removed from the set too: truly removed.
+        store.entries_delete(&sid, &[eid]).unwrap();
+        store.prune_unused(&[]).unwrap();
+        assert!(store.track(&a).is_err() && store.recording(&ra).is_err());
+
+        // A version: hidden while a set plays it, deleted after.
+        let c = song(&store, "Two versions", file("c"));
+        let v2 = store.version_create(&c, Version { id: String::new(), name: "Short".into(), recording: String::new(), display_name: None, styles: vec![], legacy_style: None, settings: Overrides { cue_out_ms: Some(60_000), ..Default::default() }, comment: String::new(), tags: vec![], hidden: false }).unwrap();
+        let e2 = store.entries_insert(&sid, None, &[NewEntry { version_id: Some(v2.id.clone()), ..Default::default() }]).unwrap()[0].clone();
+        store.remove_version(&v2.id, &[]).unwrap();
+        assert!(store.version(&v2.id).unwrap().0.hidden);
+        store.entries_delete(&sid, &[e2]).unwrap();
+        store.prune_unused(&[]).unwrap();
+        assert!(store.version(&v2.id).is_err());
+        assert_eq!(store.track(&c).unwrap().rec.versions.len(), 1);
         let _ = fs::remove_dir_all(lib.parent().unwrap());
     }
 

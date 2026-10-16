@@ -129,6 +129,10 @@ pub struct Version {
     /// Your tags (keys into `styles.json`'s `tags`), e.g. "familiar".
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// Removed from the library while a set still plays it: hidden from
+    /// library views, deleted once no set does.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -155,6 +159,8 @@ pub struct VersionPatch {
     pub stems: Option<Option<serde_json::Map<String, serde_json::Value>>>,
     pub comment: Option<String>,
     pub tags: Option<Vec<String>>,
+    /// Shows it in the library again (`false`).
+    pub hidden: Option<bool>,
 }
 
 /// One of *your* dance styles: what versions in your library are tagged with.

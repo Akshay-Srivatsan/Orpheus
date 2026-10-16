@@ -32,6 +32,8 @@ export interface Version extends Overrides {
   comment?: string;
   /** Your tags (keys into styles.json's tags). */
   tags?: string[];
+  /** Removed from the library while a set plays it (shown only there). */
+  hidden?: boolean;
 }
 
 /**

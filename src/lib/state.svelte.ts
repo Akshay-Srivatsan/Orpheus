@@ -126,7 +126,7 @@ class AppState {
   /** Rows in the library (excludes set-only songs, which are still in versionMap). */
   rows = $derived.by(() => {
     const out: Row[] = [];
-    for (const t of this.tracks) if (t.inLibrary !== false) out.push(...rowsOf(t));
+    for (const t of this.tracks) if (t.inLibrary !== false) out.push(...rowsOf(t).filter((r) => !r.version.hidden));
     return out;
   });
   libraryTracks = $derived(this.tracks.filter((t) => t.inLibrary !== false));
