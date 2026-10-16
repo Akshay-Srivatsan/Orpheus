@@ -19,6 +19,7 @@ export type SourceView =
   | { kind: "history" }
   | { kind: "missing" }
   | { kind: "files" }
+  | { kind: "club-songs" }
   | { kind: "spotify-search" }
   | { kind: "spotify-playlist"; uri: string; name: string };
 

@@ -167,6 +167,13 @@
 
   <div class="group">
     <div class="section-title row">Crates <button class="plain icon add" title="New crate or smart crate" onclick={addMenu}><Icon name="plus" size={13} /></button></div>
+    {#if app.club}
+      <!-- The club's suggested songs, as a crate while that club is active. -->
+      <button class="item" class:sel={is({ kind: "club-songs" })} onclick={() => go({ kind: "club-songs" })}
+        title="The songs {app.club.name} suggests for its styles that you have (Settings → Clubs lists the others)">
+        <Icon name="star" size={14} /> {app.club.name}'s Songs <span class="count">{new Set(Object.keys(app.songMatches)).size}</span>
+      </button>
+    {/if}
     {#each app.crates as c (c.id)}
       {#if renaming === c.id}
         <!-- svelte-ignore a11y_autofocus -->

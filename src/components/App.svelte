@@ -63,9 +63,21 @@
       case "history": return "History";
       case "missing": return "Missing Files";
       case "files": return "Files";
+      case "club-songs": return `${app.club?.name ?? "Club"}'s Songs`;
       case "spotify-search": return "Spotify";
       case "spotify-playlist": return v.name;
     }
+  });
+  /** In the club's songs: how many of its suggested songs you have. */
+  let clubSongCount = $state<{ have: number; total: number } | null>(null);
+  $effect(() => {
+    const r = app.clubRef;
+    void app.songMatches;
+    if (app.view.kind !== "club-songs" || !r) return;
+    api.clubSongEntries(r.id, r.version).then((e) => {
+      const all = Object.values(e).flat();
+      clubSongCount = { have: all.filter((m) => m.length).length, total: all.length };
+    }).catch(() => (clubSongCount = null));
   });
   const viewCrate = $derived(app.view.kind === "crate" ? app.crates.find((c) => c.id === (app.view as { id: string }).id) : undefined);
 
@@ -111,6 +123,10 @@
             <div class="vt">
               {#if viewCrate?.smart}<Icon name="auto" size={15} />{/if}
               {viewTitle}
+              {#if app.view.kind === "club-songs" && clubSongCount}
+                <span class="faint small">{clubSongCount.have} of {clubSongCount.total} suggested songs here ·
+                  <button class="plain small link" onclick={() => (app.settingsOpen = "clubs")}>get the others in Settings → Clubs</button></span>
+              {/if}
               {#if viewCrate?.smart}
                 <span class="faint small" title={viewCrate.smart.conditions.map((c) => describe(c, app.smartCtx)).join(viewCrate.smart.match === "any" ? "\nor " : "\nand ")}>smart crate</span>
                 <button class="plain small" onclick={() => (app.smartEditor = viewCrate!.id)}>Edit Rules…</button>
@@ -169,4 +185,5 @@
   .loading { display: grid; place-items: center; height: 100vh; color: var(--text-dim); }
   .dropzone { position: fixed; inset: 12px; z-index: 90; border: 3px dashed var(--blue); border-radius: 16px; background: rgba(10,132,255,0.08);
     display: grid; place-items: center; font: 600 var(--fs-lg) var(--font-display); pointer-events: none; }
+  .link { padding: 0; height: auto; color: var(--blue); display: inline; }
 </style>

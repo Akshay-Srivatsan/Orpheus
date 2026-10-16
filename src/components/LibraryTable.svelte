@@ -50,6 +50,9 @@
         return app.rows.map((r) => mk(r));
       case "missing":
         return app.rows.filter((r) => r.rec.missing).map((r) => mk(r));
+      case "club-songs":
+        // The active club's suggested songs that you have (in the library, or only in sets).
+        return [...app.versionMap.values()].filter((r) => !r.version.hidden && app.songMatches[r.rec.id]?.length).map((r) => mk(r));
       case "crate": {
         const c = app.crates.find((c) => c.id === v.id);
         if (c?.smart) return evaluate(c.smart, app.rows, app.smartCtx).map((r) => mk(r));
@@ -142,7 +145,7 @@
   });
 
   /** Views listing songs (not particular versions, as setlists, history and crates do) fold them. */
-  const foldable = $derived(app.view.kind === "all" || app.view.kind === "missing" || (app.view.kind === "crate" && !plainCrate));
+  const foldable = $derived(app.view.kind === "all" || app.view.kind === "missing" || app.view.kind === "club-songs" || (app.view.kind === "crate" && !plainCrate));
   const isOpen = (trackId: Id) => app.foldVersions === !!app.foldToggled[trackId];
 
   /** The rows shown: a song's versions folded under the first of them (in this order), unless unfolded. */
