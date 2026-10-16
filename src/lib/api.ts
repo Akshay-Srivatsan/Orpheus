@@ -29,6 +29,10 @@ export const api = {
   exportSetlist: (id: T.Id, path: string) => call<void>("setlist_export", { id, path }),
   /** Adds a set from a set file, linking its songs to this library's audio. */
   importSetlist: (path: string) => call<{ setlistId: T.Id; linked: number; spotify: number; missing: number }>("setlist_import", { path }),
+  /** Writes a crate as a crate file (its songs carry their audio's identity). */
+  exportCrate: (id: T.Id, path: string) => call<void>("crate_export", { id, path }),
+  /** Adds a crate from a crate file, linking its songs to this library's audio. */
+  importCrate: (path: string) => call<{ setlistId: T.Id; linked: number; spotify: number; missing: number }>("crate_import", { path }),
   /** Takes one file out of the library (a recording with other files keeps them; files stay on disk). */
   removeAudioFile: (hash: string) => call<void>("audio_file_remove", { hash }),
   /** Recordings here that sound the same as missing audio songs still play. */

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { open as openDialog } from "@tauri-apps/plugin-dialog";
+  import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api";
   import { evaluate } from "../lib/smart";
   import { app, type SourceView, confirmAction } from "../lib/state.svelte";
@@ -8,6 +8,22 @@
   import Icon from "./Icon.svelte";
 
   const missing = $derived(app.libraryTracks.filter((t) => t.missing).length);
+
+  /** A crate file another library can open: its songs link to the same audio there. */
+  async function exportCrate(c: Crate) {
+    const path = await saveDialog({ defaultPath: `${c.name}.orpheus-crate.toml`, filters: [{ name: "Orpheus crate", extensions: ["toml"] }] });
+    if (path && (await app.run(api.exportCrate(c.id, path))) !== undefined) app.toast(`Exported “${c.name}”.`, "info");
+  }
+
+  async function importCrate() {
+    const path = await openDialog({ multiple: false, directory: false, title: "Import a crate", filters: [{ name: "Orpheus crate", extensions: ["toml"] }] });
+    if (typeof path !== "string") return;
+    const r = await app.run(api.importCrate(path));
+    if (!r) return;
+    app.view = { kind: "crate", id: r.setlistId };
+    const parts = [`${r.linked} linked to your songs`, r.spotify ? `${r.spotify} from Spotify` : "", r.missing ? `${r.missing} not here yet (they link up when you add the audio)` : ""];
+    app.toast(`Imported: ${parts.filter(Boolean).join(", ")}.`, r.missing ? "error" : "info");
+  }
 
   /** Opens a set file: its songs link to this library's audio (the same file, another encoding, or Spotify). */
   async function importSet() {
@@ -65,6 +81,8 @@
       items: [
         { label: "New Crate", action: newCrate },
         { label: "New Smart Crate…", action: () => (app.smartEditor = "new") },
+        { separator: true },
+        { label: "Import Crate…", action: importCrate },
       ],
     };
   }
@@ -78,6 +96,7 @@
         { label: "Rename", action: () => (renaming = c.id) },
         ...(c.smart ? [{ label: "Edit Rules…", action: () => (app.smartEditor = c.id) }] : []),
         { separator: true },
+        { label: "Export Crate…", action: () => exportCrate(c) },
         { label: "Delete Crate…", danger: true, action: () => confirmAction(`Delete the crate “${c.name}”? Its songs stay in your library.`).then((ok) => { if (ok) api.deleteCrate(c.id); }) },
       ],
     };

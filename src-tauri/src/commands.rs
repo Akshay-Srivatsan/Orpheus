@@ -260,6 +260,24 @@ pub async fn setlist_import(app: S<'_>, path: String) -> Res<crate::setfile::Imp
     Ok(report)
 }
 
+/// Writes a crate as a crate file (`*.orpheus-crate.toml`).
+#[tauri::command]
+pub async fn crate_export(app: S<'_>, id: Id, path: String) -> Res<()> {
+    let text = crate::setfile::export_crate(&app.store, &id).map_err(ae)?;
+    crate::store::write_atomic(std::path::Path::new(&path), text.as_bytes()).map_err(ae)
+}
+
+/// Adds a crate from a crate file, linking its songs to the library's audio.
+#[tauri::command]
+pub async fn crate_import(app: S<'_>, path: String) -> Res<crate::setfile::ImportReport> {
+    let text = std::fs::read_to_string(&path).map_err(err)?;
+    let report = crate::setfile::import_crate(&app.store, &text).map_err(ae)?;
+    crate::app::emit(&app.handle, "crates-changed", ());
+    crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
+    crate::app::emit(&app.handle, "recordings-changed", ());
+    Ok(report)
+}
+
 /// The audio files in the library folders, with what each is in the library.
 #[tauri::command]
 pub async fn library_files(app: S<'_>) -> Res<Vec<LibraryFile>> {

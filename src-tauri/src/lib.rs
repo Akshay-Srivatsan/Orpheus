@@ -189,6 +189,8 @@ pub fn run() {
             commands::reconnect,
             commands::setlist_export,
             commands::setlist_import,
+            commands::crate_export,
+            commands::crate_import,
             commands::library_files,
             commands::library_add_files,
             commands::version_create,

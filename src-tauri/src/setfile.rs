@@ -1,9 +1,9 @@
-//! Set files (`*.orpheus-set.toml`): a set to share or keep, as text. Each
-//! song entry carries its audio's identity (file hashes, Spotify tracks,
-//! fingerprint, length), so another library links it to the same audio: the
-//! same file, another encoding of it (by fingerprint), or Spotify. Audio it
-//! doesn't have yet is added as missing, and links up when it turns up (see
-//! `Store::reconnect_matches`).
+//! Set and crate files (`*.orpheus-set.toml`, `*.orpheus-crate.toml`): a set
+//! or crate to share or keep, as text. Each song carries its audio's identity
+//! (file hashes, Spotify tracks, fingerprint, length), so another library
+//! links it to the same audio: the same file, another encoding of it (by
+//! fingerprint), or Spotify. Audio it doesn't have yet is added as missing,
+//! and links up when it turns up (see `Store::reconnect_matches`).
 
 use crate::model::*;
 use crate::store::Store;
@@ -132,25 +132,14 @@ pub fn export(store: &Store, setlist_id: &str, club_name: Option<String>, club_r
             settings: e.overrides.clone(),
             ..Default::default()
         };
-        if let Some(vid) = &e.version_id {
-            if let Ok((v, tid)) = store.version(vid) {
-                let t = store.track(&tid)?;
-                let r = store.recording(&v.recording).ok().map(|r| r.rec);
-                if e.styles.is_none() {
-                    out.styles = v.styles.clone();
-                }
-                out.version = Some(v.name.clone());
-                out.display_name = v.display_name.clone();
-                out.settings = crate::app::App::resolve_settings(&v, Some(e));
-                out.song = Some(SetSong {
-                    title: t.rec.title.clone(),
-                    artist: t.rec.artist.clone(),
-                    length: r.as_ref().filter(|r| r.duration_ms > 0).map(|r| (r.duration_ms as f64 / 1000.0).round()),
-                    hash: r.iter().flat_map(|r| r.sources.iter().filter(|s| s.kind == "file").map(|s| s.key.clone())).collect(),
-                    spotify: r.iter().flat_map(|r| r.sources.iter().filter(|s| s.kind == "spotify").map(|s| s.key.clone())).collect(),
-                    fingerprint: r.and_then(|r| r.fingerprint),
-                });
+        if let Some((song, v)) = e.version_id.as_deref().and_then(|vid| song_of(store, vid)) {
+            if e.styles.is_none() {
+                out.styles = v.styles.clone();
             }
+            out.version = Some(v.name.clone());
+            out.display_name = v.display_name.clone();
+            out.settings = crate::app::App::resolve_settings(&v, Some(e));
+            out.song = Some(song);
         }
         entries.push(out);
     }
@@ -193,7 +182,7 @@ pub fn import(store: &Store, text: &str, club: Option<ClubRef>) -> Result<Import
     for e in &file.entries {
         let version_id = match &e.song {
             Some(song) if e.kind == EntryKind::Song => {
-                let (vid, how) = link(store, song, e)?;
+                let (vid, how) = link(store, song, e.version.as_deref(), e.display_name.clone(), &e.styles, false)?;
                 match how {
                     Linked::Library => report.linked += 1,
                     Linked::Spotify => report.spotify += 1,
@@ -232,16 +221,36 @@ enum Linked {
     Missing,
 }
 
-/// The version an imported song entry plays: one of the library's songs if
-/// it has the audio, else a new set-only song for it.
-fn link(store: &Store, song: &SetSong, e: &SetFileEntry) -> Result<(Id, Linked)> {
+/// A version's song and its audio's identity.
+fn song_of(store: &Store, version_id: &str) -> Option<(SetSong, Version)> {
+    let (v, tid) = store.version(version_id).ok()?;
+    let t = store.track(&tid).ok()?;
+    let r = store.recording(&v.recording).ok().map(|r| r.rec);
+    let song = SetSong {
+        title: t.rec.title.clone(),
+        artist: t.rec.artist.clone(),
+        length: r.as_ref().filter(|r| r.duration_ms > 0).map(|r| (r.duration_ms as f64 / 1000.0).round()),
+        hash: r.iter().flat_map(|r| r.sources.iter().filter(|s| s.kind == "file").map(|s| s.key.clone())).collect(),
+        spotify: r.iter().flat_map(|r| r.sources.iter().filter(|s| s.kind == "spotify").map(|s| s.key.clone())).collect(),
+        fingerprint: r.and_then(|r| r.fingerprint),
+    };
+    Some((song, v))
+}
+
+/// The version an imported song plays: one of the library's songs if it
+/// has the audio, else a new song for it (set-only unless `in_library`).
+fn link(store: &Store, song: &SetSong, version: Option<&str>, display_name: Option<String>, styles: &[String], in_library: bool) -> Result<(Id, Linked)> {
     if let Some(rid) = store.find_recording(&song.hash, &song.spotify, song.fingerprint.as_deref()) {
         if let Some(sid) = store.song_for_recording(&rid) {
+            // A set-only song joining a crate joins the library.
+            if in_library && !store.track(&sid)?.rec.in_library {
+                store.set_in_library(&sid, true)?;
+            }
             let t = store.track(&sid)?;
             let playing: Vec<&Version> = t.rec.versions.iter().filter(|v| v.recording == rid).collect();
             let v = playing
                 .iter()
-                .find(|v| Some(&v.name) == e.version.as_ref())
+                .find(|v| Some(v.name.as_str()) == version)
                 .or_else(|| playing.iter().find(|v| t.rec.primary.as_deref() == Some(v.id.as_str())))
                 .or_else(|| playing.first())
                 .map(|v| v.id.clone());
@@ -249,13 +258,13 @@ fn link(store: &Store, song: &SetSong, e: &SetFileEntry) -> Result<(Id, Linked)>
                 return Ok((v, Linked::Library));
             }
         }
-        let sid = store.song_from_recording(&rid, false)?;
+        let sid = store.song_from_recording(&rid, in_library)?;
         return Ok((store.track(&sid)?.rec.versions[0].id.clone(), Linked::Library));
     }
     // Not here: the audio as the file names it, missing until it turns up
     // (or playable from Spotify).
     let rid = store.insert_missing_recording(song)?;
-    let sid = store.song_from_recording(&rid, false)?;
+    let sid = store.song_from_recording(&rid, in_library)?;
     let mut t = store.track(&sid)?;
     if !song.title.is_empty() {
         store.update_track(&sid, &TrackPatch { title: Some(song.title.clone()), artist: Some(song.artist.clone()), ..Default::default() })?;
@@ -265,14 +274,82 @@ fn link(store: &Store, song: &SetSong, e: &SetFileEntry) -> Result<(Id, Linked)>
     store.version_update(
         &vid,
         &VersionPatch {
-            name: e.version.clone(),
-            display_name: Some(e.display_name.clone()),
-            styles: (!e.styles.is_empty()).then(|| e.styles.clone()),
+            name: version.map(String::from),
+            display_name: Some(display_name),
+            styles: (!styles.is_empty()).then(|| styles.to_vec()),
             ..Default::default()
         },
     )?;
     let how = if song.spotify.is_empty() { Linked::Missing } else { Linked::Spotify };
     Ok((vid, how))
+}
+
+/// A crate as a crate file: its songs (with their audio's identity), or a
+/// smart crate's rules.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct CrateFile {
+    pub orpheus_crate: u32,
+    pub name: String,
+    /// A smart crate's rules (JSON, as Orpheus keeps them).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub smart: Option<String>,
+    #[serde(rename = "song", skip_serializing_if = "Vec::is_empty")]
+    pub songs: Vec<CrateSong>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct CrateSong {
+    #[serde(flatten)]
+    pub song: SetSong,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub styles: Vec<String>,
+}
+
+pub fn export_crate(store: &Store, crate_id: &str) -> Result<String> {
+    let c = store.crates().into_iter().find(|c| c.id == crate_id).ok_or_else(|| anyhow!("crate not found"))?;
+    let songs = c
+        .version_ids
+        .iter()
+        .filter_map(|vid| song_of(store, vid))
+        .map(|(song, v)| CrateSong { song, version: Some(v.name), display_name: v.display_name, styles: v.styles })
+        .collect();
+    let file = CrateFile { orpheus_crate: FORMAT, name: c.name, smart: c.smart.map(|s| s.to_string()), songs };
+    let body = toml::to_string_pretty(&file)?;
+    Ok(format!("# An Orpheus crate. Each song names its audio (file hashes, Spotify tracks, fingerprint),\n# so another library can link it to the same audio, in any encoding.\n\n{body}"))
+}
+
+/// Adds a crate from a crate file; its songs link to the library's audio
+/// (songs it doesn't have join the library, missing until their audio turns up).
+pub fn import_crate(store: &Store, text: &str) -> Result<ImportReport> {
+    let file: CrateFile = toml::from_str(text).map_err(|e| anyhow!("not an Orpheus crate file: {e}"))?;
+    if file.orpheus_crate > FORMAT {
+        return Err(anyhow!("this crate file is from a newer Orpheus (format {}); update Orpheus to open it", file.orpheus_crate));
+    }
+    let smart = match &file.smart {
+        Some(s) => Some(serde_json::from_str(s).map_err(|e| anyhow!("its smart rules can't be read: {e}"))?),
+        None => None,
+    };
+    let name = if file.name.trim().is_empty() { "Imported crate".to_string() } else { file.name.clone() };
+    let id = store.crate_create(&name, smart)?;
+    let mut report = ImportReport { setlist_id: id.clone(), ..Default::default() };
+    let mut vids = vec![];
+    for s in &file.songs {
+        let (vid, how) = link(store, &s.song, s.version.as_deref(), s.display_name.clone(), &s.styles, true)?;
+        match how {
+            Linked::Library => report.linked += 1,
+            Linked::Spotify => report.spotify += 1,
+            Linked::Missing => report.missing += 1,
+        }
+        vids.push(vid);
+    }
+    store.crate_add(&id, &vids)?;
+    Ok(report)
 }
 
 #[cfg(test)]
@@ -350,6 +427,24 @@ mod tests {
         assert_eq!(gv.recording, "h-gone", "named by its content, so its file links it when scanned");
         assert!(set.entries[4].version_id.is_none() && set.entries[4].styles.as_deref() == Some(&["waltz".to_string()][..]));
         assert_eq!(set.entries[5].kind, EntryKind::Pause);
+
+        // A crate goes the same way; its songs join B's library (the missing one,
+        // already in B from the set, too).
+        let cr = a.crate_create("Waltzes", None).unwrap();
+        a.crate_add(&cr, &[enc.clone(), gone.clone()]).unwrap();
+        let text = export_crate(&a, &cr).unwrap();
+        let r = import_crate(&b, &text).unwrap();
+        assert_eq!((r.linked, r.missing), (2, 0));
+        let got = b.crates().into_iter().find(|c| c.id == r.setlist_id).unwrap();
+        assert_eq!(got.name, "Waltzes");
+        assert_eq!(got.version_ids[0], b_mp3);
+        let (_, t2) = b.version(&got.version_ids[1]).unwrap();
+        assert!(b.track(&t2).unwrap().rec.in_library);
+        // A smart crate keeps its rules.
+        let rules = serde_json::json!({ "match": "all", "conditions": [{ "field": "style", "op": "is", "value": "waltz" }] });
+        let sm = a.crate_create("Smart", Some(rules.clone())).unwrap();
+        let r = import_crate(&b, &export_crate(&a, &sm).unwrap()).unwrap();
+        assert_eq!(b.crates().into_iter().find(|c| c.id == r.setlist_id).unwrap().smart, Some(rules));
         let _ = std::fs::remove_dir_all(base_a);
         let _ = std::fs::remove_dir_all(base_b);
     }
