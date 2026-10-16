@@ -1,7 +1,7 @@
 # Orpheus: the engine (`core`) and its user interfaces.
 [workspace]
 resolver = "2"
-members = ["core"]
+members = ["core", "app"]
 
 # Keep audio DSP and analysis fast in debug builds.
 [profile.dev]

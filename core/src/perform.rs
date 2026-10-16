@@ -12,7 +12,6 @@
 
 use crate::app::{emit, App};
 use crate::model::*;
-use crate::club::Club;
 use anyhow::{anyhow, Result};
 use serde::Serialize;
 use parking_lot::Mutex;
@@ -88,8 +87,6 @@ pub struct Perform {
     pub auto: AutoPhase,
     /// Last announcement pattern used (not repeated next time).
     pub last_pattern: Option<usize>,
-    /// What the next entry is called for dancers (the UI resolves club names).
-    pub dance_names: HashMap<Id, String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -133,17 +130,13 @@ pub struct ProjEntry {
     pub recording_id: Option<Id>,
     pub title: String,
     pub artist: String,
-    /// Your style keys (the page shows the club styles they match).
-    pub styles: Vec<String>,
-    /// The club styles chosen for this entry, if any (see `SetlistEntry::club_styles`).
-    pub club_styles: Option<Vec<String>>,
-    /// For matching club styles: beats per bar and playing length.
-    pub meter: Option<u8>,
+    /// What dancers call it (a custom label, else the styles it shows: the
+    /// club's in a club's set), a short form, and its style's colour.
+    pub dance: String,
+    pub dance_short: String,
+    pub color: String,
+    /// Playing length (seconds).
     pub length_secs: Option<f64>,
-    /// Club styles that list this song among their songs.
-    pub club_listed: Vec<String>,
-    /// Custom text replacing the style names.
-    pub label: Option<String>,
     pub tags: Vec<ProjTag>,
     pub status: String,
     pub bpm: Option<f64>,
@@ -165,12 +158,6 @@ pub struct ProjectorPayload {
     pub message: Option<String>,
     /// Deck whose position drives the projector's progress bar.
     pub live_deck: usize,
-    /// The set's club guidelines (for its style names), and your styles and mappings.
-    pub club: Option<Arc<Club>>,
-    pub club_id: Option<String>,
-    /// Tempo change allowed when the club doesn't say (Settings: tempo slider range).
-    pub tempo_range_pct: f64,
-    pub style_library: StyleLibrary,
 }
 
 /// The deck the crossfader favors (none = centered; it snaps to the center).
@@ -680,8 +667,7 @@ impl App {
         if !self.has_announcement(entry) {
             return None;
         }
-        let known = self.perform.lock().dance_names.get(&entry.id).cloned();
-        let name = known.or_else(|| self.own_dance_name(entry));
+        let name = self.dance_name(entry);
         let fill = |t: &str| -> Option<String> {
             if t.contains("{dance}") {
                 Some(t.replace("{dance}", name.as_deref()?))
@@ -716,26 +702,19 @@ impl App {
         (before, after)
     }
 
-    /// Fallback name when the UI hasn't said: the label, display name or your styles.
-    fn own_dance_name(&self, entry: &SetlistEntry) -> Option<String> {
-        if let Some(l) = entry.label.clone().filter(|l| !l.is_empty()) {
-            return Some(l);
-        }
-        let version = entry.version_id.as_ref().and_then(|v| self.store.version(v).ok()).map(|(v, _)| v);
-        if let Some(d) = version.as_ref().and_then(|v| v.display_name.clone()) {
-            return Some(d);
-        }
-        let keys = entry.styles.clone().or_else(|| version.map(|v| v.styles)).unwrap_or_default();
-        (!keys.is_empty()).then(|| keys.iter().map(|k| self.style_name(k)).collect::<Vec<_>>().join(" or "))
-    }
-
-    /// Records what an entry is called for dancers (sent by the UI, which resolves club names).
-    pub fn set_dance_name(&self, entry_id: Id, name: String) {
-        let mut p = self.perform.lock();
-        if p.dance_names.len() > 200 {
-            p.dance_names.clear();
-        }
-        p.dance_names.insert(entry_id, name);
+    /// What dancers call an entry: its label, else its version's display name,
+    /// else the styles it shows (the club's names in a club's set).
+    fn dance_name(&self, entry: &SetlistEntry) -> Option<String> {
+        let set = self.perform.lock().setlist_id.clone().and_then(|id| self.store.setlist(&id).ok());
+        let ctx = self.view_context(set.and_then(|s| s.club));
+        let found = entry.version_id.as_ref().and_then(|v| self.store.version(v).ok()).and_then(|(v, tid)| Some((self.store.track(&tid).ok()?, v)));
+        let shown = match &found {
+            Some((t, v)) => crate::views::shown_for(&ctx, t, v, Some(entry)),
+            None => crate::views::shown_styles(&ctx, None, None, Some(entry)),
+        };
+        let custom = crate::views::custom_label(found.as_ref().map(|(_, v)| v), Some(entry));
+        let name = crate::views::label_of(&shown, custom.as_deref(), " or ");
+        (!name.is_empty()).then_some(name)
     }
 
     /// Speaks `text` now (in a background thread).
@@ -764,8 +743,7 @@ impl App {
             None => {
                 // The button works even with announcements off in auto mode.
                 let patterns = self.settings.read().announce.patterns.clone();
-                let known = self.perform.lock().dance_names.get(&next.id).cloned();
-                let name = known.or_else(|| self.own_dance_name(&next));
+                let name = self.dance_name(&next);
                 match (patterns.iter().find(|p| !p.trim().is_empty()), name) {
                     (Some(p), Some(n)) => p.replace("{dance}", &n),
                     _ => return Err(anyhow!("Nothing to announce for the next entry")),
@@ -960,11 +938,17 @@ impl App {
         }
     }
 
-    /// Club style names / colours are filled in by the projector page from
-    /// `ProjectorPayload::{profile, style_library}` (see `src/lib/styles.ts`).
-    fn proj_entry(&self, e: &SetlistEntry, club: Option<&Club>, listed: &HashMap<Id, Vec<String>>, lookup: &HashMap<Id, (Version, Track)>) -> ProjEntry {
+    fn proj_entry(&self, e: &SetlistEntry, ctx: &crate::views::ViewContext, lookup: &HashMap<Id, (Version, Track)>) -> ProjEntry {
+        let club = ctx.club.as_deref();
         let vt = e.version_id.as_ref().and_then(|id| lookup.get(id));
-        let styles = e.styles.clone().or_else(|| vt.map(|(v, _)| v.styles.clone())).unwrap_or_default();
+        let shown = match (vt, e.kind) {
+            (_, EntryKind::Pause) => vec![],
+            (Some((v, t)), _) => crate::views::shown_for(ctx, t, v, Some(e)),
+            (None, _) => crate::views::shown_styles(ctx, None, None, Some(e)),
+        };
+        // Entry label, else the version's display name (e.g. a line dance's name).
+        let custom = crate::views::custom_label(vt.map(|(v, _)| v), Some(e)).or_else(|| (e.kind == EntryKind::Pause).then(|| "Pause".to_string()));
+        let shorts: Vec<crate::views::Shown> = shown.iter().map(|s| crate::views::Shown { name: s.short.clone(), ..s.clone() }).collect();
         let settings = vt.map(|(v, _)| Self::resolve_settings(v, Some(e)));
         let target = settings.as_ref().and_then(|s| s.target_bpm);
         let rec = vt.and_then(|(v, t)| t.recording_of(&v.id)).map(|r| &r.rec);
@@ -980,17 +964,10 @@ impl App {
             recording_id: rec.map(|r| r.id.clone()),
             title: vt.map(|(_, t)| t.rec.title.clone()).unwrap_or_default(),
             artist: vt.map(|(_, t)| t.rec.artist.clone()).unwrap_or_default(),
-            styles,
-            club_styles: e.club_styles.clone(),
-            meter: rec.and_then(|r| r.beats_per_bar),
-            club_listed: rec.and_then(|r| listed.get(&r.id).cloned()).unwrap_or_default(),
+            dance: crate::views::label_of(&shown, custom.as_deref(), " / "),
+            dance_short: crate::views::label_of(&shorts, custom.as_deref(), " / "),
+            color: shown.first().map_or_else(|| crate::views::NEUTRAL.to_string(), |s| s.color.clone()),
             length_secs,
-            // Entry label, else the version's display name (e.g. a line dance's name).
-            label: e
-                .label
-                .clone()
-                .or_else(|| vt.and_then(|(v, _)| v.display_name.clone()))
-                .or_else(|| (e.kind == EntryKind::Pause).then(|| "Pause".to_string())),
             tags: e
                 .tags
                 .iter()
@@ -1020,8 +997,8 @@ impl App {
                 }
             }
         }
-        let listed = self.active_club_ref().map(|r| self.club_song_matches(&r)).unwrap_or_default();
-        let proj: Vec<ProjEntry> = entries.iter().map(|e| self.proj_entry(e, club.as_deref(), &listed, &lookup)).collect();
+        let ctx = self.view_context(None);
+        let proj: Vec<ProjEntry> = entries.iter().map(|e| self.proj_entry(e, &ctx, &lookup)).collect();
         // Only songs the room has heard count as "current".
         let current_id = self.current_entry_id().filter(|id| {
             entries.iter().any(|e| &e.id == id && (e.status == "playing" || e.status == "played"))
@@ -1040,7 +1017,7 @@ impl App {
             .take(settings.history_count as usize)
             .map(|(_, p)| p.clone())
             .collect();
-        history.retain(|h| !h.title.is_empty() || !h.styles.is_empty() || h.label.is_some());
+        history.retain(|h| !h.title.is_empty() || !h.dance.is_empty());
         let mode = match settings.display_mode.as_str() {
             "live" | "preset" => settings.display_mode.clone(),
             _ => setlist.as_ref().map(|s| s.mode.clone()).unwrap_or_else(|| "live".into()),
@@ -1063,10 +1040,6 @@ impl App {
             playing,
             message,
             live_deck,
-            club,
-            club_id: self.active_club_ref().map(|r| r.id),
-            tempo_range_pct: self.settings.read().tempo_range_pct,
-            style_library: self.style_library(),
         }
     }
 }

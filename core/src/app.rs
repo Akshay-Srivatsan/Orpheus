@@ -96,6 +96,18 @@ pub trait EventSink: Send + Sync {
 /// The engine's handle to its event sink.
 pub type Events = Arc<dyn EventSink>;
 
+/// The app's identifier, naming its data folder.
+pub const APP_ID: &str = "edu.stanford.orpheus";
+
+/// Where Orpheus keeps its data: `ORPHEUS_DATA_DIR`, else the platform's
+/// application data folder.
+pub fn default_data_dir() -> Result<PathBuf> {
+    if let Some(d) = std::env::var_os("ORPHEUS_DATA_DIR") {
+        return Ok(d.into());
+    }
+    Ok(dirs::data_dir().ok_or_else(|| anyhow!("no application data folder on this system"))?.join(APP_ID))
+}
+
 pub fn emit<S: Serialize>(h: &Events, ev: &str, payload: S) {
     match serde_json::to_value(payload) {
         Ok(v) => h.emit(ev, v),
@@ -465,6 +477,24 @@ impl App {
         ctx.with_club(club, r.map(|r| r.id), pct)
     }
 
+    /// The tempo a song gets when it goes into a club's set: one that fits
+    /// the club's style only with a tempo change (within what the club
+    /// allows) is set to the nearest tempo in the style's range. None: no
+    /// change (no club, a tempo already set, or it fits as it is). The DJ can
+    /// undo it.
+    pub fn club_tempo(&self, set: &Setlist, entry: &SetlistEntry) -> Option<f64> {
+        set.club.as_ref()?;
+        let (version, tid) = self.store.version(entry.version_id.as_deref()?).ok()?;
+        if crate::views::resolve_settings(Some(&version), Some(entry)).target_bpm.is_some() {
+            return None;
+        }
+        let track = self.store.track(&tid).ok()?;
+        let ctx = self.view_context(set.club.clone());
+        // The best fit first: if it needs a change, so do the others shown.
+        let first = crate::views::shown_for(&ctx, &track, &version, Some(entry)).into_iter().next()?;
+        (first.fit == Some(crate::matching::Fit::Stretch)).then_some(first.bpm).flatten()
+    }
+
     /// Your styles and club mappings; seeded (and saved) on first use from the
     /// styles your library already uses, named after the active club profile.
     pub fn style_library(&self) -> StyleLibrary {
@@ -536,16 +566,7 @@ impl App {
 
     /// Effective playback settings: entry overrides → version → (track defaults applied by caller).
     pub fn resolve_settings(version: &Version, entry: Option<&SetlistEntry>) -> Overrides {
-        let v = &version.settings;
-        let e = entry.map(|e| e.overrides.clone()).unwrap_or_default();
-        Overrides {
-            target_bpm: e.target_bpm.or(v.target_bpm),
-            cue_in_ms: e.cue_in_ms.or(v.cue_in_ms),
-            cue_out_ms: e.cue_out_ms.or(v.cue_out_ms),
-            fade_out_ms: e.fade_out_ms.or(v.fade_out_ms),
-            gain_db: e.gain_db.or(v.gain_db),
-            stems: e.stems.or_else(|| v.stems.clone()),
-        }
+        crate::views::resolve_settings(Some(version), entry)
     }
 
     /// Picks the source to play: the recording's preferred kind if available,
@@ -944,6 +965,30 @@ impl App {
             }
         }
         Ok(None)
+    }
+
+    /// Starts the engine's background work: tidies the library, scans its
+    /// folders and reconnects Spotify (if you asked it to).
+    pub fn launch(self: &Arc<Self>) {
+        self.prune();
+        self.scan_library();
+        let app = self.clone();
+        std::thread::spawn(move || {
+            let auto = app.settings.read().spotify.auto_connect;
+            if auto && app.spotify.status().has_cached_credentials {
+                if let Err(e) = app.spotify.connect_cached() {
+                    log::warn!("Spotify auto-connect failed: {e:#}");
+                }
+                emit(&app.handle, "spotify-status", app.spotify.status());
+            }
+        });
+    }
+
+    /// Before quitting: the decks stop (no audio cut mid-buffer).
+    pub fn shutdown(&self) {
+        for d in &self.decks {
+            d.pause();
+        }
     }
 
     /// Runs a future on the engine's runtime (from a worker thread, not

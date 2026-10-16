@@ -630,7 +630,23 @@ pub fn setlist_reset(app: &Arc<App>, id: Id) -> Res<()> {
     Ok(())
 }
 
-pub fn entries_insert(app: &Arc<App>, setlist_id: Id, position: Option<usize>, entries: Vec<NewEntry>) -> Res<Vec<Id>> {
+/// Adds entries to a set. Songs going into a club's set get the tempo change
+/// its style needs (see `App::club_tempo`).
+pub fn entries_insert(app: &Arc<App>, setlist_id: Id, position: Option<usize>, mut entries: Vec<NewEntry>) -> Res<Vec<Id>> {
+    let set = app.store.setlist(&setlist_id).map_err(ae)?;
+    for e in entries.iter_mut() {
+        let as_entry = SetlistEntry {
+            version_id: e.version_id.clone(),
+            styles: e.styles.clone(),
+            club_styles: e.club_styles.clone(),
+            label: e.label.clone(),
+            overrides: e.overrides.clone(),
+            ..Default::default()
+        };
+        if let Some(bpm) = app.club_tempo(&set, &as_entry) {
+            e.overrides.target_bpm = Some(bpm);
+        }
+    }
     let ids = app.store.entries_insert(&setlist_id, position, &entries).map_err(ae)?;
     app.emit_setlist(&setlist_id);
     app.emit_perform();
@@ -640,7 +656,17 @@ pub fn entries_insert(app: &Arc<App>, setlist_id: Id, position: Option<usize>, e
 pub fn entry_update(app: &Arc<App>, id: Id, patch: serde_json::Value) -> Res<SetlistEntry> {
     let patch: EntryPatch = serde_json::from_value(patch).map_err(err)?;
     let replaced = patch.version_id.is_some();
-    let e = app.store.entry_update(&id, &patch).map_err(ae)?;
+    let mut e = app.store.entry_update(&id, &patch).map_err(ae)?;
+    // A song put into a slot of a club's set gets the tempo its style needs.
+    if replaced {
+        let (_, sid) = app.store.entry(&id).map_err(ae)?;
+        let set = app.store.setlist(&sid).map_err(ae)?;
+        if let Some(bpm) = app.club_tempo(&set, &e) {
+            let mut overrides = e.overrides.clone();
+            overrides.target_bpm = Some(bpm);
+            e = app.store.entry_update(&id, &EntryPatch { overrides: Some(overrides), ..Default::default() }).map_err(ae)?;
+        }
+    }
     if replaced {
         app.prune();
     }
@@ -807,12 +833,6 @@ pub fn tts_phonemes(app: &Arc<App>, text: String) -> Res<String> {
 /// Announces the next dance now.
 pub fn announce_next(app: &Arc<App>) -> Res<()> {
     app.announce_next().map_err(ae)
-}
-
-/// What an entry is called for dancers (the UI resolves club style names).
-pub fn set_dance_name(app: &Arc<App>, entry_id: Id, name: String) -> Res<()> {
-    app.set_dance_name(entry_id, name);
-    Ok(())
 }
 
 // ---------------------------------------------------------------- clubs
@@ -2160,16 +2180,6 @@ pub fn call(app: &Arc<App>, name: &str, args: serde_json::Value) -> Res<serde_js
             json(tts_phonemes(app, a.text))
         }
         "announce_next" => json(announce_next(app)),
-        "set_dance_name" => {
-            #[derive(Deserialize)]
-            #[serde(rename_all = "camelCase")]
-            struct A {
-                entry_id: Id,
-                name: String,
-            }
-            let a: A = parse(args)?;
-            json(set_dance_name(app, a.entry_id, a.name))
-        }
         "clubs_list" => json(clubs_list(app)),
         "club_get" => {
             #[derive(Deserialize)]
