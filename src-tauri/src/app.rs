@@ -516,7 +516,12 @@ impl App {
     pub fn load_request(&self, deck: usize, track: &Track, version: &Version, entry: Option<&SetlistEntry>, play: bool) -> Result<LoadRequest> {
         let s = self.settings.read().clone();
         let r = Self::resolve_settings(version, entry);
-        let rec = track.recording_of(&version.id).ok_or_else(|| anyhow!("\"{}\" ({}) has no recording", track.rec.title, version.name))?;
+        let rec = track
+            .recording_of(&version.id)
+            .ok_or_else(|| anyhow!("The audio of \"{}\" ({}) isn't in the library.", track.rec.title, version.name))?;
+        if rec.rec.removed {
+            return Err(anyhow!("The audio of \"{}\" was removed from the library: add it again in Library → Files (or a file that sounds the same).", track.rec.title));
+        }
         let tempo = match (r.target_bpm, rec.rec.bpm) {
             (Some(t), Some(b)) if b > 0.0 => (t / fold_bpm(b, t)).clamp(0.5, 2.0),
             _ => 1.0,
@@ -799,6 +804,12 @@ impl App {
                         let r = app.analyze(&id);
                         if let Err(e) = r {
                             log::warn!("analysis of recording {id} failed: {e:#}");
+                        } else {
+                            // New audio that sounds like missing audio songs still play: offer it.
+                            let found = app.store.reconnect_matches(Some(&id));
+                            if !found.is_empty() {
+                                emit(&app.handle, "reconnect-found", &found);
+                            }
                         }
                         emit(&app.handle, "library-changed", app.store.songs_for_recording(&id));
                     }

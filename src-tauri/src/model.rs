@@ -70,6 +70,18 @@ pub struct SourceRef {
     pub key: String,
 }
 
+impl SourceRef {
+    /// The id of a recording made from this source: content-addressed, so
+    /// audio removed from the library and added again (the same file, or
+    /// the same Spotify track) comes back under the id versions point to.
+    pub fn recording_id(&self) -> Id {
+        match self.kind.as_str() {
+            "spotify" => format!("spotify-{}", self.key.rsplit(':').next().unwrap_or(&self.key)),
+            _ => self.key.clone(),
+        }
+    }
+}
+
 /// Playback settings that a version defines and a setlist entry may override.
 /// `None` = inherit (entry → version → track defaults).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -300,11 +312,33 @@ pub struct RecordingRecord {
     /// IDs of recordings merged into this one (keeps references valid).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<Id>,
+    /// Removed from the library while songs or sets still play it: a
+    /// "ghost" that can't play, kept (fingerprint, length, BPM…) so the same
+    /// audio can stand in for it again (the same file or Spotify track, or a
+    /// file whose fingerprint matches: `Store::reconnect`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub removed: bool,
 }
 
-/// `excluded.json` in the library folder: files removed from the library (by
-/// content hash, so it works on every machine). Scanning the library folders
-/// doesn't add them again; adding one explicitly (Library → Files) does.
+/// A recording on this machine whose audio is the same as a missing one's
+/// (by fingerprint): it can stand in for it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Reconnect {
+    /// The missing recording (removed, or its file isn't here) that songs still play.
+    pub missing: Id,
+    /// The recording that sounds the same.
+    pub found: Id,
+    pub coverage: f64,
+    pub error: f64,
+}
+
+/// `excluded.json` in the library folder: audio removed from the library.
+/// Files (by content hash, so it works on every machine) aren't added again by
+/// scanning the library folders; adding one explicitly (Library → Files) does.
+/// Versions that still play removed audio keep pointing to it (they show as
+/// missing); recording ids are content-addressed (`SourceRef::recording_id`),
+/// so adding it again brings it back for them.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Excluded {
@@ -331,7 +365,7 @@ pub struct LibraryFile {
     pub hash: String,
     /// The recording it is, if it's in the library.
     pub recording: Option<Id>,
-    /// Songs playing it.
+    /// Songs playing it (removed: still pointing to it).
     pub songs: Vec<Id>,
     /// Removed from the library (scanning skips it).
     pub removed: bool,
@@ -448,6 +482,7 @@ impl TrackRecord {
             sources: l.sources,
             hot_cues: l.hot_cues,
             aliases: self.aliases.clone(),
+            removed: false,
         })
     }
 }

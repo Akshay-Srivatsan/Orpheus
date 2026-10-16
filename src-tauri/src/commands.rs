@@ -173,7 +173,7 @@ pub async fn recordings_compare(app: S<'_>, ids: Vec<Id>) -> Res<Vec<AudioMatch>
             .map(|id| match (&base, fp(id)) {
                 (Some(a), Some(b)) => {
                     let s = crate::fingerprint::similarity(a, &b);
-                    AudioMatch { id: id.clone(), known: true, coverage: s.coverage, error: s.error, same: crate::fingerprint::same_recording(a, &b) }
+                    AudioMatch { id: id.clone(), known: true, coverage: s.coverage, error: s.error, same: crate::fingerprint::same_version(a, &b) }
                 }
                 _ => AudioMatch { id: id.clone(), known: false, coverage: 0.0, error: 1.0, same: false },
             })
@@ -182,8 +182,8 @@ pub async fn recordings_compare(app: S<'_>, ids: Vec<Id>) -> Res<Vec<AudioMatch>
     .await
 }
 
-/// Removes recordings from the library with the versions playing them
-/// (files stay on disk; Library → Files adds them again).
+/// Removes recordings from the library; versions playing them stay, showing
+/// as missing until it's added again (files stay on disk).
 #[tauri::command]
 pub async fn recordings_remove(app: S<'_>, ids: Vec<Id>) -> Res<()> {
     app.store.remove_recordings(&ids).map_err(ae)?;
@@ -191,6 +191,32 @@ pub async fn recordings_remove(app: S<'_>, ids: Vec<Id>) -> Res<()> {
     crate::app::emit(&app.handle, "recordings-changed", ());
     crate::app::emit(&app.handle, "setlists-changed", ());
     crate::app::emit(&app.handle, "crates-changed", ());
+    Ok(())
+}
+
+/// Takes one file out of the library (see `Store::remove_audio_file`).
+#[tauri::command]
+pub async fn audio_file_remove(app: S<'_>, hash: String) -> Res<()> {
+    app.store.remove_audio_file(&hash).map_err(ae)?;
+    crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
+    crate::app::emit(&app.handle, "recordings-changed", ());
+    Ok(())
+}
+
+/// Recordings that sound the same as missing audio songs still play.
+#[tauri::command]
+pub async fn reconnect_matches(app: S<'_>) -> Res<Vec<Reconnect>> {
+    let store = app.store.clone();
+    blocking(move || Ok(store.reconnect_matches(None))).await
+}
+
+/// Lets `found` stand in for the missing recording `missing`.
+#[tauri::command]
+pub async fn reconnect(app: S<'_>, missing: Id, found: Id) -> Res<()> {
+    app.store.reconnect(&missing, &found).map_err(ae)?;
+    crate::app::emit(&app.handle, "library-changed", Vec::<Id>::new());
+    crate::app::emit(&app.handle, "recordings-changed", ());
+    app.emit_perform();
     Ok(())
 }
 

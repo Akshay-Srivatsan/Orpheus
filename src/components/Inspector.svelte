@@ -473,6 +473,9 @@
                 <span class="faint num">{fmtTime(vrec.durationMs)}{vrec.bpm ? ` · ${fmtBpm(vrec.bpm)} BPM` : ""}</span>
                 {#each sourceChips(vrec) as c}<span class="chip" title={c.title}>{c.label}</span>{/each}
               </div>
+              {#if vrec.removed}
+                <div class="warn small">Removed from the library: it can't play until you add it again in Library → Files (or a file that sounds the same; Files lists any it finds).</div>
+              {/if}
               {#if open}
                 <div class="audiobox">
                   {#if sharedHere.length || others.length}
@@ -484,7 +487,7 @@
                 </div>
               {/if}
             {:else}
-              <div class="audio warn small">Its audio isn't in the library.</div>
+              <div class="audio warn small">Its audio was removed from the library: add it again in Library → Files (or find it on Spotify again).</div>
             {/if}
             <div class="grid">
               <span class="lbl">Styles</span>

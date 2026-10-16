@@ -270,7 +270,7 @@ impl Inner {
         files.sort();
         let has_spotify = rec.sources.iter().any(|s| s.kind == "spotify");
         Recording {
-            missing: files.is_empty() && !has_spotify,
+            missing: rec.removed || (files.is_empty() && !has_spotify),
             files,
             file_paths,
             songs: users.get(&rec.id).cloned().unwrap_or_default(),
@@ -435,6 +435,7 @@ impl Store {
             }
             self.save_track(t)?;
         }
+        self.use_content_ids()?;
         // Recordings nothing plays (e.g. "hidden" ones from before) leave the
         // library; not when a file failed to load (its songs may play them).
         let unused: Vec<Id> = if !self.load_errors().is_empty() {
@@ -451,6 +452,63 @@ impl Store {
         Ok(())
     }
 
+    /// Older recordings had random ids: give each the id of its first source's
+    /// content (the old id stays as an alias), rewrite the versions playing
+    /// it, and move its cached waveform.
+    fn use_content_ids(&self) -> Result<()> {
+        let renames: Vec<(Id, Id)> = {
+            let inner = self.inner.read();
+            let mut taken: std::collections::HashSet<Id> = inner.recordings.keys().cloned().collect();
+            let mut out = vec![];
+            let mut ids: Vec<&Id> = inner.recordings.keys().collect();
+            ids.sort();
+            for id in ids {
+                let r = &inner.recordings[id];
+                let Some(new) = r.sources.first().map(|s| s.recording_id()) else { continue };
+                if &new != id && !taken.contains(&new) {
+                    taken.insert(new.clone());
+                    out.push((id.clone(), new));
+                }
+            }
+            out
+        };
+        if renames.is_empty() {
+            return Ok(());
+        }
+        log::info!("library: {} recording(s) take content-addressed ids", renames.len());
+        for (old, new) in &renames {
+            let mut r = self.inner.write().recordings.remove(old).expect("listed above");
+            r.id = new.clone();
+            if !r.aliases.contains(old) {
+                r.aliases.push(old.clone());
+            }
+            self.save_recording(&r)?;
+            {
+                let mut inner = self.inner.write();
+                inner.reindex_recording(&r);
+                inner.recordings.insert(new.clone(), r);
+            }
+            let _ = fs::remove_file(self.lib_path("recordings", old));
+            let _ = fs::rename(self.waveform_path(old), self.waveform_path(new));
+        }
+        let map: HashMap<&Id, &Id> = renames.iter().map(|(o, n)| (o, n)).collect();
+        let songs: Vec<Id> = {
+            let inner = self.inner.read();
+            inner.tracks.values().filter(|t| t.versions.iter().any(|v| map.contains_key(&v.recording))).map(|t| t.id.clone()).collect()
+        };
+        for sid in songs {
+            self.with_track(&sid, |t| {
+                for v in t.versions.iter_mut() {
+                    if let Some(n) = map.get(&v.recording) {
+                        v.recording = (*n).clone();
+                    }
+                }
+                Ok(())
+            })?;
+        }
+        Ok(())
+    }
+
     fn save_excluded(&self) -> Result<()> {
         let x = self.inner.read().excluded.clone();
         write_json(&self.library_dir().join("excluded.json"), &x)
@@ -461,7 +519,61 @@ impl Store {
         self.inner.read().excluded.files.iter().any(|f| f.hash == hash)
     }
 
-    /// Lets scanning add a removed file again.
+    /// Recordings nothing plays any more leave the library: Spotify-only ones
+    /// simply go (they can be found on Spotify again); files are excluded
+    /// from scanning (they stay on disk; Library → Files adds them again).
+    fn drop_unused_recordings(&self, ids: &[Id]) -> Result<()> {
+        self.drop_recordings(ids, true)
+    }
+
+    /// Takes recordings out of the library (with `only_unused`, only those
+    /// nothing plays). One that songs or sets still play stays as a ghost
+    /// (`removed`): it can't play, but keeps what identifies it, to be
+    /// replaced by the same audio later. Its files are excluded from scanning.
+    fn drop_recordings(&self, ids: &[Id], only_unused: bool) -> Result<()> {
+        let users = self.inner.read().recording_users();
+        let mut changed = false;
+        for id in ids {
+            let rid = self.inner.read().canonical_rec(id);
+            if users.contains_key(&rid) {
+                if only_unused {
+                    continue;
+                }
+                let hashes: Vec<(String, String, String)> = self.with_recording(&rid, |r| {
+                    r.removed = true;
+                    Ok(r.sources.iter().filter(|s| s.kind == "file").map(|s| (s.key.clone(), r.title.clone(), r.artist.clone())).collect())
+                })?;
+                let mut inner = self.inner.write();
+                for (hash, title, artist) in hashes {
+                    if !inner.excluded.files.iter().any(|f| f.hash == hash) {
+                        inner.excluded.files.push(ExcludedFile { hash, title, artist, removed_at: now_ms() });
+                        changed = true;
+                    }
+                }
+                continue;
+            }
+            let Some(r) = self.inner.write().recordings.remove(&rid) else { continue };
+            {
+                let mut inner = self.inner.write();
+                for s in &r.sources {
+                    inner.source_owner.remove(s);
+                    if s.kind == "file" && !inner.excluded.files.iter().any(|f| f.hash == s.key) {
+                        inner.excluded.files.push(ExcludedFile { hash: s.key.clone(), title: r.title.clone(), artist: r.artist.clone(), removed_at: now_ms() });
+                        changed = true;
+                    }
+                }
+            }
+            let _ = fs::remove_file(self.lib_path("recordings", &r.id));
+            let _ = fs::remove_file(self.waveform_path(&r.id));
+        }
+        if changed {
+            self.save_excluded()?;
+        }
+        Ok(())
+    }
+
+    /// Lets scanning add a removed file again (as the recording it was: its
+    /// id comes from its content, so versions still pointing to it play it).
     pub fn include_file(&self, hash: &str) -> Result<()> {
         let changed = {
             let mut inner = self.inner.write();
@@ -472,38 +584,131 @@ impl Store {
         if changed {
             self.save_excluded()?;
         }
+        // The ghost it backed plays again.
+        if let Some(rid) = self.recording_for_source(&SourceRef { kind: "file".into(), key: hash.to_string() }) {
+            self.unghost(&rid)?;
+        }
         Ok(())
     }
 
-    /// Recordings nothing plays any more leave the library: Spotify-only ones
-    /// simply go (they can be found on Spotify again); files are excluded
-    /// from scanning (they stay on disk; Library → Files adds them again).
-    fn drop_unused_recordings(&self, ids: &[Id]) -> Result<()> {
-        let users = self.inner.read().recording_users();
-        let mut excluded_changed = false;
-        for id in ids {
-            let rid = self.inner.read().canonical_rec(id);
-            if users.contains_key(&rid) {
-                continue;
-            }
-            let Some(r) = self.inner.write().recordings.remove(&rid) else { continue };
-            {
-                let mut inner = self.inner.write();
-                for s in &r.sources {
-                    inner.source_owner.remove(s);
-                    if s.kind == "file" && !inner.excluded.files.iter().any(|f| f.hash == s.key) {
-                        inner.excluded.files.push(ExcludedFile { hash: s.key.clone(), title: r.title.clone(), artist: r.artist.clone(), removed_at: now_ms() });
-                        excluded_changed = true;
-                    }
-                }
-            }
-            let _ = fs::remove_file(self.lib_path("recordings", &r.id));
-            let _ = fs::remove_file(self.waveform_path(&r.id));
-        }
-        if excluded_changed {
-            self.save_excluded()?;
+    fn unghost(&self, rec_id: &str) -> Result<()> {
+        if self.recording(rec_id).is_ok_and(|r| r.rec.removed) {
+            self.with_recording(rec_id, |r| {
+                r.removed = false;
+                Ok(())
+            })?;
         }
         Ok(())
+    }
+
+    /// Takes one file out of the library. If its recording has other sources
+    /// (another file, a Spotify track), it simply loses this one; otherwise
+    /// the recording goes (or stays as a ghost while songs play it). The file
+    /// stays on disk, excluded from scanning.
+    pub fn remove_audio_file(&self, hash: &str) -> Result<()> {
+        let src = SourceRef { kind: "file".into(), key: hash.to_string() };
+        match self.recording_for_source(&src) {
+            Some(rid) if self.recording(&rid)?.rec.sources.len() > 1 => {
+                self.remove_source(&rid, &src)?;
+                let title = self.recording(&rid)?.rec;
+                let mut inner = self.inner.write();
+                if !inner.excluded.files.iter().any(|f| f.hash == hash) {
+                    inner.excluded.files.push(ExcludedFile { hash: hash.to_string(), title: title.title, artist: title.artist, removed_at: now_ms() });
+                }
+                drop(inner);
+                self.save_excluded()
+            }
+            Some(rid) => self.remove_recordings(&[rid]),
+            None => Ok(()),
+        }
+    }
+
+    /// Recordings here that sound the same as missing ones that songs still
+    /// play (fingerprints: the same version, any encoding; not an edit).
+    /// `only` limits the candidates (e.g. a recording just analysed).
+    pub fn reconnect_matches(&self, only: Option<&str>) -> Vec<Reconnect> {
+        let (missing, found) = {
+            let inner = self.inner.read();
+            let users = inner.recording_users();
+            let mut missing = vec![];
+            let mut found = vec![];
+            for r in inner.recordings.values() {
+                let Some(fp) = r.fingerprint.as_deref().and_then(|f| crate::fingerprint::decode(f).ok()) else { continue };
+                let view = inner.to_recording(r, &users);
+                if view.missing {
+                    if users.contains_key(&r.id) {
+                        missing.push((r.id.clone(), fp));
+                    }
+                } else if only.is_none_or(|o| inner.canonical_rec(o) == r.id) {
+                    found.push((r.id.clone(), fp));
+                }
+            }
+            (missing, found)
+        };
+        let item = crate::fingerprint::item_secs();
+        let mut out = vec![];
+        for (m, mfp) in &missing {
+            for (f, ffp) in &found {
+                // Different lengths can't be the same version: skip the comparison.
+                if (mfp.len() as f64 - ffp.len() as f64).abs() * item > crate::fingerprint::SAME_VERSION_LENGTH_SECS {
+                    continue;
+                }
+                if crate::fingerprint::same_version(mfp, ffp) {
+                    let s = crate::fingerprint::similarity(mfp, ffp);
+                    out.push(Reconnect { missing: m.clone(), found: f.clone(), coverage: s.coverage, error: s.error });
+                }
+            }
+        }
+        out
+    }
+
+    /// `found` stands in for the missing recording `missing`: its sources
+    /// join it (and the sources it no longer has are dropped), so the songs
+    /// and sets playing `missing` play it. A song made just for `found` is
+    /// combined into the first song playing `missing`.
+    pub fn reconnect(&self, missing: &str, found: &str) -> Result<()> {
+        let missing = self.inner.read().canonical_rec(missing);
+        let found = self.inner.read().canonical_rec(found);
+        let users = self.songs_for_recording(&missing);
+        let new_songs: Vec<Id> = self.songs_for_recording(&found).into_iter().filter(|s| !users.contains(s)).collect();
+        // The files it can no longer play: all of them for a ghost, else those not on this machine.
+        let dead: Vec<SourceRef> = {
+            let r = self.recording(&missing)?;
+            r.rec.sources.iter().filter(|s| s.kind == "file" && (r.rec.removed || !r.file_paths.contains_key(&s.key))).cloned().collect()
+        };
+        self.merge_recordings(&missing, &[found.clone()])?;
+        self.with_recording(&missing, |r| {
+            r.sources.retain(|s| !dead.contains(s));
+            r.removed = false;
+            Ok(())
+        })?;
+        {
+            let mut inner = self.inner.write();
+            for s in &dead {
+                inner.source_owner.remove(s);
+            }
+        }
+        if let Some(keep) = users.first() {
+            if !new_songs.is_empty() {
+                self.combine_songs(keep, &new_songs)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// A content-addressed id for a new recording of `source`. A merged-away
+    /// recording's id (an alias) is taken back from the recording it joined.
+    fn free_recording_id(&self, source: &SourceRef) -> Id {
+        let id = source.recording_id();
+        let owner = self.inner.read().rec_alias.get(&id).cloned();
+        if let Some(owner) = owner {
+            let _ = self.with_recording(&owner, |r| {
+                r.aliases.retain(|a| a != &id);
+                Ok(())
+            });
+            self.inner.write().rec_alias.remove(&id);
+        }
+        id
     }
 
     /// The audio files in the library folders (and files added from elsewhere), with what they are.
@@ -516,13 +721,21 @@ impl Store {
             .iter()
             .map(|(path, f)| {
                 let rec = inner.source_owner.get(&SourceRef { kind: "file".into(), key: f.hash.clone() }).cloned();
+                let removed = inner.excluded.files.iter().any(|x| x.hash == f.hash);
+                // A removed file: the songs still pointing to the recording it was,
+                // if that's missing (not if it plays from other sources).
+                let of = rec.clone().or_else(|| {
+                    let id = SourceRef { kind: "file".into(), key: f.hash.clone() }.recording_id();
+                    let playing = inner.recordings.get(&id).is_some_and(|r| !r.removed && !r.sources.is_empty());
+                    (removed && !playing).then_some(id)
+                });
                 LibraryFile {
                     path: path.clone(),
                     root: f.root.clone(),
                     hash: f.hash.clone(),
-                    songs: rec.as_ref().and_then(|r| users.get(r).cloned()).unwrap_or_default(),
+                    songs: of.as_ref().and_then(|r| users.get(r).cloned()).unwrap_or_default(),
                     recording: rec,
-                    removed: inner.excluded.files.iter().any(|x| x.hash == f.hash),
+                    removed,
                 }
             })
             .collect();
@@ -990,10 +1203,23 @@ impl Store {
     /// The source's recording, created if it's new (`true`). No song is made.
     pub fn insert_recording(&self, t: &NewTrack, source: SourceRef) -> Result<(Id, bool)> {
         if let Some(existing) = self.recording_for_source(&source) {
+            // A ghost found again (the same Spotify track): it plays again.
+            if source.kind != "file" {
+                self.unghost(&existing)?;
+            }
             return Ok((existing, false));
         }
+        let id = self.free_recording_id(&source);
+        // Its id is an existing recording's (it was this audio's source, e.g. a
+        // ghost's): it's that audio again.
+        if self.inner.read().recordings.contains_key(&id) {
+            self.add_source(&id, source)?;
+            self.unghost(&id)?;
+            return Ok((id, false));
+        }
         let rec = RecordingRecord {
-            id: new_id(),
+            // From its content: versions still pointing to removed audio find it again.
+            id,
             title: t.title.clone(),
             artist: t.artist.clone(),
             album: t.album.clone(),
@@ -1133,7 +1359,7 @@ impl Store {
         }
         self.remove_source(&old.id, source)?;
         let new = RecordingRecord {
-            id: new_id(),
+            id: self.free_recording_id(source),
             title: old.title.clone(),
             artist: old.artist.clone(),
             album: old.album.clone(),
@@ -1159,79 +1385,12 @@ impl Store {
         Ok(new.id)
     }
 
-    /// Removes recordings from the library with the versions playing them
-    /// (songs left without versions go too; set entries lose their song).
-    /// Files stay on disk, excluded from scanning.
+    /// Removes recordings from the library. Versions playing them stay (in
+    /// sets too), pointing to them: they show as missing until the audio is
+    /// added again (Library → Files, or the same Spotify track). Files stay on
+    /// disk, excluded from scanning.
     pub fn remove_recordings(&self, ids: &[Id]) -> Result<()> {
-        let rids: Vec<Id> = ids.iter().map(|id| self.inner.read().canonical_rec(id)).collect();
-        let (whole, partial): (Vec<Id>, Vec<(Id, Vec<Id>)>) = {
-            let inner = self.inner.read();
-            let mut whole = vec![];
-            let mut partial = vec![];
-            for t in inner.tracks.values() {
-                let hit: Vec<Id> = t.versions.iter().filter(|v| rids.contains(&inner.canonical_rec(&v.recording))).map(|v| v.id.clone()).collect();
-                if hit.is_empty() {
-                    continue;
-                }
-                if hit.len() == t.versions.len() {
-                    whole.push(t.id.clone());
-                } else {
-                    partial.push((t.id.clone(), hit));
-                }
-            }
-            (whole, partial)
-        };
-        for (song, vids) in &partial {
-            self.with_track(song, |t| {
-                t.versions.retain(|v| !vids.contains(&v.id));
-                if t.primary.as_ref().is_some_and(|p| vids.contains(p)) {
-                    t.primary = None;
-                }
-                Ok(())
-            })?;
-            self.forget_versions(vids)?;
-        }
-        self.delete_tracks(&whole)?;
-        self.drop_unused_recordings(&rids)
-    }
-
-    /// Set entries and crates stop referring to removed versions.
-    fn forget_versions(&self, vids: &[Id]) -> Result<()> {
-        let (setlists, crates) = {
-            let mut inner = self.inner.write();
-            for v in vids {
-                inner.version_owner.remove(v);
-            }
-            let mut setlists = vec![];
-            for s in inner.setlists.values_mut() {
-                let mut hit = false;
-                for e in s.entries.iter_mut() {
-                    if e.version_id.as_ref().is_some_and(|v| vids.contains(v)) {
-                        e.version_id = None;
-                        hit = true;
-                    }
-                }
-                if hit {
-                    setlists.push(s.clone());
-                }
-            }
-            let mut crates = vec![];
-            for c in inner.crates.values_mut() {
-                let before = c.version_ids.len();
-                c.version_ids.retain(|v| !vids.contains(v));
-                if c.version_ids.len() != before {
-                    crates.push(c.clone());
-                }
-            }
-            (setlists, crates)
-        };
-        for s in &setlists {
-            self.save_setlist(s)?;
-        }
-        for c in &crates {
-            self.save_crate(c)?;
-        }
-        Ok(())
+        self.drop_recordings(ids, false)
     }
 
     /// A BPM the DJ entered (or from tags), which analysis should use for the meter.
@@ -1327,7 +1486,7 @@ impl Store {
             .values()
             .filter(|t| {
                 let has_file = t.sources.iter().any(|s| s.kind == "file" && inner.by_hash.contains_key(&s.key));
-                has_file && (!t.analyzed || t.analysis_version < crate::analysis::VERSION || !self.waveform_path(&t.id).exists())
+                !t.removed && has_file && (!t.analyzed || t.analysis_version < crate::analysis::VERSION || !self.waveform_path(&t.id).exists())
             })
             .map(|t| t.id.clone())
             .collect()
@@ -2123,12 +2282,17 @@ mod tests {
             "hotCues":[{"slot":1,"ms":1000}],"aliases":["s2"],
             "versions":[{"id":"v1","name":"Original","styles":["polka"]},{"id":"v2","name":"Short","cueOutMs":60000}]}"#;
         fs::write(lib.join("tracks").join("s1.json"), old).unwrap();
+        fs::create_dir_all(local.join("waveforms")).unwrap();
+        fs::write(local.join("waveforms").join("s1.bin"), [1u8, 2, 3]).unwrap();
         let store = Store::open(&lib, &local).unwrap();
         assert!(store.load_errors().is_empty(), "{:?}", store.load_errors());
         let t = store.track("s1").unwrap();
         assert_eq!(t.rec.rating, Some(3));
-        assert!(t.rec.versions.iter().all(|v| v.recording == "s1"), "the recording keeps the song's id (waveforms stay valid)");
-        let r = store.recording("s1").unwrap().rec;
+        // The recording's id comes from its content (its first source); the old id still resolves.
+        assert!(t.rec.versions.iter().all(|v| v.recording == "h1"), "{:?}", t.rec.versions);
+        assert_eq!(store.recording("s1").unwrap().rec.id, "h1");
+        assert_eq!(store.waveform("h1"), Some(vec![1, 2, 3]), "the cached waveform moved with it");
+        let r = store.recording("h1").unwrap().rec;
         assert_eq!((r.bpm, r.bpm_source.as_deref(), r.beats_per_bar, r.analysis_version), (Some(121.5), Some("user"), Some(4), 4));
         assert_eq!(r.sources.len(), 2);
         assert_eq!(r.hot_cues.len(), 1);
@@ -2136,15 +2300,16 @@ mod tests {
         assert_eq!(store.track("s2").unwrap().rec.id, "s1", "a merged song's old id still resolves");
         // Both files were rewritten in the new form; loading again changes nothing.
         let text = fs::read_to_string(lib.join("tracks").join("s1.json")).unwrap();
-        assert!(!text.contains("sources") && !text.contains("bpm") && text.contains("\"recording\": \"s1\""), "{text}");
-        assert!(lib.join("recordings").join("s1.json").exists());
+        assert!(!text.contains("sources") && !text.contains("bpm") && text.contains("\"recording\": \"h1\""), "{text}");
+        assert!(lib.join("recordings").join("h1.json").exists() && !lib.join("recordings").join("s1.json").exists());
         let again = Store::open(&lib, &local).unwrap();
-        assert_eq!(again.recording("s1").unwrap().rec, r);
+        assert_eq!(again.recording("h1").unwrap().rec, r);
 
         // The old merge can be undone: the Spotify track becomes a recording
         // of its own, and the short version plays it.
-        let new = again.split_source("s1", &spotify("x"), &["v2".to_string()], false).unwrap();
-        assert_eq!(again.recording("s1").unwrap().rec.sources, vec![file("h1")]);
+        let new = again.split_source("h1", &spotify("x"), &["v2".to_string()], false).unwrap();
+        assert_eq!(new, "spotify-x", "its own content id");
+        assert_eq!(again.recording("h1").unwrap().rec.sources, vec![file("h1")]);
         assert_eq!(again.recording(&new).unwrap().rec.sources, vec![spotify("x")]);
         assert!(!again.recording(&new).unwrap().rec.analyzed, "analysed afresh");
         assert_eq!(again.version("v2").unwrap().0.recording, new);
@@ -2282,23 +2447,104 @@ mod tests {
         let _ = fs::remove_dir_all(lib.parent().unwrap());
     }
 
+    /// A chord sequence (different seeds: different music), as Chromaprint fingerprints it.
+    fn tune_fp(seed: u32, noise: f32) -> String {
+        let sr = 11025u32;
+        let mut st = seed;
+        let mut n = 7u32;
+        let mut freqs = [0.0f32; 3];
+        let mono: Vec<f32> = (0..sr as usize * 60)
+            .map(|i| {
+                if i % (sr as usize / 2) == 0 {
+                    for f in freqs.iter_mut() {
+                        st = st.wrapping_mul(1664525).wrapping_add(1013904223);
+                        *f = 110.0 * 2f32.powf((st >> 24) as f32 / 48.0);
+                    }
+                }
+                n = n.wrapping_mul(1664525).wrapping_add(1013904223);
+                let t = i as f32 / sr as f32;
+                freqs.iter().map(|f| (t * f * std::f32::consts::TAU).sin()).sum::<f32>() * 0.25 + ((n >> 16) as f32 / 65536.0 - 0.5) * noise
+            })
+            .collect();
+        crate::fingerprint::encode(&crate::fingerprint::compute(&mono, sr).unwrap())
+    }
+
     #[test]
-    fn removing_audio_takes_its_versions() {
+    fn removed_audio_leaves_its_versions_pointing_to_it() {
         let (lib, local) = temp_dirs();
         let store = Store::open(&lib, &local).unwrap();
-        let a = song(&store, "Barbie (RP edit)", file("a"));
-        let b = song(&store, "Barbie (Lucas edit)", file("b"));
-        let (va, _) = first(&store, &a);
-        let (vb, rb) = first(&store, &b);
+        // One recording as a FLAC and an MP3.
+        let a = song(&store, "Barbie", file("flac"));
+        let b = song(&store, "Barbie", file("mp3"));
+        let (va, ra) = first(&store, &a);
+        let (_, rb) = first(&store, &b);
+        assert_eq!(ra, "flac", "a recording's id is its content's");
+        store.merge_recordings(&ra, &[rb]).unwrap();
         store.combine_songs(&a, &[b]).unwrap();
         let sid = store.setlist_create("Set", "live", None, None).unwrap();
-        let eid = store.entries_insert(&sid, None, &[NewEntry { version_id: Some(vb.clone()), ..Default::default() }]).unwrap()[0].clone();
-        store.remove_recordings(&[rb.clone()]).unwrap();
-        assert_eq!(store.track(&a).unwrap().rec.versions.iter().map(|v| v.id.clone()).collect::<Vec<_>>(), vec![va]);
-        assert_eq!(store.entry(&eid).unwrap().0.version_id, None, "the set entry loses its song");
-        assert!(store.is_excluded("b"));
+        let eid = store.entries_insert(&sid, None, &[NewEntry { version_id: Some(va.clone()), ..Default::default() }]).unwrap()[0].clone();
+
+        // Removing one of its two files: it just has one fewer.
+        store.remove_audio_file("mp3").unwrap();
+        let r = store.recording(&ra).unwrap();
+        assert_eq!(r.rec.sources, vec![file("flac")]);
+        assert!(!r.rec.removed && store.is_excluded("mp3"));
+
+        // Removing its last file: a ghost (it can't play), still played by the song and the set.
+        store.remove_audio_file("flac").unwrap();
+        let r = store.recording(&ra).unwrap();
+        assert!(r.rec.removed && r.missing);
+        assert_eq!(store.entry(&eid).unwrap().0.version_id, Some(va.clone()));
+        assert_eq!(store.version(&va).unwrap().0.recording, ra);
+        assert!(store.needs_analysis().is_empty());
+        // The same file added again: it plays again.
+        store.include_file("flac").unwrap();
+        assert!(!store.recording(&ra).unwrap().rec.removed);
+        let _ = fs::remove_dir_all(lib.parent().unwrap());
+    }
+
+    #[test]
+    fn a_file_that_sounds_the_same_can_stand_in_for_missing_audio() {
+        let (lib, local) = temp_dirs();
+        let store = Store::open(&lib, &local).unwrap();
+        let fp = tune_fp(1, 0.0);
+        let a = song(&store, "Waltz", file("orig"));
+        let (va, ra) = first(&store, &a);
+        store.set_analysis(&ra, &Analysis { fingerprint: Some(fp.clone()), duration_ms: 60_000, ..Default::default() }).unwrap();
+        store.remove_audio_file("orig").unwrap();
+        // A re-encode (a little noise), and an unrelated song.
+        for h in ["copy", "other"] {
+            store.upsert_file(&format!("/music/{h}.mp3"), FileEntry { hash: h.into(), size: 1, mtime: 2, root: None });
+        }
+        let c = song(&store, "Waltz (MP3)", file("copy"));
+        let (_, rc) = first(&store, &c);
+        store.set_analysis(&rc, &Analysis { fingerprint: Some(tune_fp(1, 0.02)), duration_ms: 60_000, ..Default::default() }).unwrap();
+        let d = song(&store, "Other", file("other"));
+        let (_, rd) = first(&store, &d);
+        store.set_analysis(&rd, &Analysis { fingerprint: Some(tune_fp(9, 0.0)), duration_ms: 60_000, ..Default::default() }).unwrap();
+        let m = store.reconnect_matches(None);
+        assert_eq!(m.iter().map(|x| (x.missing.as_str(), x.found.as_str())).collect::<Vec<_>>(), vec![(ra.as_str(), rc.as_str())], "{m:?}");
+        assert_eq!(store.reconnect_matches(Some(&rd)).len(), 0);
+
+        store.reconnect(&ra, &rc).unwrap();
+        let r = store.recording(&ra).unwrap();
+        assert_eq!(r.rec.sources, vec![file("copy")], "the new file stands in for the removed one");
+        assert!(!r.rec.removed);
+        assert_eq!(store.version(&va).unwrap().0.recording, ra);
+        // The song made for the new file was folded into the song playing the audio.
+        assert!(store.track(&c).map(|t| t.rec.id == a).unwrap_or(true));
+        assert_eq!(store.all_tracks().len(), 2);
+        assert!(store.reconnect_matches(None).is_empty());
+        let _ = fs::remove_dir_all(lib.parent().unwrap());
+    }
+
+    #[test]
+    fn older_hidden_recordings_leave_the_library() {
+        let (lib, local) = temp_dirs();
+        let store = Store::open(&lib, &local).unwrap();
         // Older "hidden" recordings (no song) leave the library on load.
         let r = store.insert_recording(&NewTrack { title: "Old".into(), ..Default::default() }, file("c")).unwrap().0;
+        assert_eq!(r, "c");
         // Not while a song file is unreadable (it may be the one playing it).
         fs::write(lib.join("tracks").join("broken.json"), "{ not json").unwrap();
         assert!(Store::open(&lib, &local).unwrap().recording(&r).is_ok());

@@ -6,15 +6,19 @@
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { api, on } from "../lib/api";
   import { app, confirmAction } from "../lib/state.svelte";
-  import type { LibraryFile } from "../lib/types";
+  import type { LibraryFile, Reconnect } from "../lib/types";
 
   let files = $state<LibraryFile[]>([]);
   let show = $state<"all" | "in" | "out">("all");
   /** Not in the library: removed, or (e.g. its recording now plays from Spotify) not added. */
   const out = (f: LibraryFile) => f.removed || !f.recording;
 
+  /** Files here that sound like missing audio songs still play. */
+  let matches = $state<Reconnect[]>([]);
+
   async function load() {
     files = (await app.run(api.libraryFiles())) ?? [];
+    matches = (await app.run(api.reconnectMatches())) ?? [];
   }
   $effect(() => {
     void load();
@@ -39,11 +43,18 @@
 
   async function remove(f: LibraryFile) {
     const titles = f.songs.map((id) => app.trackMap.get(id)?.title ?? id);
-    const msg = titles.length
-      ? `Remove “${rel(f)}” from the library? It's played by ${titles.map((t) => `“${t}”`).join(", ")}; those versions go too. The file stays on disk, and you can add it again here.`
-      : `Remove “${rel(f)}” from the library? The file stays on disk.`;
-    if (f.recording && (await confirmAction(msg, "Remove"))) await app.run(api.removeRecordings([f.recording]));
+    const rec = f.recording ? app.recordingMap.get(f.recording) : undefined;
+    const others = (rec?.sources.length ?? 1) > 1;
+    const msg = others
+      ? `Remove “${rel(f)}” from the library? Its audio stays playable from its other ${rec?.sources.some((s) => s.kind === "spotify") ? "source" : "file"}. The file stays on disk.`
+      : titles.length
+        ? `Remove “${rel(f)}” from the library? It's played by ${titles.map((t) => `“${t}”`).join(", ")}: those stay (in sets too), but show as missing and can't play until you add it again, or a file that sounds the same. The file stays on disk.`
+        : `Remove “${rel(f)}” from the library? The file stays on disk, and you can add it again here.`;
+    if (await confirmAction(msg, "Remove")) await app.run(api.removeAudioFile(f.hash));
   }
+
+  const titleOf = (recId: string) => app.recordingMap.get(recId)?.title ?? recId;
+  const songOf = (recId: string) => { const r = app.recordingMap.get(recId); return r ? app.trackMap.get(r.songs[0]) : undefined; };
 
   async function addOther() {
     const picked = await openDialog({ multiple: true, directory: false, title: "Add audio files to the library" });
@@ -65,6 +76,17 @@
     <span class="grow"></span>
     <button class="small" onclick={addOther}>Add Files…</button>
   </div>
+  {#if matches.length}
+    <div class="matches">
+      <div class="small"><b>Sounds like missing audio</b> <span class="faint">— songs still play audio that isn't here; these files sound the same (another encoding, not an edit):</span></div>
+      {#each matches as m (m.missing + m.found)}
+        <div class="match small">
+          <span>“{titleOf(m.found)}” for <b>{songOf(m.missing)?.title ?? titleOf(m.missing)}</b> <span class="faint">({Math.round(m.coverage * 100)}% lines up, {Math.round(m.error * 100)}% differs)</span></span>
+          <button class="small" onclick={() => app.run(api.reconnect(m.missing, m.found))}>Use It</button>
+        </div>
+      {/each}
+    </div>
+  {/if}
   <div class="table">
     <div class="row head"><span>File</span><span>Folder</span><span>In the library as</span><span></span></div>
     {#each shown as f (f.path)}
@@ -72,7 +94,7 @@
         <span class="t" title={f.path}>{rel(f).split(/[/\\]/).pop()}</span>
         <span class="t faint" title={f.root ?? ""}>{rel(f).split(/[/\\]/).slice(0, -1).join("/") || (f.root ? "" : "(added from elsewhere)")}</span>
         <span class="t">
-          {#if f.removed}<span class="faint">removed</span>
+          {#if f.removed}<span class="faint">removed</span>{#if f.songs.length}<span class="warn"> · still in {#each f.songs as id, i (id)}{i ? ", " : ""}<button class="plain link" onclick={() => { app.inspectTrack = id; app.rightTab = "info"; }}>{app.trackMap.get(id)?.title ?? id}</button>{/each}</span>{/if}
           {:else if !f.recording}<span class="faint">not added</span>
           {:else}
             {#each f.songs as id, i (id)}{i ? ", " : ""}<button class="plain link" onclick={() => { app.inspectTrack = id; app.rightTab = "info"; }}>{app.trackMap.get(id)?.title ?? id}</button>{/each}
@@ -105,5 +127,8 @@
   .link { padding: 0; height: auto; color: var(--blue); display: inline; }
   .small { font-size: var(--fs-sm); }
   .danger { color: var(--red); }
+  .warn { color: var(--yellow); }
   .empty { padding: 16px; }
+  .matches { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--yellow) 8%, transparent); }
+  .match { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
 </style>

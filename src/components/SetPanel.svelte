@@ -29,6 +29,7 @@
       const shown = app.shownFor(r?.track, r?.version, e);
       // The DJ's choice of club style that the song doesn't fit.
       const warnings = [...new Set(shown.flatMap((s) => s.problems))];
+      if (r?.rec.missing) warnings.unshift(r.rec.removed || !r.rec.sources.length ? "Its audio was removed from the library (Library → Files adds it again)" : "Its file isn't on this computer");
       // In a club's set, a song that is none of its styles.
       const noStyle = app.hasClub && !!r && !shown.length && !customLabel(r.version, e);
       // Many automatic matches: the first two, and how many more (all in the tooltip).

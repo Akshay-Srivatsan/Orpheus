@@ -25,6 +25,12 @@ export const api = {
   compareRecordings: (ids: T.Id[]) => call<{ id: T.Id; known: boolean; coverage: number; error: number; same: boolean }[]>("recordings_compare", { ids }),
   /** Removes recordings from the library with the versions playing them (files stay on disk). */
   removeRecordings: (ids: T.Id[]) => call<void>("recordings_remove", { ids }),
+  /** Takes one file out of the library (a recording with other files keeps them; files stay on disk). */
+  removeAudioFile: (hash: string) => call<void>("audio_file_remove", { hash }),
+  /** Recordings here that sound the same as missing audio songs still play. */
+  reconnectMatches: () => call<T.Reconnect[]>("reconnect_matches"),
+  /** `found` stands in for the missing recording `missing` (its songs and sets play it). */
+  reconnect: (missing: T.Id, found: T.Id) => call<void>("reconnect", { missing, found }),
   /** The audio files in the library folders, and what each is in the library. */
   libraryFiles: () => call<T.LibraryFile[]>("library_files"),
   /** Adds files to the library, including ones removed from it before. */
@@ -237,6 +243,8 @@ export interface Events {
   "clubs-changed": null;
   "styles-changed": null;
   "recordings-changed": null;
+  /** Audio just analysed sounds like missing audio songs still play. */
+  "reconnect-found": T.Reconnect[];
   "settings-changed": T.Settings;
   "scan-progress": T.ScanProgress;
   "spotify-status": T.SpotifyStatus;

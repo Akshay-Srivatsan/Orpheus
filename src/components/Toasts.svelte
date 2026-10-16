@@ -6,6 +6,9 @@
   {#each app.toasts as t (t.id)}
     <div class="toast {t.kind}" role="status">
       <span>{t.text}</span>
+      {#if t.action}
+        <button class="small" onclick={() => { app.toasts = app.toasts.filter((x) => x.id !== t.id); t.action?.run(); }}>{t.action.label}</button>
+      {/if}
       <button class="plain icon" onclick={() => (app.toasts = app.toasts.filter((x) => x.id !== t.id))}>×</button>
     </div>
   {/each}

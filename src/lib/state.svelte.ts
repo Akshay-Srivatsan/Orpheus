@@ -26,6 +26,8 @@ export interface Toast {
   id: number;
   text: string;
   kind: "error" | "info";
+  /** A button on it (e.g. Undo); clicking it runs the action and closes the toast. */
+  action?: { label: string; run: () => unknown };
 }
 
 /** Style-filter value matching songs that have no dance style. */
@@ -308,12 +310,13 @@ class AppState {
 
   private toastTimers = new Map<number, ReturnType<typeof setTimeout>>();
 
-  toast(text: string, kind: Toast["kind"] = "error") {
-    const ms = kind === "error" ? 6000 : 3500;
+  toast(text: string, kind: Toast["kind"] = "error", action?: Toast["action"]) {
+    // With a button, long enough to reach for it.
+    const ms = action ? 10000 : kind === "error" ? 6000 : 3500;
     // The same message again (e.g. from a controller held down): keep one, show it longer.
     const same = this.toasts.find((t) => t.text === text && t.kind === kind);
     const id = same?.id ?? Date.now() + Math.random();
-    if (!same) this.toasts.push({ id, text, kind });
+    if (!same) this.toasts.push({ id, text, kind, action });
     clearTimeout(this.toastTimers.get(id));
     this.toastTimers.set(id, setTimeout(() => {
       this.toasts = this.toasts.filter((t) => t.id !== id);
@@ -403,6 +406,20 @@ class AppState {
       this.styleLib = await api.styles();
     });
     this.listen("styles-changed", async () => (this.styleLib = await api.styles()));
+    // New audio that sounds like missing audio songs still play: offer it in its place.
+    this.listen("reconnect-found", async (found) => {
+      await this.reloadTracks([]);
+      for (const m of found) {
+        const missing = this.recordingMap.get(m.missing);
+        const song = missing ? this.trackMap.get(missing.songs[0]) : undefined;
+        const file = this.recordingMap.get(m.found);
+        if (!song) continue;
+        this.toast(`“${file?.title ?? "A new file"}” sounds like the missing audio of “${song.title}”.`, "info", {
+          label: "Use It",
+          run: () => this.run(api.reconnect(m.missing, m.found)),
+        });
+      }
+    });
     this.listen("setlist-changed", async (id) => {
       if (id === this.current?.id) await this.reloadCurrent();
       if (this.view.kind === "setlist" && this.view.id === id) await this.reloadBrowsed();

@@ -80,6 +80,16 @@ export interface Recording {
   missing: boolean;
   /** Songs whose versions play it. */
   songs: Id[];
+  /** Removed from the library while songs still play it (a "ghost": it can't play until the same audio is back). */
+  removed?: boolean;
+}
+
+/** A recording here that sounds the same as missing audio songs still play. */
+export interface Reconnect {
+  missing: Id;
+  found: Id;
+  coverage: number;
+  error: number;
 }
 
 /** An audio file in the library folders (Library → Files). */
