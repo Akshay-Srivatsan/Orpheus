@@ -109,6 +109,8 @@ class AppState {
   mergeDialog = $state<{ songs: Id[]; recordings: Id[] } | null>(null);
   /** A style slot in the open set the DJ is choosing a song for. */
   fillingSlot = $state<Id | null>(null);
+  /** A song the DJ is choosing library audio for, to add as an edit (a version). */
+  pickingEdit = $state<Id | null>(null);
   /** Smart crate being edited: its id, or "new". */
   smartEditor = $state<string | false>(false);
   /** Bumped by MIDI browse actions; the library table reacts. */
@@ -549,6 +551,17 @@ export function startFillingSlot(entry: SetlistEntry) {
 }
 
 /** Puts a song into the slot being filled (or `slotId`). */
+/** Adds an edit (a version with its own audio) to a song, with Undo. */
+export async function addEdit(audio: Parameters<typeof api.addEdit>[1], trackId: Id | null = app.pickingEdit) {
+  if (!trackId) return;
+  const v = await app.run(api.addEdit(trackId, audio));
+  if (!v) return;
+  if (app.pickingEdit === trackId) app.pickingEdit = null;
+  app.inspectTrack = trackId;
+  app.rightTab = "info";
+  app.toast(`Added the version “${v.name}”`, "info", { label: "Undo", run: () => app.run(api.deleteVersion(v.id)) });
+}
+
 export async function fillSlot(versionId: Id, slotId: Id | null = app.fillingSlot) {
   if (!slotId) return;
   const slot = app.current?.entries.find((e) => e.id === slotId);

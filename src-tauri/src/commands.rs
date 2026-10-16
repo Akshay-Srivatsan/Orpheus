@@ -470,6 +470,48 @@ pub async fn version_create(app: S<'_>, track_id: Id, version: serde_json::Value
     Ok(v)
 }
 
+/// Audio for a new version: a file, a Spotify track, or audio already in the library.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioPick {
+    pub path: Option<String>,
+    pub spotify: Option<SpotifyTrack>,
+    pub recording: Option<Id>,
+}
+
+/// Adds a version that plays other audio (an edit) to a song, named after that audio.
+#[tauri::command]
+pub async fn version_add_audio(app: S<'_>, track_id: Id, audio: AudioPick) -> Res<Version> {
+    let (rid, new, name) = if let Some(p) = &audio.path {
+        let path = std::path::Path::new(p);
+        let (rid, new) = crate::library::add_file(&app.store, path).map_err(ae)?;
+        (rid, new, path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default())
+    } else if let Some(t) = audio.spotify {
+        let src = SourceRef { kind: "spotify".into(), key: t.uri.clone() };
+        let nt = NewTrack { title: t.title.clone(), artist: t.artist, album: t.album, duration_ms: t.duration_ms, artwork_url: t.artwork_url, ..Default::default() };
+        let (rid, new) = app.store.insert_recording(&nt, src).map_err(ae)?;
+        (rid, new, t.title)
+    } else if let Some(r) = audio.recording {
+        let title = app.store.recording(&r).map_err(ae)?.rec.title;
+        (r, false, title)
+    } else {
+        return Err("no audio chosen".into());
+    };
+    let track = app.store.track(&track_id).map_err(ae)?;
+    let base = if name.trim().is_empty() { "Edit".to_string() } else { name.trim().to_string() };
+    let taken = |n: &str| track.rec.versions.iter().any(|v| v.name == n);
+    let name = std::iter::once(base.clone()).chain((2..).map(|i| format!("{base} ({i})"))).find(|n| !taken(n)).unwrap_or(base);
+    let mut v: Version = serde_json::from_value(serde_json::json!({ "id": "", "name": name })).map_err(err)?;
+    v.recording = rid.clone();
+    let v = app.store.version_create(&track_id, v).map_err(ae)?;
+    if new {
+        app.queue_analysis(rid, true);
+    }
+    crate::app::emit(&app.handle, "library-changed", vec![track_id]);
+    crate::app::emit(&app.handle, "recordings-changed", ());
+    Ok(v)
+}
+
 #[tauri::command]
 pub async fn version_update(app: S<'_>, id: Id, patch: serde_json::Value) -> Res<Version> {
     let patch: VersionPatch = serde_json::from_value(patch).map_err(err)?;

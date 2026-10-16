@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, on } from "../lib/api";
   import { evaluate } from "../lib/smart";
-  import { NO_STYLE, addToSet, app, audition, confirmAction, fillSlot, loadDeck } from "../lib/state.svelte";
+  import { NO_STYLE, addToSet, app, audition, confirmAction, fillSlot, addEdit, loadDeck } from "../lib/state.svelte";
   import { primaryVersion, rowsOf, type SetlistEntry } from "../lib/types";
   import { fmtBpm, fmtPct, fmtTime, playback, playedDurationMs, tempoFit } from "../lib/tempo";
   import type { HistoryItem, Id, Row } from "../lib/types";
@@ -217,6 +217,7 @@
   /** Double-click / Enter: fill the slot being filled, else load onto the off-air deck (paused). */
   function choose(r: Row) {
     if (app.fillingSlot) return fillSlot(r.version.id);
+    if (app.pickingEdit) return addEdit({ recording: r.rec.id });
     loadDeck(app.freeDeck, r.version.id);
   }
 
@@ -224,6 +225,7 @@
     return n === 3 || n === 6 ? "triple" : n === 2 || n === 4 ? "duple" : "";
   }
 
+  const editFor = $derived(app.pickingEdit ? app.trackMap.get(app.pickingEdit) : undefined);
   const slot = $derived(app.fillingSlot ? app.current?.entries.find((e) => e.id === app.fillingSlot) : undefined);
   const slotNumber = $derived(slot ? (app.current?.entries.filter((e) => e.status !== "skipped").indexOf(slot) ?? -1) + 1 : 0);
   $effect(() => {
@@ -283,6 +285,7 @@
     else if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
     else if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) { const r = selectedRow(); if (r) choose(r); }
     else if (e.key === "Escape" && app.fillingSlot) app.fillingSlot = null;
+    else if (e.key === "Escape" && app.pickingEdit) app.pickingEdit = null;
     else if ((e.key === "Backspace" || e.key === "Delete") && plainCrate && app.selected.length) {
       api.removeFromCrate(plainCrate.id, app.selected);
     }
@@ -305,6 +308,7 @@
     const items: MenuItem[] = [
       ...historyItems,
       ...(app.fillingSlot ? [{ label: "Use for the Slot", action: () => fillSlot(r.version.id) }, { separator: true } as MenuItem] : []),
+      ...(editFor ? [{ label: `Add Its Audio to “${editFor.title}”`, action: () => addEdit({ recording: r.rec.id }) }, { separator: true } as MenuItem] : []),
       { label: "Preview in Headphones (free deck)", action: () => preview(r) },
       { label: "Load onto Deck A", disabled: app.decks[0].onAir && app.decks[0].status === "playing", action: () => loadDeck(0, r.version.id) },
       { label: "Load onto Deck B", disabled: app.decks[1].onAir && app.decks[1].status === "playing", action: () => loadDeck(1, r.version.id) },
@@ -397,6 +401,13 @@
     <span>Choosing a song for slot {slotNumber}{slot.styles?.length ? ` (${slot.styles.map((k) => app.styleName(k)).join(" / ")})` : ""}: double-click a song, press <Icon name="check" size={11} />, or drag it onto the slot.</span>
     {#if app.styleFilter.length}<button class="plain small" onclick={() => (app.styleFilter = [])}>Show All Songs</button>{/if}
     <button class="plain small" onclick={() => (app.fillingSlot = null)}>Cancel</button>
+  </div>
+{/if}
+{#if editFor}
+  <div class="filling" role="status">
+    <Icon name="plus" size={13} />
+    <span>Choosing audio for a new version of “{editFor.title}”: double-click a song to add its audio.</span>
+    <button class="plain small" onclick={() => (app.pickingEdit = null)}>Cancel</button>
   </div>
 {/if}
 <div class="table" role="grid" tabindex="0" onkeydown={keydown} aria-label="Library">

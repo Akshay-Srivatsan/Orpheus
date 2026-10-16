@@ -255,6 +255,23 @@ pub fn import_paths(db: &Store, paths: &[String], progress: &dyn Fn(&ScanProgres
     Ok(ids)
 }
 
+/// One audio file's recording (made if new: `true`), without making a song
+/// for it. A file removed from the library is refused (Library → Files adds it).
+pub fn add_file(db: &Store, path: &Path) -> Result<(Id, bool)> {
+    if !decode::is_audio_file(path) {
+        anyhow::bail!("not an audio file Orpheus can play");
+    }
+    let (size, mtime) = file_stat(path).ok_or_else(|| anyhow::anyhow!("can't read {}", path.display()))?;
+    let hash = decode::content_hash(path)?;
+    if db.is_excluded(&hash) {
+        anyhow::bail!("that file was removed from the library (add it again in Library → Files)");
+    }
+    db.upsert_file(&path.to_string_lossy(), FileEntry { hash: hash.clone(), size, mtime, root: None });
+    let out = db.insert_recording(&read_tags(path), SourceRef { kind: "file".into(), key: hash })?;
+    db.save_index()?;
+    Ok(out)
+}
+
 /// Finds a readable file for a recording, if any of its known paths still exist.
 pub fn resolve_path(db: &Store, rec_id: &str) -> Option<PathBuf> {
     db.recording_file_paths(rec_id).into_iter().map(PathBuf::from).find(|p| p.exists())
@@ -266,4 +283,30 @@ pub fn analyze_recording(db: &Store, rec_id: &str) -> Result<()> {
     let a = crate::analysis::analyze(&mono, sr, db.known_bpm(rec_id));
     db.set_analysis(rec_id, &a)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn add_file_makes_a_recording_without_a_song() {
+        let base = std::env::temp_dir().join(format!("orpheus-test-{}", crate::model::new_id()));
+        let store = Store::open(&base.join("lib"), &base.join("local")).unwrap();
+        std::fs::create_dir_all(&base).unwrap();
+        let wav = base.join("edit.wav");
+        let spec = hound::WavSpec { channels: 1, sample_rate: 8000, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+        let mut w = hound::WavWriter::create(&wav, spec).unwrap();
+        for i in 0..8000 {
+            w.write_sample(((i as f32 * 0.05).sin() * 8000.0) as i16).unwrap();
+        }
+        w.finalize().unwrap();
+
+        let (rid, new) = add_file(&store, &wav).unwrap();
+        assert!(new);
+        assert!(store.songs_for_recording(&rid).is_empty(), "no song is made for it");
+        assert_eq!(add_file(&store, &wav).unwrap(), (rid, false), "the same file again is the same recording");
+        assert!(add_file(&store, &base.join("notes.txt")).is_err());
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }

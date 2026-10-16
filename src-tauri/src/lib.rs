@@ -195,6 +195,7 @@ pub fn run() {
             commands::library_files,
             commands::library_add_files,
             commands::version_create,
+            commands::version_add_audio,
             commands::version_update,
             commands::version_delete,
             commands::midi_info,

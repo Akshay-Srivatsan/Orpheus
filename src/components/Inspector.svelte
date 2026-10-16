@@ -2,7 +2,8 @@
   // Info tab: the selected song, its versions and the recordings they play,
   // and — when a set entry is selected — that entry's per-setlist overrides.
   import { api } from "../lib/api";
-  import { app, audition, confirmAction } from "../lib/state.svelte";
+  import { addEdit, app, audition, confirmAction } from "../lib/state.svelte";
+  import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { fmtBpm, fmtTime, foldBpm, playback, playedDurationMs, rateToFit, resolveSettings, styleCenter } from "../lib/tempo";
   import { primaryVersion, recordingOf, type Id, type Overrides, type Recording, type RecordingPatch, type SetlistEntry, type SourceRef, type Track, type Version } from "../lib/types";
   import Icon from "./Icon.svelte";
@@ -21,6 +22,8 @@
 
   let taps = $state<number[]>([]);
   let linkInput = $state("");
+  /** Adding an edit from a Spotify link: the link being typed (null: not shown). */
+  let editLink = $state<string | null>(null);
 
   // ---------------------------------------------------------------- club styles for a set entry
 
@@ -155,6 +158,30 @@
     const style = app.filterStyle;
     const v = await app.run(api.createVersion(track.id, { name: style ? app.styleName(style) : "New version", styles: style ? [style] : [] }));
     if (v) app.selected = [v.id];
+  }
+
+  /** Add an Edit…: a version of this song that plays other audio. */
+  function editMenu(ev: MouseEvent) {
+    if (!track) return;
+    const id = track.id;
+    const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+    clubMenu = { x: r.left, y: r.bottom + 2, items: [
+      { label: "From a File…", action: async () => {
+        const path = await openDialog({ multiple: false, directory: false, title: "Audio for the new version" });
+        if (typeof path === "string") addEdit({ path }, id);
+      } },
+      { label: "From Spotify…", disabled: !app.spotify?.connected, action: () => (editLink = "") },
+      { label: "From the Library…", action: () => { app.pickingEdit = id; } },
+    ] };
+  }
+
+  async function addSpotifyEdit() {
+    if (!track || !editLink?.trim()) return;
+    const hits = await app.run(api.spotifyResolve(editLink));
+    if (!hits) return;
+    if (!hits.length) return app.toast("That isn't a Spotify track link");
+    await addEdit({ spotify: hits[0] }, track.id);
+    editLink = null;
   }
 
   async function duplicateVersion(v: Version) {
@@ -445,7 +472,21 @@
       </section>
 
       <section class="box">
-        <div class="section-title row">Versions <button class="plain small" onclick={newVersion}><Icon name="plus" size={12} /> New</button></div>
+        <div class="section-title row">Versions
+          <span>
+            <button class="plain small" title="A version playing the same audio (other styles, cues, tempo…)" onclick={newVersion}><Icon name="plus" size={12} /> New</button>
+            <button class="plain small" title="A version playing other audio: another edit of this song" onclick={editMenu}>Add an Edit…</button>
+          </span>
+        </div>
+        {#if editLink !== null}
+          <div class="row">
+            <!-- svelte-ignore a11y_autofocus -->
+            <input type="text" placeholder="Spotify link of the edit" bind:value={editLink} style="flex:1" autofocus
+              onkeydown={(e) => { if (e.key === "Enter") addSpotifyEdit(); else if (e.key === "Escape") editLink = null; }} />
+            <button class="small" disabled={!editLink.trim()} onclick={addSpotifyEdit}>Add</button>
+            <button class="plain small" onclick={() => (editLink = null)}>Cancel</button>
+          </div>
+        {/if}
         {#each track.versions as v (v.id)}
           {@const pb = playback(track, v, null, app.clubStyleOf)}
           {@const vrec = recordingOf(track, v)}

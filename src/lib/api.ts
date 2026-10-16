@@ -67,6 +67,9 @@ export const api = {
   /** Moves versions of one song into a new song. */
   separateVersions: (versionIds: T.Id[]) => call<T.Track>("versions_separate", { versionIds }),
   createVersion: (trackId: T.Id, version: T.VersionPatch) => call<T.Version>("version_create", { trackId, version }),
+  /** Adds a version playing other audio (an edit): a file, a Spotify track, or a recording in the library. */
+  addEdit: (trackId: T.Id, audio: { path?: string; spotify?: T.SpotifyTrack; recording?: T.Id }) =>
+    call<T.Version>("version_add_audio", { trackId, audio }),
   updateVersion: (id: T.Id, patch: T.VersionPatch) => call<T.Version>("version_update", { id, patch }),
   deleteVersion: (id: T.Id) => call<void>("version_delete", { id }),
 
