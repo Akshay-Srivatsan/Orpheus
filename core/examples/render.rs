@@ -1,7 +1,7 @@
 //! Renders a file through a deck (time-stretch + SRC) without an audio device
 //! and reports duration/BPM of the output. Usage: render <file> <tempo> <out_rate>
-use orpheus_lib::audio::source::{LocalSource, Source};
-use orpheus_lib::audio::{Deck, LoadRequest};
+use orpheus_core::audio::source::{LocalSource, Source};
+use orpheus_core::audio::{Deck, LoadRequest};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -28,7 +28,7 @@ fn main() -> anyhow::Result<()> {
     let t0 = std::time::Instant::now();
     loop {
         if let Ok(ev) = rx.try_recv() {
-            if let orpheus_lib::audio::DeckEvent::Ended { .. } = ev { break; }
+            if let orpheus_core::audio::DeckEvent::Ended { .. } = ev { break; }
             println!("event {ev:?}");
         }
         if let Some(ring) = tap.ring.lock().as_mut() {
@@ -42,8 +42,8 @@ fn main() -> anyhow::Result<()> {
     let secs = mono.len() as f64 / out_rate as f64;
     let peak = mono.iter().fold(0f32, |m, x| m.max(x.abs()));
     println!("rendered {secs:.2}s (expected {:.2}s) in {:?}, peak {peak:.3}", 60.0 / tempo, t0.elapsed());
-    println!("output bpm: {:?}", orpheus_lib::analysis::detect_bpm(&mono, out_rate));
-    let (src, sr) = orpheus_lib::decode::decode_mono(&path)?;
-    println!("source bpm (first 60 s): {:?}", orpheus_lib::analysis::detect_bpm(&src[..(60 * sr) as usize], sr));
+    println!("output bpm: {:?}", orpheus_core::analysis::detect_bpm(&mono, out_rate));
+    let (src, sr) = orpheus_core::decode::decode_mono(&path)?;
+    println!("source bpm (first 60 s): {:?}", orpheus_core::analysis::detect_bpm(&src[..(60 * sr) as usize], sr));
     Ok(())
 }

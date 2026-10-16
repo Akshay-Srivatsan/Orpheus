@@ -1,7 +1,7 @@
 //! Separates one file and renders it through StemSource with each stem muted.
 //! Usage: stems <audio file> <scratch dir>
-use orpheus_lib::audio::source::{LocalSource, Source, StemSource};
-use orpheus_lib::audio::AtomicF32;
+use orpheus_core::audio::source::{LocalSource, Source, StemSource};
+use orpheus_core::audio::AtomicF32;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -13,24 +13,24 @@ fn main() -> anyhow::Result<()> {
     env_logger::init();
     let a: Vec<String> = std::env::args().collect();
     let path = std::path::PathBuf::from(&a[1]);
-    let stems = orpheus_lib::stems::Stems::new(std::path::Path::new(&a[2]));
+    let stems = orpheus_core::stems::Stems::new(std::path::Path::new(&a[2]));
     if !stems.model_ready() {
         stems.download_model();
         while !stems.model_ready() {
-            if let orpheus_lib::stems::ModelStatus::Error { message } = stems.status().model {
+            if let orpheus_core::stems::ModelStatus::Error { message } = stems.status().model {
                 anyhow::bail!(message);
             }
             std::thread::sleep(Duration::from_millis(500));
         }
     }
-    let hash = orpheus_lib::decode::content_hash(&path)?;
+    let hash = orpheus_core::decode::content_hash(&path)?;
     let t0 = Instant::now();
     stems.request("t", &hash, path.clone())?;
     let files = loop {
         if let Some(f) = stems.files(&hash) {
             break f;
         }
-        if let Some(orpheus_lib::stems::JobStatus::Failed { message }) = stems.job("t") {
+        if let Some(orpheus_core::stems::JobStatus::Failed { message }) = stems.job("t") {
             anyhow::bail!(message);
         }
         std::thread::sleep(Duration::from_millis(500));
@@ -51,7 +51,7 @@ fn main() -> anyhow::Result<()> {
         let diff: Vec<f32> = out[..n].iter().zip(&orig[..n]).map(|(a, b)| a - b).collect();
         println!(
             "mute {:<7} rms {:.4}  (original {:.4}, removed {:.4})",
-            mute.map(|i| orpheus_lib::stems::STEMS[i]).unwrap_or("none"),
+            mute.map(|i| orpheus_core::stems::STEMS[i]).unwrap_or("none"),
             rms(&out[..n]),
             rms(&orig[..n]),
             rms(&diff)

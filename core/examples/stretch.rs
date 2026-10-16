@@ -1,7 +1,7 @@
 //! Renders an excerpt with each time-stretch engine, for listening tests.
 //! Usage: stretch <file> <tempo> <start secs> <length secs> <out dir>
-use orpheus_lib::audio::source::{LocalSource, Source};
-use orpheus_lib::audio::stretch::{create, Engine};
+use orpheus_core::audio::source::{LocalSource, Source};
+use orpheus_core::audio::stretch::{create, Engine};
 
 fn main() -> anyhow::Result<()> {
     let a: Vec<String> = std::env::args().collect();

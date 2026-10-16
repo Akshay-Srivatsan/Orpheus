@@ -5,8 +5,8 @@ fn main() -> anyhow::Result<()> {
     env_logger::init();
     let a: Vec<String> = std::env::args().collect();
     let rt = tokio::runtime::Runtime::new()?;
-    let tts = orpheus_lib::tts::Tts::new(std::path::Path::new(&a[1]), rt.handle().clone());
-    let cfg = orpheus_lib::tts::TtsConfig { voice: a[2].clone(), model: "fp16".into(), speed: 1.0 };
+    let tts = orpheus_core::tts::Tts::new(std::path::Path::new(&a[1]), rt.handle().clone());
+    let cfg = orpheus_core::tts::TtsConfig { voice: a[2].clone(), model: "fp16".into(), speed: 1.0 };
     if tts.status(&cfg).installed_voices.iter().all(|v| v != &a[2]) {
         tts.install(&cfg)?;
     }

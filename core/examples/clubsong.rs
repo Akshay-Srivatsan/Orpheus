@@ -1,7 +1,7 @@
 //! Prints a club-file song entry (hash, length, fingerprint) for audio files,
 //! and which of them are the same version.
 //! Usage: clubsong <file>...
-use orpheus_lib::{decode, fingerprint};
+use orpheus_core::{decode, fingerprint};
 
 fn main() -> anyhow::Result<()> {
     let mut fps = vec![];

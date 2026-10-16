@@ -1,6 +1,6 @@
 //! Compares Orpheus's fingerprints with Chromaprint's `fpcalc`, and two songs.
 //! Usage: fpcompare <file> [<other file>]   (needs fpcalc on the PATH)
-use orpheus_lib::{decode, fingerprint};
+use orpheus_core::{decode, fingerprint};
 
 fn fpcalc(path: &str, raw: bool) -> String {
     let mut c = std::process::Command::new("fpcalc");

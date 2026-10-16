@@ -1,6 +1,6 @@
 //! Scans a folder into a scratch library and prints what Orpheus sees.
 //! Usage: cargo run --release --example scan -- <music dir> <library dir> <local dir>
-use orpheus_lib::{library, store::Store};
+use orpheus_core::{library, store::Store};
 use std::time::Instant;
 
 fn main() -> anyhow::Result<()> {

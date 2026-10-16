@@ -1701,7 +1701,7 @@ announce = true
 
     /// Runs a future that does no waiting (bundled files only).
     fn futures_lite_block_on<F: std::future::Future>(f: F) -> F::Output {
-        tauri::async_runtime::block_on(f)
+        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(f)
     }
 
     #[test]

@@ -18,7 +18,6 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
 
 pub use crate::perform::{PendingNext, Perform, PerformState, ProjectorPayload};
 
@@ -50,7 +49,8 @@ pub struct UndoBook {
 }
 
 pub struct App {
-    pub handle: AppHandle,
+    /// Where events go (the UI).
+    pub handle: Events,
     pub store: Arc<Store>,
     pub local_dir: PathBuf,
     pub data_dir: PathBuf,
@@ -87,9 +87,19 @@ pub struct App {
     _rt: tokio::runtime::Runtime,
 }
 
-pub fn emit<S: Serialize + Clone>(h: &AppHandle, ev: &str, payload: S) {
-    if let Err(e) = h.emit(ev, payload) {
-        log::debug!("emit {ev}: {e}");
+/// Where the engine's events go: a user interface (or several). Each event has
+/// a name (e.g. "deck-state") and a JSON payload.
+pub trait EventSink: Send + Sync {
+    fn emit(&self, event: &str, payload: serde_json::Value);
+}
+
+/// The engine's handle to its event sink.
+pub type Events = Arc<dyn EventSink>;
+
+pub fn emit<S: Serialize>(h: &Events, ev: &str, payload: S) {
+    match serde_json::to_value(payload) {
+        Ok(v) => h.emit(ev, v),
+        Err(e) => log::debug!("emit {ev}: {e}"),
     }
 }
 
@@ -109,7 +119,7 @@ pub fn fold_bpm(bpm: f64, target: f64) -> f64 {
 }
 
 impl App {
-    pub fn new(handle: AppHandle, data_dir: PathBuf) -> Result<Arc<Self>> {
+    pub fn new(handle: Events, data_dir: PathBuf) -> Result<Arc<Self>> {
         std::fs::create_dir_all(&data_dir)?;
         let settings: Settings = std::fs::read_to_string(data_dir.join("settings.json"))
             .ok()
@@ -125,7 +135,7 @@ impl App {
         let store = Arc::new(Store::open(&library_dir, &data_dir)?);
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build()?;
         let spotify = Arc::new(Spotify::new(rt.handle().clone(), data_dir.join("spotify")));
-        spotify.set_web_client_id(&crate::commands::spotify_web_client_id(&settings));
+        spotify.set_web_client_id(&crate::spotify::web_client_id(&settings));
         let stems = crate::stems::Stems::new(&data_dir);
         let tts = crate::tts::Tts::new(&data_dir, rt.handle().clone());
         let announcer = Arc::new(crate::audio::announcer::Announcer::default());
@@ -264,7 +274,7 @@ impl App {
             self.buffer_ms.store(new.audio.buffer_ms, Ordering::Relaxed);
             self.apply_outputs();
         }
-        self.spotify.set_web_client_id(&crate::commands::spotify_web_client_id(&new));
+        self.spotify.set_web_client_id(&crate::spotify::web_client_id(&new));
         if serde_json::to_string(&old.announce)? != serde_json::to_string(&new.announce)? {
             self.emit_tts_status();
             if new.announce.enabled {
@@ -434,6 +444,25 @@ impl App {
 
     pub(crate) fn active_club(&self) -> Option<Arc<Club>> {
         self.club(&self.active_club_ref()?)
+    }
+
+    /// What views need: the club in effect (`club`, else the open set's, else
+    /// the default club's latest), your styles and the club's suggested songs.
+    pub fn view_context(&self, club: Option<ClubRef>) -> crate::views::ViewContext {
+        let r = club.or_else(|| self.active_club_ref());
+        let (pct, trim) = {
+            let s = self.settings.read();
+            (s.tempo_range_pct, s.trim_silence)
+        };
+        let ctx = crate::views::ViewContext {
+            styles: self.style_library(),
+            song_matches: r.as_ref().map(|r| self.club_song_matches(r)).unwrap_or_default(),
+            fade_secs: self.fade_secs(),
+            trim_silence: trim,
+            ..Default::default()
+        };
+        let club = r.as_ref().and_then(|r| self.club(r));
+        ctx.with_club(club, r.map(|r| r.id), pct)
     }
 
     /// Your styles and club mappings; seeded (and saved) on first use from the
@@ -915,6 +944,12 @@ impl App {
             }
         }
         Ok(None)
+    }
+
+    /// Runs a future on the engine's runtime (from a worker thread, not
+    /// inside an async runtime).
+    pub fn block_on<F: std::future::Future>(&self, f: F) -> F::Output {
+        self._rt.block_on(f)
     }
 
     /// Starts an undoable action: remembers the library before it.

@@ -882,6 +882,15 @@ fn closest_in_length(mut hits: Vec<SpotifyTrack>, duration_ms: i64, max_diff_ms:
     hits
 }
 
+/// Your own Spotify app's client id for search and playlists ("" = the shared one).
+pub fn web_client_id(settings: &crate::settings::Settings) -> String {
+    let id = settings.spotify.client_id.trim().to_string();
+    if !id.is_empty() {
+        return id;
+    }
+    std::env::var("ORPHEUS_SPOTIFY_CLIENT_ID").unwrap_or_default()
+}
+
 fn web_track(t: &serde_json::Value) -> Option<SpotifyTrack> {
     let uri = t["uri"].as_str()?;
     if !uri.starts_with("spotify:track:") {

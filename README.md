@@ -9,7 +9,8 @@ Stanford's [Dancebreak](https://dancebreak.stanford.edu/info/djing/), Jammix
 (Powers' tips) and Friday Night Waltz (Lucas Garron's
 [tempos](https://garron.net/dance/tempos/))).
 
-Runs on macOS, Linux and Windows (Tauri 2, Rust and Svelte).
+A Rust engine (`core/`) with a Qt Quick interface (in progress; Linux first, then
+macOS, Windows, Android and the web).
 
 ## How it differs from club DJ software
 
@@ -256,9 +257,7 @@ deck.
 
 ## Development
 
-You need Rust (stable), Node 20+, and the
-[Tauri prerequisites](https://tauri.app/start/prerequisites/) for your OS.
-You also need **libclang**, which `signalsmith-stretch` uses for bindgen:
+You need Rust (stable), and **libclang**, which `signalsmith-stretch` uses for bindgen:
 
 | OS | libclang |
 |---|---|
@@ -266,20 +265,23 @@ You also need **libclang**, which `signalsmith-stretch` uses for bindgen:
 | Linux | Your distribution's `clang` package. |
 | Windows | Install LLVM. |
 
+The Tauri/Svelte interface has been removed, and the Qt Quick one replacing
+it is being built. Until it lands, the engine runs in its tests and examples:
+
 ```sh
-npm install
-npm run tauri dev        # run the app
-npm run tauri build      # build an installer / .app
-npm test                 # frontend tests (style mapping, smart crates)
-cd src-tauri && cargo test --release   # backend tests
+cargo test -p orpheus-core          # engine tests
+cargo run -p orpheus-core --example scan -- <music dir> <library dir> <local dir>
 ```
+
+The old Svelte code (`src/`) stays as the reference for the port, with its tests
+(`npm test`: style mapping, smart crates), until the Qt interface replaces it.
 
 Useful environment variables:
 
 - `ORPHEUS_DATA_DIR`: use a separate data folder, e.g. for testing.
 - `ORPHEUS_SPOTIFY_CLIENT_ID`: your own Spotify app for search and playlists, if none is set in Settings.
 
-The developer examples in `src-tauri/examples/` work without the UI:
+The developer examples in `core/examples/` work without the UI:
 
 - `scan` scans a folder into a scratch library and prints BPM and identity
   results.
@@ -294,7 +296,8 @@ The developer examples in `src-tauri/examples/` work without the UI:
 ### Layout
 
 ```
-src-tauri/src/
+core/src/       the engine (crate `orpheus-core`): everything but the interface
+  api.rs        the interface's API: one function per command, and `call` (by name, JSON in and out); events go to an `EventSink`
   app.rs        app state, settings, audio routing, loading, background jobs
   perform.rs    two-deck model: crossfader, Play Next / Go Live, auto-load, pauses, set history, projector state
   controls.rs   deck controls (CUE, hot cues, scrubbing, edit points) and controller actions
@@ -309,9 +312,9 @@ src-tauri/src/
   stems.rs      background stem separation and cache
   tts.rs        Kokoro text-to-speech for announcements (download, phonemes, synthesis)
   midi.rs       midir hot-plug, mappings (DJ2GO2 built in), learn, LEDs
-  commands.rs   Tauri commands
 examples/clubs/ example club guidelines (Dancebreak, Jammix, Friday Night Waltz), bundled with the app
-src/
+icons/          app icons
+src/            the former Svelte interface (reference for the Qt port; to be removed)
   components/   main window (decks, transport, library, set panel, inspector, settings)
   components/projector/  public display
   lib/clubs.ts  matching songs to club styles and checking sets (the only implementation; used by both windows)

@@ -1,22 +1,15 @@
 [package]
-name = "orpheus"
+name = "orpheus-core"
 version = "0.1.0"
-description = "Social dance DJ software"
+description = "Orpheus's engine: library, sets, clubs, audio, Spotify and analysis, without a UI"
 license = "GPL-3.0-or-later"
 edition = "2021"
 
 [lib]
-name = "orpheus_lib"
-# Desktop only: Tauri's mobile targets would also need "staticlib" and "cdylib".
-crate-type = ["rlib"]
-
-[build-dependencies]
-tauri-build = { version = "2", features = [] }
+name = "orpheus_core"
 
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-dialog = "2"
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 anyhow = "1"
 thiserror = "2"
@@ -67,6 +60,7 @@ indexmap = { version = "2.14.2", features = ["serde"] }
 jiff = "0.2.38"
 toml_edit = "0.25.17"
 rusty-chromaprint = "0.3.0"
+unicode-normalization = "0.1"
 
 # On Linux, ask RealtimeKit (over D-Bus) for real-time scheduling; works without root.
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -80,13 +74,3 @@ stem-splitter-core = { version = "1.2", default-features = false, features = ["c
 
 [target.'cfg(target_os = "windows")'.dependencies]
 stem-splitter-core = { version = "1.2", default-features = false, features = ["directml"] }
-
-# Keep audio DSP and analysis fast in debug builds.
-[profile.dev]
-opt-level = 1
-
-[profile.dev.package."*"]
-opt-level = 2
-
-[profile.release]
-lto = "thin"

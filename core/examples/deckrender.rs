@@ -1,8 +1,8 @@
 //! Renders the start of a song the way a deck does (512-frame blocks, key
 //! lock, output at 48 kHz), for checking the output offline.
 //! Usage: deckrender <file> <tempo> <start secs> <length secs> <out.wav> [engine]
-use orpheus_lib::audio::source::{LocalSource, Source};
-use orpheus_lib::audio::stretch::{create, Engine};
+use orpheus_core::audio::source::{LocalSource, Source};
+use orpheus_core::audio::stretch::{create, Engine};
 
 fn main() -> anyhow::Result<()> {
     let a: Vec<String> = std::env::args().collect();
