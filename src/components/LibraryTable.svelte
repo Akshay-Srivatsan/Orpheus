@@ -433,8 +433,9 @@
                 <button class="plain fold" title={fold.open ? "Fold its versions" : `Show all ${fold.count} versions`} onclick={(e) => toggleFold(e, r.track.id)}>{fold.open ? "▾" : "▸"}<span class="n">{fold.count}</span></button>
               {:else}<span class="fold-pad"></span>{/if}
             {/if}
+            <!-- Its own slot on every row, so it never moves the title. -->
+            <span class="sp">{#if r.rec.sources.some((s) => s.kind === "spotify") && !r.rec.files.length}<span title="Spotify">●</span>{/if}</span>
             {#if r.rec.missing}<span title="File missing on this computer"><Icon name="warning" size={12} /></span>{/if}
-            {#if r.rec.sources.some((s) => s.kind === "spotify") && !r.rec.files.length}<span class="sp" title="Spotify">●</span>{/if}
             {r.track.title}
           </span>
           <span class="c artist" title={r.track.artist}>{r.track.artist}</span>
@@ -507,7 +508,9 @@
   .fold .n { font-size: var(--fs-xs); color: var(--text-faint); font-variant-numeric: tabular-nums; }
   .fold-pad { display: inline-block; }
   .indent { display: inline-block; width: 16px; flex: none; }
-  .thead .title.tree { padding-left: 26px; }
+  /* Over the titles: past the fold and Spotify slots (and the space after each). */
+  .thead .title { padding-left: 16px; }
+  .thead .title.tree { padding-left: 46px; }
   .tr.child .title { color: var(--text-dim); }
   .thead .version { display: flex; gap: 6px; align-items: center; }
   .hbtn { padding: 0; height: auto; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; }
@@ -522,7 +525,7 @@
   .c { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .title { display: flex; align-items: center; gap: 5px; }
   .title :global(svg) { color: var(--yellow); flex: none; }
-  .sp { color: #1db954; font-size: 9px; }
+  .sp { color: #1db954; font-size: 9px; display: inline-block; width: 12px; flex: none; }
   .bpm { display: flex; gap: 4px; align-items: baseline; }
   .rate { font-size: var(--fs-xs); color: var(--teal); }
   .fit-sweet { color: var(--green); }
