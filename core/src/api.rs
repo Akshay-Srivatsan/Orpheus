@@ -1659,6 +1659,52 @@ pub fn library_summary(app: &Arc<App>) -> Res<crate::views::LibrarySummary> {
     Ok(crate::views::library_summary(&ctx, &app.store.all_tracks(), &app.store.crates(), crate::model::now_ms()))
 }
 
+/// A song as the Info panel shows it (and, with `entry_id`, that set entry).
+pub fn song_view(app: &Arc<App>, track_id: Option<Id>, entry_id: Option<Id>) -> Res<Option<crate::views::SongView>> {
+    let entry = entry_id.and_then(|id| app.store.entry(&id).ok());
+    let tid = match (&entry, track_id) {
+        (Some((e, _)), _) if e.version_id.is_some() => app.store.version(e.version_id.as_deref().unwrap_or_default()).ok().map(|(_, t)| t),
+        (_, t) => t,
+    };
+    let set = entry.as_ref().and_then(|(_, sid)| app.store.setlist(sid).ok());
+    let ctx = app.view_context(set.and_then(|s| s.club));
+    let ready = stems_ready(app)?;
+    let is_ready = |r: &Recording| ready.contains(&r.rec.id);
+    let announce = app.settings.read().announce.clone();
+    let sc = crate::views::SongContext { stems_ready: &is_ready, gap_secs: app.gap_seconds(), announce: &announce };
+    let all = app.store.all_tracks();
+    let Some(track) = tid.and_then(|t| all.iter().find(|x| x.rec.id == t).cloned()) else {
+        // A slot or a pause: only the entry.
+        return Ok(entry.map(|(e, _)| {
+            let empty = Track { rec: Default::default(), recordings: vec![], missing: false, play_count: 0, last_played_at: None };
+            let mut v = crate::views::song_view(&ctx, &empty, Some(&e), &all, &sc);
+            v.track.rec.id = String::new();
+            v
+        }));
+    };
+    Ok(Some(crate::views::song_view(&ctx, &track, entry.as_ref().map(|(e, _)| e), &all, &sc)))
+}
+
+/// Plays another version of the song in a set entry (e.g. another edit of a
+/// line dance). Settings tied to the old audio (tempo, start/end, fade) are
+/// dropped, and the club's tempo rule applies afresh.
+pub fn entry_switch_version(app: &Arc<App>, entry_id: Id, version_id: Id) -> Res<SetlistEntry> {
+    let (e, _) = app.store.entry(&entry_id).map_err(ae)?;
+    let keep = Overrides { gain_db: e.overrides.gain_db, stems: e.overrides.stems.clone(), ..Default::default() };
+    let overrides = serde_json::to_value(keep).map_err(err)?;
+    entry_update(app, entry_id, serde_json::json!({ "versionId": version_id, "overrides": overrides }))
+}
+
+/// Sets a version's tempo to the nearest edge of its style's sweet range (or
+/// back to its own, if it's there already).
+pub fn version_fit_tempo(app: &Arc<App>, id: Id) -> Res<Version> {
+    let (v, tid) = app.store.version(&id).map_err(ae)?;
+    let track = app.store.track(&tid).map_err(ae)?;
+    let ctx = app.view_context(None);
+    let target = crate::views::fit_tempo(&ctx, &track, &v).ok_or("This version has no style with a tempo to fit")?;
+    version_update(app, id, serde_json::json!({ "targetBpm": target }))
+}
+
 /// What smart crate rules can test (for the rule editor).
 pub fn smart_fields() -> Res<Vec<crate::smart::FieldDef>> {
     Ok(crate::smart::fields())
@@ -2812,6 +2858,34 @@ pub fn call(app: &Arc<App>, name: &str, args: serde_json::Value) -> Res<serde_js
         }
         "smart_fields" => json(smart_fields()),
         "active_club" => json(active_club(app)),
+        "song_view" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                track_id: Option<Id>,
+                entry_id: Option<Id>,
+            }
+            let a: A = parse(args)?;
+            json(song_view(app, a.track_id, a.entry_id))
+        }
+        "entry_switch_version" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                entry_id: Id,
+                version_id: Id,
+            }
+            let a: A = parse(args)?;
+            json(entry_switch_version(app, a.entry_id, a.version_id))
+        }
+        "version_fit_tempo" => {
+            #[derive(Deserialize)]
+            struct A {
+                id: Id,
+            }
+            let a: A = parse(args)?;
+            json(version_fit_tempo(app, a.id))
+        }
         "library_summary" => json(library_summary(app)),
         "smart_default_condition" => {
             #[derive(Deserialize)]

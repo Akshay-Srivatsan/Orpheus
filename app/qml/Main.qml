@@ -119,12 +119,7 @@ ApplicationWindow {
                         Layout.fillHeight: true
                         currentIndex: Session.rightTab === "info" ? 1 : 0
                         SetPanel { onNewSetlist: newSetlist.open() }
-                        Label {
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                            opacity: 0.6
-                            text: qsTr("Song info isn't available in this build yet.")
-                        }
+                        Inspector {}
                     }
                 }
             }

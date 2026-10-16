@@ -1232,6 +1232,260 @@ pub fn club_summary(club: &Club, r: &ClubRef, info: Option<&crate::club::ClubInf
     }
 }
 
+// ---------------------------------------------------------------- song (Info)
+
+/// A song as the Info panel shows it: the song, each version and its audio,
+/// and the set entry selected (if any).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SongView {
+    pub track: Track,
+    pub versions: Vec<VersionView>,
+    /// The song's audio, to choose what a version plays.
+    pub recordings: Vec<Choice>,
+    pub entry: Option<EntryView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Choice {
+    pub id: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VersionView {
+    pub version: Version,
+    pub is_primary: bool,
+    /// What it shows (your styles, or the club's), and the names joined (for placeholders).
+    pub shown: Vec<Shown>,
+    pub shown_names: String,
+    pub playback: Playback,
+    /// The tempo "Fit" sets (the nearest edge of its style's sweet range), if it has one.
+    pub can_fit: bool,
+    pub audio: Option<AudioView>,
+    /// Other versions of this song playing the same audio, and other songs playing it.
+    pub shared_with: Vec<String>,
+    pub other_songs: Vec<Choice>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioView {
+    pub recording: Recording,
+    /// "FLAC", "MP3", "Spotify" or "file missing", with a tooltip (the path or link).
+    pub chips: Vec<Choice>,
+    /// Where its BPM came from, in words.
+    pub bpm_from: String,
+    /// The club suggests this audio for these styles.
+    pub club_suggests: Vec<String>,
+    pub stems_ready: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryView {
+    pub entry: SetlistEntry,
+    pub is_pause: bool,
+    /// The song's versions it can play, described (tempo, length, warnings).
+    pub version_choices: Vec<Choice>,
+    pub show_as: Vec<ShowAs>,
+    pub shown_names: String,
+    pub playback: Option<Playback>,
+    /// The pause before it, and between its announcement and its start, by default (seconds).
+    pub default_pause_before: f64,
+    pub default_pause_after: f64,
+    /// Something is said before it.
+    pub speaks: bool,
+    pub tags: Vec<TagOn>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagOn {
+    pub key: String,
+    pub name: String,
+    pub color: String,
+    pub note: String,
+    pub on: bool,
+}
+
+/// What else the Info panel needs to know.
+pub struct SongContext<'a> {
+    pub stems_ready: &'a dyn Fn(&Recording) -> bool,
+    pub gap_secs: f64,
+    pub announce: &'a crate::settings::AnnounceSettings,
+}
+
+fn bpm_from(r: &Recording) -> String {
+    match r.rec.bpm_source.as_deref() {
+        Some("detected") => "from analysis".into(),
+        Some("tag") => "from the file tag".into(),
+        Some("tap") => "from tapping".into(),
+        Some("user") => "set by you".into(),
+        Some(other) => format!("from {other}"),
+        None if r.rec.analyzed => "not detected".into(),
+        None => "analysing…".into(),
+    }
+}
+
+fn chips(r: &Recording) -> Vec<Choice> {
+    r.rec
+        .sources
+        .iter()
+        .map(|s| {
+            if s.kind == "spotify" {
+                return Choice { id: "Spotify".into(), label: s.key.clone() };
+            }
+            match r.file_paths.get(&s.key).and_then(|p| p.first()) {
+                Some(p) => {
+                    let ext = std::path::Path::new(p).extension().map(|e| e.to_string_lossy().to_uppercase()).unwrap_or_else(|| "file".into());
+                    Choice { id: ext, label: p.clone() }
+                }
+                None => Choice { id: "file missing".into(), label: "Not found on this computer: add its folder in Settings → Library".into() },
+            }
+        })
+        .collect()
+}
+
+pub fn song_view(ctx: &ViewContext, track: &Track, entry: Option<&SetlistEntry>, all: &[Track], sc: &SongContext) -> SongView {
+    let primary = primary_version(track).map(|v| v.id.clone());
+    let club = ctx.club.as_deref();
+    let versions = track
+        .rec
+        .versions
+        .iter()
+        .map(|v| {
+            let rec = track.recording_of(&v.id);
+            let shown = shown_for(ctx, track, v, None);
+            let st = club_style_of(&shown).cloned();
+            let pb = playback(rec, v, None, st.as_ref());
+            let audio = rec.map(|r| AudioView {
+                recording: r.clone(),
+                chips: chips(r),
+                bpm_from: bpm_from(r),
+                club_suggests: ctx
+                    .song_matches
+                    .get(&r.rec.id)
+                    .map(|ids| ids.iter().map(|id| club.and_then(|c| c.styles.get(id)).map_or(id.clone(), |s| s.name.clone())).collect())
+                    .unwrap_or_default(),
+                stems_ready: (sc.stems_ready)(r),
+            });
+            VersionView {
+                is_primary: primary.as_deref() == Some(&v.id),
+                shown_names: shown.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(" / "),
+                can_fit: st.as_ref().is_some_and(|s| s.sweet.is_some()),
+                shown,
+                playback: pb,
+                shared_with: track.rec.versions.iter().filter(|x| x.id != v.id && x.recording == v.recording).map(|x| x.name.clone()).collect(),
+                other_songs: rec
+                    .map(|r| {
+                        r.songs
+                            .iter()
+                            .filter(|id| **id != track.rec.id)
+                            .filter_map(|id| all.iter().find(|t| &t.rec.id == id))
+                            .map(|t| Choice { id: t.rec.id.clone(), label: t.rec.title.clone() })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                audio,
+                version: v.clone(),
+            }
+        })
+        .collect();
+    let entry = entry.map(|e| {
+        let is_pause = e.kind == EntryKind::Pause;
+        let ev = e.version_id.as_ref().and_then(|id| track.rec.versions.iter().find(|v| &v.id == id));
+        let shown = match ev {
+            Some(v) => shown_for(ctx, track, v, Some(e)),
+            None => shown_styles(ctx, None, None, Some(e)),
+        };
+        let st = club_style_of(&shown).cloned();
+        let version_choices = track
+            .rec
+            .versions
+            .iter()
+            .map(|v| {
+                // How it would play here: the entry without its audio-bound settings.
+                let at = SetlistEntry { version_id: Some(v.id.clone()), overrides: Overrides::default(), ..e.clone() };
+                let rec = track.recording_of(&v.id);
+                let s = shown_for(ctx, track, v, Some(&at));
+                let pb = playback(rec, v, Some(&at), club_style_of(&s));
+                let len = rec.map(|r| played_duration_ms(ctx, r, Some(v), Some(&at), pb.rate)).unwrap_or(0.0);
+                let secs = (len / 1000.0).round() as i64;
+                let bpm = pb.target.or(rec.and_then(|r| r.rec.bpm)).map(crate::matching::num).unwrap_or_else(|| "–".into());
+                let warn = if s.iter().any(|x| !x.problems.is_empty()) { " ⚠" } else { "" };
+                let hidden = if v.hidden { " (not in the library)" } else { "" };
+                Choice { id: v.id.clone(), label: format!("{} — {bpm} BPM, {}:{:02}{warn}{hidden}", v.name, secs / 60, secs % 60) }
+            })
+            .collect();
+        let on = |k: &str| shown.iter().any(|s| s.key == k);
+        let show_as = if is_pause {
+            vec![]
+        } else if let Some(c) = club {
+            let facts = ev.and_then(|v| song_facts(ctx, track, v, Some(e)));
+            let mut all: Vec<ShowAs> = c
+                .styles
+                .iter()
+                .map(|(id, st)| ShowAs { key: id.clone(), name: st.name.clone(), fits: facts.as_ref().map_or(true, |f| crate::matching::assess(id, st, f, ctx.tempo_change).ok), on: on(id) })
+                .collect();
+            all.sort_by_key(|x| !x.fits);
+            all
+        } else {
+            ev.map(|v| v.styles.iter().map(|k| ShowAs { key: k.clone(), name: style_name(&ctx.styles, k), fits: true, on: on(k) }).collect()).unwrap_or_default()
+        };
+        let speaks = match &e.announcement {
+            Some(a) => !a.is_empty(),
+            None => sc.announce.enabled && !is_pause,
+        };
+        EntryView {
+            is_pause,
+            version_choices,
+            show_as,
+            shown_names: shown.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(" / "),
+            playback: ev.map(|v| playback(track.recording_of(&v.id), v, Some(e), st.as_ref())),
+            default_pause_before: if speaks || sc.announce.enabled { sc.announce.pause_before_secs } else { sc.gap_secs },
+            default_pause_after: sc.announce.pause_after_secs,
+            speaks,
+            tags: club
+                .map(|c| {
+                    c.tags
+                        .iter()
+                        .map(|(k, t)| TagOn {
+                            key: k.clone(),
+                            name: t.name.clone(),
+                            color: t.color.clone().unwrap_or_else(|| NEUTRAL.into()),
+                            note: t.note.clone().unwrap_or_default(),
+                            on: e.tags.contains(k),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            entry: e.clone(),
+        }
+    });
+    SongView {
+        track: track.clone(),
+        versions,
+        recordings: track.recordings.iter().map(|r| Choice { id: r.rec.id.clone(), label: r.rec.title.clone() }).collect(),
+        entry,
+    }
+}
+
+/// The tempo that brings a version into its style's sweet range (none: it's
+/// already there, or it has no style with one).
+pub fn fit_tempo(ctx: &ViewContext, track: &Track, version: &Version) -> Option<Option<f64>> {
+    let shown = shown_for(ctx, track, version, None);
+    let st = club_style_of(&shown)?;
+    let bpm = track.recording_of(&version.id)?.rec.bpm?;
+    let c = style_center(st)?;
+    let base = fold_bpm(bpm, c);
+    let r = st.sweet.or(st.extended)?;
+    let target = if base < r[0] { r[0] } else if base > r[1] { r[1] } else { return Some(None) };
+    Some(Some(crate::matching::round1(target)))
+}
+
 // ---------------------------------------------------------------- deck
 
 /// What a deck shows about its song: worked out when it loads.

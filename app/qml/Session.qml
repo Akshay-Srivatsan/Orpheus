@@ -264,6 +264,16 @@ QtObject {
         });
     }
 
+    /// Puts text on the clipboard (`what` names it in the confirmation).
+    function copy(text, what) {
+        if (!text) return;
+        clipboard.text = text;
+        clipboard.selectAll();
+        clipboard.copy();
+        toast(qsTr("%1 copied.").arg(what), "info");
+    }
+    readonly property TextEdit clipboard: TextEdit { visible: false }
+
     function show(v) {
         view = v;
         selected = [];
