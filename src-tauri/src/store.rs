@@ -1092,13 +1092,30 @@ impl Store {
             let inner = self.inner.read();
             others.iter().map(|o| inner.canonical(o)).filter(|o| *o != keep).filter_map(|o| inner.tracks.get(&o).cloned()).collect()
         };
+        // Each moved recording's file name (without extension), to tell versions apart.
+        let stems: HashMap<Id, String> = moved
+            .iter()
+            .flat_map(|o| o.versions.iter().map(|v| v.recording.clone()))
+            .filter_map(|r| {
+                let p = self.recording_file_paths(&r).into_iter().next()?;
+                let stem = Path::new(&p).file_stem()?.to_string_lossy().trim().to_string();
+                Some((r, stem)).filter(|(_, s)| !s.is_empty())
+            })
+            .collect();
         self.with_track(&keep, |k| {
             for o in &moved {
                 for v in &o.versions {
                     let mut v = v.clone();
-                    // Two "Original"s: name it after the song it was.
+                    // Two "Original"s: name it after the song it was (unless
+                    // that's this song's title too), else after its file.
                     if k.versions.iter().any(|x| x.name == v.name) {
-                        v.name = if o.title.trim().is_empty() || k.versions.iter().any(|x| x.name == o.title) { format!("{} ({})", v.name, k.versions.len() + 1) } else { o.title.clone() };
+                        let free = |n: &str| !n.trim().is_empty() && !k.versions.iter().any(|x| x.name == n);
+                        let other_title = Some(o.title.clone()).filter(|t| t.trim() != k.title.trim());
+                        v.name = [other_title, stems.get(&v.recording).cloned(), Some(o.title.clone())]
+                            .into_iter()
+                            .flatten()
+                            .find(|n| free(n))
+                            .unwrap_or_else(|| format!("{} ({})", v.name, k.versions.len() + 1));
                     }
                     k.versions.push(v);
                 }
@@ -2344,6 +2361,19 @@ mod tests {
         // Survives a reload from disk.
         let store2 = Store::open(&lib, &local).unwrap();
         assert_eq!(store2.recording(&rid).unwrap().rec.detected_bpm, Some(93.1));
+        let _ = fs::remove_dir_all(lib.parent().unwrap());
+    }
+
+    #[test]
+    fn combined_versions_are_named_after_their_file() {
+        let (lib, local) = temp_dirs();
+        let store = Store::open(&lib, &local).unwrap();
+        let a = song(&store, "Barbie", file("ha"));
+        let b = song(&store, "Barbie", file("hb"));
+        store.upsert_file("/music/Barbie club edit.mp3", FileEntry { hash: "hb".into(), size: 1, mtime: 1, root: None });
+        store.combine_songs(&a, &[b]).unwrap();
+        let names: Vec<_> = store.track(&a).unwrap().rec.versions.iter().map(|v| v.name.clone()).collect();
+        assert_eq!(names, ["Original", "Barbie club edit"]);
         let _ = fs::remove_dir_all(lib.parent().unwrap());
     }
 

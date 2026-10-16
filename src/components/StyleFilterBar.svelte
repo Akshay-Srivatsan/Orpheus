@@ -11,13 +11,17 @@
 
   let drop = $state<string | null>(null);
 
+  /** Style → how many songs here have a version of it. */
   const counts = $derived.by(() => {
-    const m = new Map<string, number>();
+    const songs = new Map<string, Set<Id>>();
     for (const r of rows) {
       const keys = r.version.styles?.length ? r.version.styles : [NO_STYLE];
-      for (const k of keys) m.set(k, (m.get(k) ?? 0) + 1);
+      for (const k of keys) {
+        if (!songs.has(k)) songs.set(k, new Set());
+        songs.get(k)!.add(r.track.id);
+      }
     }
-    return m;
+    return new Map([...songs].map(([k, s]) => [k, s.size]));
   });
   const sel = $derived(new Set(app.styleFilter));
   /** Your styles plus any unknown style keys found in this view. */
