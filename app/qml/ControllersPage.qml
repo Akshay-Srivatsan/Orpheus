@@ -48,7 +48,7 @@ SettingsPage {
         ColumnLayout {
             Repeater {
                 model: page.midi ? page.midi.ports : []
-                delegate: StatusButton { required property var modelData; text: modelData.name; status: modelData.connected ? "ok" : ""; flat: true; enabled: false }
+                delegate: Label { required property var modelData; text: modelData.name + (modelData.connected ? "" : qsTr(" (not connected)")); opacity: modelData.connected ? 1 : Theme.dim }
             }
             Label { visible: !!page.midi && !page.midi.ports.length; text: qsTr("No MIDI devices found. Plug one in; it connects automatically."); opacity: 0.6 }
         }

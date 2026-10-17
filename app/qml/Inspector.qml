@@ -144,7 +144,6 @@ Pane {
                     onClicked: editMenu.popup()
                     Menu {
                         id: editMenu
-                        popupType: Popup.Native
                         MenuItem {
                             text: qsTr("From a File…")
                             onTriggered: Session.chooseFile({ title: qsTr("Audio for the new version") }, path => Session.addEdit({ path: path }, root.t.id))

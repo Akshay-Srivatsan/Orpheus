@@ -11,6 +11,8 @@ Pane {
 
     property var view: null
     property alias searchField: search
+    /// The songs table (the Library menu acts on its selection).
+    property alias table: table
 
     signal combine(var songs, var recordings)
     signal editSmartCrate(string id)
@@ -41,8 +43,6 @@ Pane {
             search: Session.search,
             sort: Session.sort || null,
             descending: Session.descending,
-            fold: Session.fold,
-            toggled: Session.toggled,
             suggestByTempo: Session.suggestByTempo,
         };
     }
@@ -79,8 +79,6 @@ Pane {
         function onSearchChanged() { later.restart(); }
         function onSortChanged() { later.restart(); }
         function onDescendingChanged() { later.restart(); }
-        function onFoldChanged() { later.restart(); }
-        function onToggledChanged() { later.restart(); }
         function onSuggestByTempoChanged() { later.restart(); }
         function onLibraryChanged() { later.restart(); }
         function onSetlistChanged(id) { if (Session.view.kind === "setlist" || Session.view.kind === "history") later.restart(); }
@@ -180,6 +178,7 @@ Pane {
         }
 
         LibraryTable {
+            id: table
             visible: !root.filesView
             Layout.fillWidth: true
             Layout.fillHeight: true

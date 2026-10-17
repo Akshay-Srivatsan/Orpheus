@@ -171,7 +171,6 @@ Pane {
                 onClicked: setMenu.popup()
                 Menu {
                     id: setMenu
-                    popupType: Popup.Native
                     MenuItem { text: qsTr("Rename"); onTriggered: root.renaming = true }
                     MenuItem { text: qsTr("Duplicate"); onTriggered: Session.run("setlist_duplicate", { id: root.set.id, name: qsTr("%1 (copy)").arg(root.set.name) }) }
                     MenuItem {
@@ -373,7 +372,6 @@ Pane {
                 onClicked: slotMenu.popup()
                 Menu {
                     id: slotMenu
-                    popupType: Popup.Native
                     Instantiator {
                         model: root.v && root.v.club ? root.v.club.styles : Session.myStyles
                         delegate: MenuItem {

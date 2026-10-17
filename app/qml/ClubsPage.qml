@@ -122,7 +122,6 @@ SettingsPage {
                 onClicked: addMenu.popup()
                 Menu {
                     id: addMenu
-                    popupType: Popup.Native
                     MenuItem { text: qsTr("New Club…"); onTriggered: newClub.open() }
                     MenuItem {
                         text: qsTr("Import File…")

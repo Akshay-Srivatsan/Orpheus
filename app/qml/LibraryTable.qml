@@ -1,147 +1,187 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQml.Models
+import Qt.labs.qmlmodels
 import Orpheus
 
-// The library view's songs: a row per version (folded under its song where
-// the view lists songs), sortable by column. Double-click loads the free deck
-// (or fills the slot being chosen); drag rows to the set, a deck, a crate or a style.
+// The library view's songs: a tree table (a song's other versions fold under
+// the row standing for it, where the view lists songs), sortable by column.
+// Double-click (or Enter) loads the free deck, or fills the slot being chosen;
+// drag rows to the set, a deck, a crate or a style.
 FocusScope {
     id: root
 
     /// The view (`library_view`).
     property var view: null
-    readonly property var rows: view ? view.rows : []
     readonly property bool positioned: !!view && (view.sort === "position" || Session.view.kind === "setlist" || Session.view.kind === "history" || (Session.view.kind === "crate" && !view.foldable))
-    /// Shift-click selects from here.
-    property int anchorIndex: -1
 
     signal combine(var songs, var recordings)
 
-    // Columns. Title, artist and version share what the others leave (by
-    // `weights`, down to `minimums`) until a header's edge is dragged, which fixes
-    // that column's width. Hidden columns and dragged widths are saved on this
-    // computer; when the table is too narrow, columns go in `dropOrder`.
-    readonly property var optional: ["artist", "version", "style", "bpm", "time", "meter", "plays"]
-    readonly property var names: ({ artist: qsTr("Artist"), version: qsTr("Version"), style: qsTr("Style"), bpm: qsTr("BPM"), time: qsTr("Time"), meter: qsTr("Meter"), plays: qsTr("Plays") })
-    readonly property var dropOrder: ["plays", "meter", "version", "style", "artist", "time"]
-    readonly property var defaults: ({ position: 34, style: 92, bpm: 88, time: 52, meter: 56, plays: 52, played: 124 })
-    readonly property var weights: ({ title: 2.2, artist: 1.4, version: 0.8 })
-    readonly property var minimums: ({ title: 140, artist: 90, version: 60 })
-    readonly property int wActions: 56
+    // ------------------------------------------------------------ columns
+
+    /// The model's columns, in order. Hidden ones get no width.
+    /// Title comes first: the tree (folding) is in the first column. In ordered
+    /// views (setlists, crates, history) the title cell starts with the position.
+    readonly property var keys: ["title", "artist", "version", "style", "bpm", "time", "meter", "plays", "actions"]
     readonly property string playsKey: Session.view.kind === "history" ? "played" : "plays"
+    readonly property var names: ({
+        title: positioned ? qsTr("#  Title") : qsTr("Title"), artist: qsTr("Artist"), version: qsTr("Version"), style: qsTr("Style"),
+        bpm: qsTr("BPM"), time: qsTr("Time"), meter: qsTr("Meter"), plays: Session.view.kind === "history" ? qsTr("Played") : qsTr("Plays"), actions: ""
+    })
+    /// Columns you can hide (right-click the header), and the order they give way when narrow.
+    readonly property var optional: ["artist", "version", "style", "bpm", "time", "meter", "plays"]
+    readonly property var dropOrder: ["plays", "meter", "version", "style", "artist", "time"]
+    /// Widths (px): fixed ones, and the share of the rest the flexible ones take.
+    readonly property var defaults: ({ style: 100, bpm: 90, time: 60, meter: 64, plays: 60, played: 130, actions: 64 })
+    readonly property var weights: ({ title: 2.2, artist: 1.4, version: 0.8 })
+    readonly property var minimums: ({ title: 160, artist: 90, version: 70 })
     readonly property var saved: Session.settings && Session.settings.libraryColumns ? Session.settings.libraryColumns : ({ hidden: [], widths: {} })
-    /// Widths being dragged (saved when the drag ends).
-    property var dragged: ({})
-    function fixedWidth(k) {
-        if (dragged[k] !== undefined) return dragged[k];
-        if (saved.widths[k] !== undefined) return saved.widths[k];
-        return defaults[k];
+
+    function widthOf(k) {
+        const key = k === "plays" ? playsKey : k;
+        return saved.widths[key] !== undefined ? saved.widths[key] : defaults[key];
     }
-    function isFlex(k) { return weights[k] !== undefined && fixedWidth(k) === undefined; }
     readonly property var shownColumns: {
         let shown = optional.filter(k => !saved.hidden.includes(k));
-        const need = cols => (positioned ? fixedWidth("position") : 0) + wActions + (isFlex("title") ? minimums.title : fixedWidth("title"))
-            + cols.reduce((n, k) => n + (isFlex(k) ? minimums[k] : fixedWidth(k === "plays" ? playsKey : k)), 0);
+        const need = cols => widthOf("actions") + (widthOf("title") || minimums.title)
+            + cols.reduce((n, k) => n + (widthOf(k) !== undefined ? widthOf(k) : minimums[k]), 0);
         for (const k of dropOrder) {
-            if (need(shown) <= list.width) break;
+            if (need(shown) <= tree.width) break;
             shown = shown.filter(x => x !== k);
         }
         return shown;
     }
-    function shows(k) { return shownColumns.includes(k === "played" ? "plays" : k); }
-    readonly property var flex: {
-        const keys = ["title"].concat(["artist", "version"].filter(k => shows(k)));
-        let free = list.width - wActions - (positioned ? fixedWidth("position") : 0);
-        for (const k of shownColumns) if (weights[k] === undefined) free -= fixedWidth(k === "plays" ? playsKey : k);
+    function shows(k) {
+        if (k === "title" || k === "actions") return true;
+        return shownColumns.includes(k);
+    }
+    /// A column's width: hidden 0, fixed, or a share of what's left.
+    function columnWidth(c) {
+        const k = keys[c];
+        if (!shows(k)) return 0;
+        if (widthOf(k) !== undefined) return widthOf(k);
+        let free = tree.width;
         let weight = 0;
-        for (const k of keys) {
-            if (isFlex(k)) weight += weights[k];
-            else free -= fixedWidth(k);
+        for (const x of keys) {
+            if (!shows(x)) continue;
+            if (widthOf(x) !== undefined) free -= widthOf(x);
+            else weight += weights[x];
         }
-        const out = {};
-        for (const k of keys) out[k] = isFlex(k) ? Math.max(minimums[k], free * weights[k] / weight) : fixedWidth(k);
-        return out;
+        return Math.max(minimums[k], Math.floor(free * weights[k] / weight));
     }
-    readonly property real wTitle: flex.title
-    function colWidth(key) {
-        if (key !== "title" && key !== "position" && !shows(key)) return 0;
-        return flex[key] !== undefined ? flex[key] : fixedWidth(key);
-    }
-    function resize(key, dx) {
-        const d = Object.assign({}, dragged);
-        d[key] = Math.max(minimums[key] || 32, colWidth(key) + dx);
-        dragged = d;
-    }
-    function saveColumns(patch) {
-        const next = { hidden: saved.hidden, widths: Object.assign({}, saved.widths, dragged) };
-        Object.assign(next, patch || {});
-        dragged = {};
-        Session.saveSettings({ libraryColumns: next });
+    onShownColumnsChanged: tree.forceLayout()
+    onSavedChanged: tree.forceLayout()
+
+    /// Saves the widths dragged in the header, and which columns are hidden.
+    function saveColumns(hidden) {
+        const widths = Object.assign({}, saved.widths);
+        for (let c = 0; c < keys.length; c++) {
+            const w = tree.explicitColumnWidth(c);
+            if (w > 0) widths[keys[c] === "plays" ? playsKey : keys[c]] = w;
+        }
+        Session.saveSettings({ libraryColumns: { hidden: hidden || saved.hidden, widths: widths } });
     }
     function toggleColumn(k) {
-        saveColumns({ hidden: saved.hidden.includes(k) ? saved.hidden.filter(x => x !== k) : saved.hidden.concat([k]) });
+        saveColumns(saved.hidden.includes(k) ? saved.hidden.filter(x => x !== k) : saved.hidden.concat([k]));
+    }
+    function resetColumns() {
+        tree.clearColumnWidths();
+        Session.saveSettings({ libraryColumns: { hidden: saved.hidden, widths: {} } });
     }
 
-    // Before every title: the fold control (views that fold songs) and where it plays from.
-    readonly property int wFold: 34
-    readonly property int wMarker: 14
-    readonly property int wIndent: 16
+    // ------------------------------------------------------------ rows
 
-    function sortBy(key) {
-        if (Session.sort === key || (Session.sort === "" && view && view.sort === key)) Session.descending = !Session.descending;
-        else { Session.sort = key; Session.descending = false; }
+    // Every column gives the row's key (an index into `flat`): the model needs
+    // one type per column, and rows have mixed nulls and numbers.
+    TreeModel {
+        id: songs
+        TableModelColumn { display: "k" }
+        TableModelColumn { display: "k" }
+        TableModelColumn { display: "k" }
+        TableModelColumn { display: "k" }
+        TableModelColumn { display: "k" }
+        TableModelColumn { display: "k" }
+        TableModelColumn { display: "k" }
+        TableModelColumn { display: "k" }
+        TableModelColumn { display: "k" }
     }
-    function sortMark(key) {
-        return view && view.sort === key ? (Session.descending ? "down" : "up") : "";
-    }
-
-    // A cell's text.
-    component Cell: Label {
-        height: Theme.rowHeight
-        leftPadding: 6
-        rightPadding: 6
-        verticalAlignment: Text.AlignVCenter
-        elide: Text.ElideRight
-    }
-    component NumberCell: Cell {
-        horizontalAlignment: Text.AlignRight
-        font.features: { "tnum": 1 }
-    }
-
-    function select(index, modifiers) {
-        const id = rows[index].versionId;
-        const sel = Session.selected;
-        if (modifiers & (Qt.ControlModifier | Qt.MetaModifier)) {
-            Session.selected = sel.includes(id) ? sel.filter(x => x !== id) : sel.concat([id]);
-            anchorIndex = index;
-        } else if ((modifiers & Qt.ShiftModifier) && anchorIndex >= 0) {
-            const a = Math.min(anchorIndex, index), b = Math.max(anchorIndex, index);
-            Session.selected = rows.slice(a, b + 1).map(r => r.versionId);
-        } else {
-            Session.selected = [id];
-            anchorIndex = index;
+    // Delegates find their row's data through `flat` (by the `k` the model
+    // gives as its edit role), never through model indexes, which a reload
+    // invalidates.
+    property var flat: []
+    onViewChanged: {
+        const all = [];
+        const keyed = rows => rows.map(r => {
+            const o = Object.assign({}, r, { k: all.length });
+            all.push(r);
+            if (r.rows) o.rows = keyed(r.rows);
+            return o;
+        });
+        const rows = keyed(view ? view.rows : []);
+        flat = all;
+        songs.rows = rows;
+        if (Session.unfolded.length) {
+            for (let r = 0; r < tree.rows; r++) {
+                const row = rowAt(r);
+                if (row && Session.unfolded.includes(row.trackId)) tree.expand(r);
+            }
         }
-        Session.inspectTrack = rows[index].trackId;
-        Session.inspectEntry = "";
+        restoreSelection();
+    }
+
+    function rowAt(r) { return r >= 0 && r < tree.rows ? flat[songs.data(tree.index(r, 0), Qt.DisplayRole)] : null; }
+
+    ItemSelectionModel {
+        id: selection
+        model: songs
+        onSelectionChanged: {
+            Session.selected = root.selectedRows().map(r => r.versionId);
+            const current = currentIndex.valid ? root.flat[songs.data(currentIndex, Qt.DisplayRole)] : null;
+            if (current) {
+                Session.inspectTrack = current.trackId;
+                Session.inspectEntry = "";
+            }
+        }
+    }
+    /// After a reload, the songs that were selected stay selected.
+    function restoreSelection() {
+        const keep = Session.selected;
+        if (!keep.length) return;
+        for (let r = 0; r < tree.rows; r++) {
+            const row = rowAt(r);
+            if (row && keep.includes(row.versionId)) selection.select(tree.index(r, 0), ItemSelectionModel.Select | ItemSelectionModel.Rows);
+        }
+    }
+    function selectedRows() {
+        return selection.selectedIndexes.filter(i => i.column === 0).map(i => flat[songs.data(i, Qt.DisplayRole)]);
     }
 
     /// Double-click / Enter: fill the slot being chosen, add the edit being
     /// chosen, else load onto the free deck (paused).
     function choose(row) {
+        if (!row) return;
         if (Session.fillingSlot) Session.fillSlot(row.versionId);
         else if (Session.pickingEdit) Session.addEdit({ recording: row.recordingId });
         else Session.loadDeck(Session.freeDeck, row.versionId, null);
     }
 
-    function toggleFold(trackId) {
-        const t = Session.toggled;
-        Session.toggled = t.includes(trackId) ? t.filter(x => x !== trackId) : t.concat([trackId]);
+    function sortBy(key) {
+        if (key === "actions") return;
+        if (Session.sort === key || (Session.sort === "" && view && view.sort === key)) Session.descending = !Session.descending;
+        else { Session.sort = key; Session.descending = false; }
     }
 
-    function selectedRows() {
-        return rows.filter(r => Session.selected.includes(r.versionId));
+    function selectAll() {
+        for (let r = 0; r < tree.rows; r++) selection.select(tree.index(r, 0), ItemSelectionModel.Select | ItemSelectionModel.Rows);
     }
+    function combineSelected() {
+        const rows = selectedRows();
+        root.combine([...new Set(rows.map(r => r.trackId))], [...new Set(rows.map(r => r.recordingId))]);
+    }
+    function expandAll() { tree.expandRecursively(); Session.unfolded = (view ? view.rows : []).map(r => r.trackId); }
+    function collapseAll() { tree.collapseRecursively(); Session.unfolded = []; }
 
     // A controller's browse knob and buttons. Its press loads (or fills the slot);
     // it never plays, so choosing songs stays silent.
@@ -149,8 +189,7 @@ FocusScope {
         target: Backend
         function onEvent(name, p) {
             if (name !== "midi-ui") return;
-            const i = list.currentIndex;
-            const row = i >= 0 && i < root.rows.length ? root.rows[i] : null;
+            const row = root.rowAt(tree.currentRow);
             if (p.action === "browse.scroll") root.move(p.delta || 0);
             else if (p.action === "browse.audition" && row) root.choose(row);
             else if (p.action === "deck.load" && p.deck !== undefined && row) Session.loadDeck(p.deck, row.versionId, null);
@@ -158,367 +197,258 @@ FocusScope {
             else if (p.action === "browse.queueEnd" && Session.selected.length) Session.addToSet(Session.selected, "end");
         }
     }
+    function move(delta) {
+        if (!tree.rows) return;
+        const r = Math.max(0, Math.min(tree.rows - 1, tree.currentRow + delta));
+        selection.setCurrentIndex(tree.index(r, 0), ItemSelectionModel.ClearAndSelect | ItemSelectionModel.Rows);
+        tree.positionViewAtRow(r, TableView.Contain);
+    }
 
     // Delete or Backspace (the Mac's Delete key) removes songs from a crate;
-    // Return or Enter loads (or fills the slot).
+    // Return or Enter loads (or fills the slot); Escape stops choosing.
     Keys.onPressed: event => {
         if (event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace) {
             const c = Session.view.kind === "crate" ? Session.crates.find(x => x.id === Session.view.id) : null;
             if (c && !c.smart && Session.selected.length) Session.run("crate_remove", { id: c.id, versionIds: Session.selected });
             event.accepted = true;
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            const i = list.currentIndex;
-            if (i >= 0) choose(rows[i]);
+            root.choose(root.rowAt(tree.currentRow));
             event.accepted = true;
+        } else if (event.key === Qt.Key_Escape) {
+            Session.fillingSlot = "";
+            Session.pickingEdit = "";
         }
     }
-    Keys.onUpPressed: move(-1)
-    Keys.onDownPressed: move(1)
-    Keys.onEscapePressed: { Session.fillingSlot = ""; Session.pickingEdit = ""; }
-    function move(delta) {
-        if (!rows.length) return;
-        const i = Math.max(0, Math.min(rows.length - 1, list.currentIndex + delta));
-        list.currentIndex = i;
-        select(i, 0);
-    }
+
+    // ------------------------------------------------------------ the table
 
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
 
-        // Header. Right-click it to choose the columns.
-        Rectangle {
+        HorizontalHeaderView {
+            id: header
             Layout.fillWidth: true
-            implicitHeight: Theme.rowHeight
-            color: Theme.system.button
-            Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.system.mid }
-            TapHandler { acceptedButtons: Qt.RightButton; onTapped: columnMenu.popup() }
-            Row {
-                anchors.fill: parent
-                HeaderCell {
-                    visible: root.positioned; width: root.colWidth("position"); text: "#"; alignment: Qt.AlignRight
-                    sorted: root.sortMark("position"); onClicked: root.sortBy("position"); onContextMenu: columnMenu.popup()
-                }
-                HeaderCell {
-                    width: root.wTitle
-                    text: qsTr("Title")
-                    indent: (root.view && root.view.foldable ? root.wFold : 0) + root.wMarker
-                    sorted: root.sortMark("title")
-                    onClicked: root.sortBy("title")
-                    onContextMenu: columnMenu.popup()
-                    resizable: true
-                    onResized: dx => root.resize("title", dx)
-                    onResizeFinished: root.saveColumns()
-                    // Fold or unfold every song's versions.
-                    ToolButton {
-                        visible: !!root.view && root.view.foldable
-                        x: 2
-                        width: root.wFold - 4
-                        height: parent.height
-                        icon.source: Theme.icon(Session.fold ? "chevron-right" : "chevron-down")
-                        icon.width: 12; icon.height: 12
-                        ToolTip.visible: hovered
-                        ToolTip.text: Session.fold ? qsTr("Unfold all: show every version of every song") : qsTr("Fold all: show each song once, its other versions under it")
-                        onClicked: { Session.fold = !Session.fold; Session.toggled = []; }
+            syncView: tree
+            clip: true
+            resizableColumns: true
+            // A list of the columns' keys (each delegate gets one as `model.modelData`).
+            model: root.keys
+            delegate: HorizontalHeaderViewDelegate {
+                id: section
+                readonly property string column: model.modelData
+                readonly property string key: column === "plays" ? root.playsKey : column
+                readonly property bool sorted: !!root.view && root.view.sort === key
+                contentItem: RowLayout {
+                    spacing: 2
+                    Label {
+                        Layout.fillWidth: true
+                        text: root.names[section.column] || ""
+                        elide: Text.ElideRight
+                        horizontalAlignment: section.key === "bpm" || section.key === "time" || section.key === "plays" ? Text.AlignRight : Text.AlignLeft
+                    }
+                    Icon {
+                        visible: section.sorted
+                        glyph: Session.descending ? "sort-down" : "sort-up"
+                        sourceSize.width: 12; sourceSize.height: 12
                     }
                 }
-                Repeater {
-                    model: root.optional
-                    delegate: HeaderCell {
-                        required property string modelData
-                        readonly property string key: modelData === "plays" ? root.playsKey : modelData
-                        visible: root.shows(modelData)
-                        width: root.colWidth(key)
-                        text: key === "played" ? qsTr("Played") : root.names[modelData]
-                        alignment: key === "bpm" || key === "time" || key === "plays" ? Qt.AlignRight : Qt.AlignLeft
-                        tip: key === "meter" ? qsTr("Triple (3/4, 6/8) or duple (2/4, 4/4)") : ""
-                        sorted: root.sortMark(key)
-                        onClicked: root.sortBy(key)
-                        onContextMenu: columnMenu.popup()
-                        resizable: true
-                        onResized: dx => root.resize(key, dx)
-                        onResizeFinished: root.saveColumns()
-                    }
-                }
-            }
-            Menu {
-                id: columnMenu
-                popupType: Popup.Native
-                MenuItem {
-                    text: qsTr("Fold Versions")
-                    checkable: true
-                    checked: Session.fold
-                    enabled: !!root.view && root.view.foldable
-                    onTriggered: { Session.fold = !Session.fold; Session.toggled = []; }
-                }
-                MenuSeparator {}
-                Instantiator {
-                    model: root.optional
-                    delegate: MenuItem {
-                        required property string modelData
-                        text: root.names[modelData]
-                        checkable: true
-                        checked: !root.saved.hidden.includes(modelData)
-                        onTriggered: root.toggleColumn(modelData)
-                    }
-                    onObjectAdded: (i, o) => columnMenu.insertItem(i + 2, o)
-                    onObjectRemoved: (i, o) => columnMenu.removeItem(o)
-                }
-                MenuSeparator {}
-                MenuItem {
-                    text: qsTr("Reset Column Widths")
-                    enabled: Object.keys(root.saved.widths).length > 0
-                    onTriggered: { root.dragged = {}; Session.saveSettings({ libraryColumns: { hidden: root.saved.hidden, widths: {} } }); }
-                }
+                TapHandler { onTapped: root.sortBy(section.key) }
+                TapHandler { acceptedButtons: Qt.RightButton; onTapped: columnMenu.popup() }
             }
         }
 
-        ListView {
-            id: list
+        TreeView {
+            id: tree
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
             focus: true
-            model: root.rows
+            model: songs
+            selectionModel: selection
+            selectionBehavior: TableView.SelectRows
+            selectionMode: TableView.ExtendedSelection
+            alternatingRows: true
             boundsBehavior: Flickable.StopAtBounds
+            columnWidthProvider: c => root.columnWidth(c)
+            onWidthChanged: forceLayout()
             ScrollBar.vertical: ScrollBar {}
-            reuseItems: true
-
-            delegate: Item {
-                id: rowItem
-                required property var modelData
-                required property int index
-                readonly property var r: modelData
-                readonly property bool selected: Session.selected.includes(r.versionId)
-                readonly property bool onDeck: Session.decks.some(d => d && d.versionId === r.versionId)
-                /// The room hears it (else, on a deck, it's previewed).
-                readonly property bool audible: Session.decks.some(d => d && d.versionId === r.versionId && d.audible)
-                /// The first of the songs suggested by tempo (a dashed line above them).
-                readonly property bool firstSuggested: r.suggested && (index === 0 || !root.rows[index - 1].suggested)
-                width: list.width
-                height: Theme.rowHeight
-
-                readonly property color fg: selected ? Theme.system.highlightedText : Theme.system.text
-
-                Rectangle {
-                    anchors.fill: parent
-                    color: rowItem.selected ? Theme.system.highlight
-                        : hover.hovered ? Qt.alpha(Theme.system.highlight, 0.12)
-                        : rowItem.index % 2 ? Theme.system.alternateBase : Theme.system.base
+            // Widths dragged in the header are saved once the drag pauses.
+            onLayoutChanged: saveWidths.restart()
+            Timer { id: saveWidths; interval: 800; onTriggered: { if (tree.columnWidthsChanged()) root.saveColumns(); } }
+            function columnWidthsChanged() {
+                for (let c = 0; c < root.keys.length; c++) {
+                    const w = explicitColumnWidth(c);
+                    const k = root.keys[c] === "plays" ? root.playsKey : root.keys[c];
+                    if (w > 0 && root.saved.widths[k] !== w) return true;
                 }
-                HoverHandler { id: hover }
-                // On a deck: a bar in its colour (red while the room hears it).
-                Rectangle {
-                    visible: rowItem.onDeck
-                    width: 3; height: parent.height
-                    color: rowItem.audible ? Theme.onAir : Theme.deckColors[0]
+                return false;
+            }
+            onExpanded: (row, depth) => { const r = root.rowAt(row); if (r && !Session.unfolded.includes(r.trackId)) Session.unfolded = Session.unfolded.concat([r.trackId]); }
+            onCollapsed: (row, recursively) => { const r = root.rowAt(row); if (r) Session.unfolded = Session.unfolded.filter(t => t !== r.trackId); }
+
+            delegate: TreeViewDelegate {
+                id: cell
+                required property int column
+                readonly property string key: root.keys[column]
+                readonly property var r: model.display !== undefined ? root.flat[model.display] : null
+                readonly property bool onDeck: !!r && Session.decks.some(d => d && d.versionId === r.versionId)
+                readonly property bool audible: !!r && Session.decks.some(d => d && d.versionId === r.versionId && d.audible)
+                /// Dimmed: played in the open set, suggested by tempo, or missing.
+                readonly property bool dim: !!r && (r.playedInSet || r.suggested || r.availability === "missing")
+                readonly property color fg: highlighted ? palette.highlightedText : palette.text
+
+                contentItem: Loader {
+                    sourceComponent: cell.key === "title" ? titleCell
+                        : cell.key === "style" ? styleCell
+                        : cell.key === "actions" ? actionsCell
+                        : textCell
                 }
-                Row {
-                    visible: rowItem.firstSuggested
-                    width: parent.width
-                    spacing: 4
-                    Repeater {
-                        model: Math.ceil(rowItem.width / 8)
-                        delegate: Rectangle { width: 4; height: 1; color: Theme.system.mid }
+                Component {
+                    id: textCell
+                    Label {
+                        verticalAlignment: Text.AlignVCenter
+                        opacity: cell.dim || ["version", "meter", "plays"].includes(cell.key) ? Theme.dim : 1
+                        elide: Text.ElideRight
+                        font.features: { "tnum": 1 }
+                        horizontalAlignment: ["bpm", "time", "plays"].includes(cell.key) && !(cell.r && cell.r.playedAt) ? Text.AlignRight : Text.AlignLeft
+                        color: cell.highlighted || !cell.r ? cell.fg
+                            : cell.key === "bpm" ? (cell.r.tempoFit === "sweet" ? Theme.ok : cell.r.tempoFit === "outside" ? Theme.warn : cell.fg)
+                            : cell.key === "time" && cell.r.long ? Theme.warn
+                            : cell.fg
+                        text: {
+                            const r = cell.r;
+                            if (!r) return "";
+                            switch (cell.key) {
+                            case "artist": return r.artist;
+                            case "version": return r.versionLabel;
+                            case "bpm": return (r.analyzing ? "… " : "") + Session.fmtBpm(r.bpm) + (Math.abs(r.rate - 1) > 0.001 ? "  " + Session.fmtPct(r.rate) : "");
+                            case "time": return Session.fmtTime(r.durationMs);
+                            case "meter": return Session.meterName(r.meter);
+                            case "plays": return r.playedAt ? new Date(r.playedAt).toLocaleString(Qt.locale(), "MMM d, h:mm ap") : r.plays || "";
+                            }
+                            return "";
+                        }
+                        ToolTip.visible: tipHover.hovered && !!ToolTip.text
+                        ToolTip.delay: 600
+                        ToolTip.text: !cell.r ? "" : cell.key === "version" ? cell.r.comment || ""
+                            : cell.key === "meter" && cell.r.meter ? (cell.r.meterByYou ? qsTr("Set by you") : qsTr("Detected")) : ""
+                        HoverHandler { id: tipHover }
                     }
                 }
-                HoverHandler { id: suggestedHover; enabled: rowItem.r.suggested }
-                ToolTip.visible: suggestedHover.hovered && rowItem.r.suggested
-                ToolTip.delay: 800
-                ToolTip.text: qsTr("Not labelled %1 yet — its tempo fits").arg(Session.styleFilter.length === 1 ? Session.styleName(Session.styleFilter[0]) : "")
-
-                Row {
-                    anchors.fill: parent
-                    spacing: 0
-                    opacity: rowItem.r.playedInSet || rowItem.r.suggested || rowItem.r.availability === "missing" ? 0.55 : 1
-
-                    NumberCell { visible: root.positioned; width: root.colWidth("position"); text: rowItem.r.position || ""; color: rowItem.fg; opacity: Theme.dim }
-                    // Title: a tree (a song's other versions indented under it). Every row
-                    // keeps the fold and source slots, so titles line up.
-                    Item {
-                        width: root.wTitle
-                        height: parent.height
-                        Row {
-                            anchors.fill: parent
-                            anchors.leftMargin: 6
-                            Item { visible: rowItem.r.child; width: root.wIndent; height: 1 }
-                            Item {
-                                visible: !!root.view && root.view.foldable
-                                width: root.wFold - (rowItem.r.child ? root.wIndent : 0)
-                                height: parent.height
-                                AbstractButton {
-                                    visible: rowItem.r.foldCount > 1
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: Math.min(parent.width, implicitWidth)
-                                    height: parent.height - 4
-                                    padding: 0
-                                    hoverEnabled: true
-                                    contentItem: Row {
-                                        spacing: 1
-                                        Icon {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            glyph: rowItem.r.foldOpen ? "chevron-down" : "chevron-right"
-                                            sourceSize.width: 12; sourceSize.height: 12
-                                            color: rowItem.fg
-                                        }
-                                        Label {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: rowItem.r.foldCount
-                                            font.pointSize: Theme.smallPointSize
-                                            color: rowItem.fg
-                                            opacity: Theme.dim
-                                        }
-                                    }
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: rowItem.r.foldOpen ? qsTr("Fold its versions") : qsTr("Show all %1 versions").arg(rowItem.r.foldCount)
-                                    onClicked: root.toggleFold(rowItem.r.trackId)
-                                }
+                // The title, after where it plays from: nothing for a file, ○ Spotify
+                // only, ● a file and Spotify, a warning when missing. On a deck, in the
+                // deck's colour (red while the room hears it).
+                Component {
+                    id: titleCell
+                    RowLayout {
+                        spacing: 4
+                        Label {
+                            visible: root.positioned
+                            Layout.preferredWidth: 24
+                            horizontalAlignment: Text.AlignRight
+                            text: cell.r && cell.r.position ? cell.r.position : ""
+                            color: cell.fg
+                            opacity: Theme.dim
+                            font.features: { "tnum": 1 }
+                        }
+                        Item {
+                            implicitWidth: 12
+                            implicitHeight: 12
+                            Rectangle {
+                                anchors.centerIn: parent
+                                width: 7; height: 7; radius: 4
+                                visible: !!cell.r && (cell.r.availability === "spotifyOnly" || cell.r.availability === "fileAndSpotify")
+                                color: cell.r && cell.r.availability === "fileAndSpotify" ? Theme.spotify : "transparent"
+                                border.color: Theme.spotify
+                                border.width: 1.5
                             }
-                            // Where it plays from: nothing for a file, ○ Spotify only, ● a file and Spotify; ⚠ missing.
-                            Item {
-                                width: root.wMarker
-                                height: parent.height
-                                Rectangle {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: 7; height: 7; radius: 4
-                                    visible: rowItem.r.availability === "spotifyOnly" || rowItem.r.availability === "fileAndSpotify"
-                                    color: rowItem.r.availability === "fileAndSpotify" ? Theme.spotify : "transparent"
-                                    border.color: Theme.spotify
-                                    border.width: 1.5
-                                }
-                                Icon {
-                                    visible: rowItem.r.availability === "missing"
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    glyph: "warning"
-                                    sourceSize.width: 12; sourceSize.height: 12
-                                    color: Theme.warn
-                                }
-                            }
-                            Label {
-                                width: parent.width - x - 6
-                                height: parent.height
-                                verticalAlignment: Text.AlignVCenter
-                                text: rowItem.r.title
-                                elide: Text.ElideRight
-                                // On a deck: in its colour (as the bar).
-                                color: rowItem.onDeck && !rowItem.selected ? (rowItem.audible ? Theme.onAir : Theme.deckColors[0]) : rowItem.fg
-                                font.italic: rowItem.r.suggested
-                                opacity: rowItem.r.child ? Theme.dim : 1
+                            Icon {
+                                anchors.centerIn: parent
+                                visible: !!cell.r && cell.r.availability === "missing"
+                                glyph: "warning"
+                                sourceSize.width: 12; sourceSize.height: 12
+                                color: Theme.warn
                             }
                         }
-                    }
-                    Cell { visible: root.shows("artist"); width: root.colWidth("artist"); text: rowItem.r.artist; color: rowItem.fg }
-                    Cell {
-                        visible: root.shows("version"); width: root.colWidth("version"); text: rowItem.r.versionLabel; color: rowItem.fg; opacity: Theme.dim
-                        ToolTip.visible: versionHover.hovered && !!rowItem.r.comment
-                        ToolTip.text: rowItem.r.comment || ""
-                        ToolTip.delay: 600
-                        HoverHandler { id: versionHover }
-                    }
-                    Item {
-                        visible: root.shows("style")
-                        width: root.colWidth("style")
-                        height: parent.height
-                        clip: true
-                        Row {
-                            x: 6
-                            anchors.verticalCenter: parent.verticalCenter
-                            spacing: 3
-                            Label { visible: rowItem.r.suggested; text: qsTr("tempo fits"); color: rowItem.fg; opacity: Theme.dim; font.italic: true }
-                            Repeater {
-                                model: rowItem.r.suggested ? [] : rowItem.r.styles
-                                delegate: StyleBadge { required property var modelData; style: modelData }
-                            }
+                        Label {
+                            Layout.fillWidth: true
+                            text: cell.r ? cell.r.title : ""
+                            elide: Text.ElideRight
+                            font.italic: !!cell.r && cell.r.suggested
+                            opacity: cell.dim || (cell.r && cell.r.child) ? Theme.dim : 1
+                            color: cell.onDeck && !cell.highlighted ? (cell.audible ? Theme.onAir : Theme.deckColors[0]) : cell.fg
                         }
                     }
-                    NumberCell {
-                        visible: root.shows("bpm")
-                        width: root.colWidth("bpm")
-                        color: rowItem.selected ? rowItem.fg : rowItem.r.tempoFit === "sweet" ? Theme.ok : rowItem.r.tempoFit === "outside" ? Theme.warn : rowItem.fg
-                        text: (rowItem.r.analyzing ? "… " : "") + Session.fmtBpm(rowItem.r.bpm) + (Math.abs(rowItem.r.rate - 1) > 0.001 ? "  " + Session.fmtPct(rowItem.r.rate) : "")
-                    }
-                    NumberCell { visible: root.shows("time"); width: root.colWidth("time"); text: Session.fmtTime(rowItem.r.durationMs); color: rowItem.r.long && !rowItem.selected ? Theme.warn : rowItem.fg }
-                    Cell {
-                        visible: root.shows("meter"); width: root.colWidth("meter"); text: Session.meterName(rowItem.r.meter); color: rowItem.fg; opacity: Theme.dim
-                        ToolTip.visible: meterHover.hovered && !!rowItem.r.meter
-                        ToolTip.text: rowItem.r.meterByYou ? qsTr("Set by you") : qsTr("Detected")
+                }
+                Component {
+                    id: styleCell
+                    Label {
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                        textFormat: Text.StyledText
+                        opacity: cell.dim ? Theme.dim : 1
+                        color: cell.fg
+                        font.italic: !!cell.r && cell.r.suggested
+                        text: !cell.r ? "" : cell.r.suggested ? qsTr("tempo fits")
+                            : cell.r.styles.map(s => cell.highlighted ? s.short || s.name : "<font color='" + s.color + "'>" + (s.short || s.name) + "</font>").join(", ")
+                        ToolTip.visible: styleHover.hovered && !!cell.r && cell.r.styles.length > 0
+                        ToolTip.text: cell.r ? cell.r.styles.map(s => [s.name].concat(s.problems).join(": ")).join("\n") : ""
                         ToolTip.delay: 600
-                        HoverHandler { id: meterHover }
+                        HoverHandler { id: styleHover }
                     }
-                    NumberCell {
-                        visible: root.shows("plays")
-                        width: root.colWidth(root.playsKey)
-                        horizontalAlignment: rowItem.r.playedAt ? Text.AlignLeft : Text.AlignRight
-                        color: rowItem.fg
-                        opacity: Theme.dim
-                        text: rowItem.r.playedAt ? new Date(rowItem.r.playedAt).toLocaleString(Qt.locale(), "MMM d, h:mm ap") : rowItem.r.plays || ""
-                    }
-                    Row {
-                        width: root.wActions
-                        height: parent.height
+                }
+                Component {
+                    id: actionsCell
+                    RowLayout {
                         spacing: 0
                         ToolButton {
                             icon.source: Theme.icon("headphones")
                             icon.width: Theme.smallIconSize; icon.height: Theme.smallIconSize
-                            icon.color: rowItem.fg
-                            width: root.wActions / 2
-                            height: parent.height
+                            icon.color: cell.fg
+                            implicitHeight: 22
                             ToolTip.visible: hovered; ToolTip.text: qsTr("Preview on the free deck")
-                            onClicked: Session.preview(rowItem.r.versionId, null)
+                            onClicked: Session.preview(cell.r.versionId, null)
                         }
                         ToolButton {
                             icon.source: Theme.icon(Session.fillingSlot ? "check" : "plus")
                             icon.width: Theme.smallIconSize; icon.height: Theme.smallIconSize
-                            icon.color: rowItem.fg
-                            width: root.wActions / 2
-                            height: parent.height
+                            icon.color: cell.fg
+                            implicitHeight: 22
                             ToolTip.visible: hovered
                             ToolTip.text: Session.fillingSlot ? qsTr("Use this song for the slot") : qsTr("Play next")
-                            onClicked: Session.fillingSlot ? Session.fillSlot(rowItem.r.versionId) : Session.addToSet([rowItem.r.versionId], "next")
+                            onClicked: Session.fillingSlot ? Session.fillSlot(cell.r.versionId) : Session.addToSet([cell.r.versionId], "next")
                         }
                     }
                 }
 
-                MouseArea {
-                    id: mouse
-                    anchors.fill: parent
-                    anchors.rightMargin: root.wActions
-                    acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    drag.target: dragProxy
-                    // Pressing a selected row keeps the selection (to drag it all); a
-                    // click without dragging then selects just that row.
-                    property bool reselect: false
-                    onPressed: m => {
-                        reselect = false;
-                        root.forceActiveFocus();
-                        list.currentIndex = rowItem.index;
-                        if (m.button === Qt.RightButton) {
-                            if (!rowItem.selected) root.select(rowItem.index, 0);
-                            menu.rows = root.selectedRows();
-                            menu.historyRow = rowItem.r;
-                            menu.popup();
-                        } else if (!rowItem.selected || m.modifiers) {
-                            root.select(rowItem.index, m.modifiers);
-                        } else {
-                            reselect = true;
-                        }
+                TapHandler {
+                    acceptedButtons: Qt.LeftButton
+                    onDoubleTapped: root.choose(cell.r)
+                }
+                TapHandler {
+                    acceptedButtons: Qt.RightButton
+                    onTapped: {
+                        const index = cell.treeView.index(cell.row, 0);
+                        if (!selection.isRowSelected(cell.row, index.parent))
+                            selection.setCurrentIndex(index, ItemSelectionModel.ClearAndSelect | ItemSelectionModel.Rows);
+                        menu.rows = root.selectedRows();
+                        menu.historyRow = cell.r;
+                        menu.popup();
                     }
-                    onReleased: m => {
-                        const dragged = drag.active;
-                        dragProxy.Drag.drop();
-                        dragProxy.x = 0; dragProxy.y = 0;
-                        if (reselect && !dragged) root.select(rowItem.index, 0);
-                        reselect = false;
-                    }
-                    onDoubleClicked: root.choose(rowItem.r)
+                }
+                // Drag the selected songs (or this one) to the set, a deck, a crate or a style.
+                DragHandler {
+                    id: dragging
+                    target: null
+                    onActiveChanged: if (!active) dragProxy.Drag.drop()
                 }
                 Item {
                     id: dragProxy
-                    Drag.active: mouse.drag.active
+                    Drag.active: dragging.active
                     Drag.dragType: Drag.Automatic
                     Drag.supportedActions: Qt.CopyAction
-                    Drag.keys: ["application/x-orpheus-versions"]
-                    Drag.mimeData: ({ "application/x-orpheus-versions": JSON.stringify(Session.selected.length ? Session.selected : [rowItem.r.versionId]) })
+                    Drag.mimeData: ({ "application/x-orpheus-versions": JSON.stringify(Session.selected.length && cell.r && Session.selected.includes(cell.r.versionId) ? Session.selected : cell.r ? [cell.r.versionId] : []) })
                 }
             }
         }
@@ -527,7 +457,7 @@ FocusScope {
     // When nothing's here, why.
     ColumnLayout {
         anchors.centerIn: parent
-        visible: !!root.view && !root.rows.length
+        visible: !!root.view && !root.view.rows.length
         width: parent.width * 0.6
         spacing: Theme.spacing
         readonly property var crate: Session.view.kind === "crate" ? Session.crates.find(c => c.id === Session.view.id) : null
@@ -560,6 +490,28 @@ FocusScope {
             text: qsTr("Add Music Folder…")
             onClicked: Session.settingsPage = "library"
         }
+    }
+
+    // The header's menu: the columns to show, folding, widths.
+    Menu {
+        id: columnMenu
+        MenuItem { text: qsTr("Expand All Songs"); enabled: !!root.view && root.view.foldable; onTriggered: root.expandAll() }
+        MenuItem { text: qsTr("Collapse All Songs"); enabled: !!root.view && root.view.foldable; onTriggered: root.collapseAll() }
+        MenuSeparator {}
+        Instantiator {
+            model: root.optional
+            delegate: MenuItem {
+                required property string modelData
+                text: root.names[modelData]
+                checkable: true
+                checked: !root.saved.hidden.includes(modelData)
+                onTriggered: root.toggleColumn(modelData)
+            }
+            onObjectAdded: (i, o) => columnMenu.insertItem(i + 3, o)
+            onObjectRemoved: (i, o) => columnMenu.removeItem(o)
+        }
+        MenuSeparator {}
+        MenuItem { text: qsTr("Reset Column Widths"); enabled: Object.keys(root.saved.widths).length > 0; onTriggered: root.resetColumns() }
     }
 
     SongMenu {

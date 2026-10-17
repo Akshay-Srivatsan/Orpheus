@@ -5,8 +5,11 @@ import Orpheus
 
 // One of the two identical decks. The crossfader decides which deck the room
 // hears ("on air"); the other is the free deck, cued in headphones.
-Pane {
+Frame {
     id: root
+    // Sized by its contents (it has overlays besides them).
+    implicitWidth: content.implicitWidth + leftPadding + rightPadding
+    implicitHeight: content.implicitHeight + topPadding + bottomPadding
 
     property int deck: 0
     readonly property var d: Session.decks[deck]
@@ -21,8 +24,6 @@ Pane {
     readonly property var stemJob: d && d.recordingId && Session.stems ? Session.stems.jobs[d.recordingId] : undefined
     readonly property var stemNames: [qsTr("Vocals"), qsTr("Drums"), qsTr("Bass"), qsTr("Other (melody, instruments)")]
     readonly property var stemShort: [qsTr("Vox"), qsTr("Drm"), qsTr("Bas"), qsTr("Oth")]
-
-    padding: Theme.spacing
 
     function call(name, args) {
         const a = Object.assign({ deck: deck }, args || {});
@@ -39,20 +40,14 @@ Pane {
         else call("deck_scrub", { ms: Math.round(ms), force: false });
     }
 
-    background: Rectangle {
-        color: Theme.system.base
-        radius: 6
-        // Red on air, amber near its end, highlighted while a song is dragged over it.
-        border.color: drop.containsDrag ? Theme.system.highlight : root.d && root.d.nearEnd ? Theme.warn : root.d && root.d.audible ? Theme.onAir : Qt.alpha(root.accent, 0.5)
-        border.width: drop.containsDrag || (root.d && (root.d.audible || root.d.nearEnd)) ? 2 : 1
-        Rectangle {
-            visible: drop.containsDrag
-            anchors.fill: parent
-            radius: parent.radius
-            color: Qt.alpha(Theme.system.highlight, 0.08)
-        }
+    // While a song is dragged over it.
+    Rectangle {
+        visible: drop.containsDrag
+        anchors.fill: parent
+        anchors.margins: -root.padding + 1
+        color: Qt.alpha(Theme.system.highlight, 0.15)
+        border.color: Theme.system.highlight
     }
-
     DropArea {
         id: drop
         anchors.fill: parent
@@ -66,6 +61,7 @@ Pane {
     }
 
     ColumnLayout {
+        id: content
         anchors.fill: parent
         spacing: 6
 
@@ -101,7 +97,7 @@ Pane {
             Item { Layout.fillWidth: true }
             Slider {
                 id: volume
-                Layout.preferredWidth: 90
+                Layout.fillWidth: true; Layout.minimumWidth: 50; Layout.maximumWidth: 110
                 from: -24; to: 12; stepSize: 0.5
                 value: root.d ? root.d.trimDb : 0
                 onMoved: root.call("deck_set", { trimDb: value })
@@ -109,9 +105,18 @@ Pane {
                 ToolTip.text: qsTr("Deck volume (double-click: 0 dB)")
                 TapHandler { acceptedButtons: Qt.LeftButton; onDoubleTapped: root.call("deck_set", { trimDb: 0 }) }
             }
-            Label { text: Session.fmtDb(volume.value); opacity: Theme.dim; font.features: { "tnum": 1 }; Layout.preferredWidth: 52 }
+            Label { text: Session.fmtDb(volume.value); opacity: Theme.dim; font.features: { "tnum": 1 }; Layout.preferredWidth: 52; visible: root.width > 420 }
             // The deck's level, before the crossfader.
-            Meter { value: Session.levels ? Math.min(1, Math.sqrt(Session.levels.decks[root.deck])) : 0 }
+            ProgressBar {
+                Layout.preferredWidth: 36
+                Layout.preferredHeight: 8
+                from: 0; to: 1
+                value: Session.levels ? Math.min(1, Math.sqrt(Session.levels.decks[root.deck])) : 0
+                palette.highlight: value > 0.985 ? Theme.error : Theme.ok
+                ToolTip.visible: levelHover.hovered
+                ToolTip.text: qsTr("Deck %1's level").arg(root.letter)
+                HoverHandler { id: levelHover }
+            }
             ToolButton {
                 checkable: true
                 checked: !!root.d && root.d.pfl
@@ -127,7 +132,6 @@ Pane {
                 onClicked: deckMenu.popup()
                 Menu {
                     id: deckMenu
-                    popupType: Popup.Native
                     MenuItem { text: qsTr("Set Start of Version Here"); enabled: root.loaded; onTriggered: root.call("deck_set_point", { kind: "start" }) }
                     MenuItem { text: qsTr("Set End of Version Here"); enabled: root.loaded; onTriggered: root.call("deck_set_point", { kind: "end" }) }
                     MenuItem { text: qsTr("Set Fade-Out Point Here"); enabled: root.loaded; onTriggered: root.call("deck_set_point", { kind: "fade" }) }
@@ -256,7 +260,8 @@ Pane {
                     font.pointSize: Theme.hugePointSize
                     font.bold: true
                     font.features: { "tnum": 1 }
-                    color: root.d && root.d.nearEnd ? Theme.onAir : Theme.system.text
+                    // Amber when the song is about to end.
+                    color: root.d && root.d.nearEnd ? Theme.warn : Theme.system.text
                 }
                 Label {
                     Layout.alignment: Qt.AlignRight
@@ -289,7 +294,7 @@ Pane {
             Layout.fillWidth: true
             spacing: 6
             Button {
-                text: qsTr("Cue")
+                text: qsTr("Cue"); Layout.fillWidth: true; Layout.minimumWidth: 44; Layout.maximumWidth: 100
                 enabled: root.loaded
                 highlighted: root.loaded && !root.playing && Math.abs(root.d.positionMs - root.d.cueMs) < 60
                 onPressed: root.call("deck_cue", { down: true })
@@ -299,7 +304,7 @@ Pane {
             }
             Button {
                 icon.source: Theme.icon(root.playing ? "pause" : "play")
-                implicitWidth: 56
+                Layout.fillWidth: true; Layout.minimumWidth: 40; Layout.maximumWidth: 70
                 enabled: root.loaded && root.d.status !== "loading"
                 onClicked: root.call("deck_action", { action: "toggle" })
                 ToolTip.visible: hovered
@@ -313,7 +318,7 @@ Pane {
                     readonly property bool isSet: !!root.song && root.song.hotCues.some(c => c.slot === slot)
                     text: slot
                     enabled: root.loaded
-                    implicitWidth: 32
+                    Layout.fillWidth: true; Layout.minimumWidth: 26; Layout.maximumWidth: 40
                     palette.button: isSet ? Theme.cueColors[index] : undefined
                     down: pad.pressed
                     ToolTip.visible: hovered
@@ -349,7 +354,7 @@ Pane {
             Button {
                 visible: !(root.d && root.d.audible && root.playing)
                 enabled: root.loaded
-                text: qsTr("Go Live")
+                text: qsTr("Go Live"); Layout.minimumWidth: 60
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Put this deck on air (the other deck fades out first)")
                 onClicked: root.call("deck_go_live").then(r => {
@@ -375,7 +380,7 @@ Pane {
                     text: root.stemShort[index]
                     checkable: true
                     checked: root.d.stems[index]
-                    implicitWidth: 40
+                    Layout.preferredWidth: 44
                     palette.button: checked ? Theme.stemColors[index] : undefined
                     ToolTip.visible: hovered
                     ToolTip.text: root.stemNames[index]

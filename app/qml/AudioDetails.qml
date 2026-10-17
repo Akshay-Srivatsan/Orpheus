@@ -64,7 +64,6 @@ ColumnLayout {
                 onClicked: correctMenu.popup()
                 Menu {
                     id: correctMenu
-                    popupType: Popup.Native
                     MenuItem { text: qsTr("Halve (½)"); onTriggered: root.scaleBpm(0.5) }
                     MenuItem { text: qsTr("Two Thirds (⅔)"); onTriggered: root.scaleBpm(2 / 3) }
                     MenuItem { text: qsTr("One and a Half (1½)"); onTriggered: root.scaleBpm(1.5) }

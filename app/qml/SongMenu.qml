@@ -5,7 +5,6 @@ import Orpheus
 // The library's context menu for the selected songs (`rows`).
 Menu {
     id: root
-    popupType: Popup.Native
 
     property var rows: []
     /// The row right-clicked (history rows can be removed from history).

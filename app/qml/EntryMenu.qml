@@ -5,7 +5,6 @@ import Orpheus
 // A set entry's context menu.
 Menu {
     id: root
-    popupType: Popup.Native
 
     property var row
     property var club: null

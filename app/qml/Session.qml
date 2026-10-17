@@ -41,8 +41,8 @@ QtObject {
     /// Sort column ("" = the view's own order) and direction.
     property string sort: ""
     property bool descending: false
-    property bool fold: true
-    property var toggled: []
+    /// Songs whose other versions are unfolded in the library (track ids).
+    property var unfolded: []
     property bool suggestByTempo: true
     /// Selected library rows (version ids) and set entries.
     property var selected: []

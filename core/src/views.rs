@@ -427,10 +427,6 @@ pub struct LibraryQuery {
     pub search: String,
     pub sort: Option<SortKey>,
     pub descending: bool,
-    /// Fold songs' versions under one row…
-    pub fold: bool,
-    /// …except these songs (or, unfolded, fold these).
-    pub toggled: Vec<Id>,
     /// With one style filtered on, also suggest unlabelled songs whose tempo fits it.
     pub suggest_by_tempo: bool,
 }
@@ -488,9 +484,10 @@ pub struct LibraryRow {
     pub availability: Availability,
     /// Played (or playing) in the open set.
     pub played_in_set: bool,
-    /// Folded versions under this row: how many, and whether they're shown.
-    pub fold_count: usize,
-    pub fold_open: bool,
+    /// A song's other versions, under the row standing for it (in views
+    /// listing songs). Named `rows` for tree models.
+    #[serde(rename = "rows", skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<LibraryRow>,
     /// One of a song's other versions, shown under it.
     pub child: bool,
     /// The song's versions, and whether this one stands for it.
@@ -832,8 +829,7 @@ pub fn library_view(ctx: &ViewContext, data: &LibraryData, q: &LibraryQuery) -> 
         history_entry_id: it.history_entry_id.clone(),
         availability: availability(it.rec),
         played_in_set: !matches!(q.view, View::History) && played_in_set.contains(it.track.rec.id.as_str()),
-        fold_count: 0,
-        fold_open: false,
+        children: vec![],
         child: false,
         version_count: it.track.rec.versions.len(),
         is_primary: primary_version(it.track).is_some_and(|p| p.id == it.version.id),
@@ -862,13 +858,8 @@ pub fn library_view(ctx: &ViewContext, data: &LibraryData, q: &LibraryQuery) -> 
             }
             let primary = primary_version(rows[g[0]].0.track).map(|v| v.id.clone());
             let head = *g.iter().find(|&&i| Some(&rows[i].0.version.id) == primary.as_ref()).unwrap_or(&g[0]);
-            let open = q.fold == q.toggled.iter().any(|t| t == id);
-            out.push(LibraryRow { fold_count: g.len(), fold_open: open, ..to_row(&rows[head].0, &rows[head].1) });
-            if open {
-                for &i in g.iter().filter(|&&i| i != head) {
-                    out.push(LibraryRow { child: true, ..to_row(&rows[i].0, &rows[i].1) });
-                }
-            }
+            let children = g.iter().filter(|&&i| i != head).map(|&i| LibraryRow { child: true, ..to_row(&rows[i].0, &rows[i].1) }).collect();
+            out.push(LibraryRow { children, ..to_row(&rows[head].0, &rows[head].1) });
         }
         out
     };

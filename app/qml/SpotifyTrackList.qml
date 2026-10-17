@@ -82,7 +82,6 @@ ColumnLayout {
             }
             Menu {
                 id: trackMenu
-                popupType: Popup.Native
                 MenuItem { text: qsTr("Load onto the Off-Air Deck"); onTriggered: root.load(item.modelData) }
                 MenuItem { text: qsTr("Preview in Headphones"); onTriggered: root.preview(item.modelData) }
                 MenuItem { text: qsTr("Play Next"); onTriggered: root.toSet(item.modelData, "next") }

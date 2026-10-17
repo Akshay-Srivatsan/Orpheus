@@ -102,7 +102,6 @@ Pane {
                 ]
                 Menu {
                     id: crateAddMenu
-                    popupType: Popup.Native
                     MenuItem { text: qsTr("New Crate"); onTriggered: Session.newCrateWith([]) }
                     MenuItem { text: qsTr("New Smart Crate…"); onTriggered: root.editSmartCrate("new") }
                     MenuSeparator {}
@@ -140,7 +139,6 @@ Pane {
                             onContextMenu: crateMenu.popup()
                             Menu {
                                 id: crateMenu
-                                popupType: Popup.Native
                                 MenuItem { text: qsTr("Rename"); onTriggered: Session.renamingCrate = crateRow.modelData.id }
                                 MenuItem { visible: !!crateRow.modelData.smart; text: qsTr("Edit Rules…"); onTriggered: root.editSmartCrate(crateRow.modelData.id) }
                                 MenuSeparator {}
@@ -208,7 +206,6 @@ Pane {
                             onContextMenu: setMenu.popup()
                             Menu {
                                 id: setMenu
-                                popupType: Popup.Native
                                 MenuItem {
                                     text: setRow.isOpen ? qsTr("Close in Set Panel") : qsTr("Open in Set Panel")
                                     onTriggered: Session.run("perform_open", { setlistId: setRow.isOpen ? null : setRow.modelData.id })
