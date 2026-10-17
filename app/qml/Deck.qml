@@ -7,8 +7,9 @@ import Orpheus
 // hears ("on air"); the other is the free deck, cued in headphones.
 Frame {
     id: root
-    // Sized by its contents (it has overlays besides them).
-    implicitWidth: content.implicitWidth + leftPadding + rightPadding
+    // Its width comes from the window (both decks the same), not its song: the
+    // contents fit themselves to it. Its height is its contents' (the same for any song).
+    implicitWidth: Theme.deckMinimumWidth
     implicitHeight: content.implicitHeight + topPadding + bottomPadding
 
     property int deck: 0
@@ -204,7 +205,9 @@ Frame {
                     text: root.song ? root.song.title : root.d && root.d.status === "loading" ? qsTr("Loading…") : qsTr("Deck %1 is empty").arg(root.letter)
                     opacity: root.song ? 1 : Theme.dim
                 }
+                // Its artist and dances (or, when it failed, the error, on the same line).
                 RowLayout {
+                    visible: !(root.d && root.d.error)
                     Layout.fillWidth: true
                     Label {
                         Layout.fillWidth: true
@@ -249,8 +252,13 @@ Frame {
                 }
                 Label {
                     visible: !!root.d && !!root.d.error
+                    Layout.fillWidth: true
+                    elide: Text.ElideRight
                     text: root.d && root.d.error ? root.d.error : ""
                     color: Theme.error
+                    ToolTip.visible: errorHover.hovered && truncated
+                    ToolTip.text: text
+                    HoverHandler { id: errorHover }
                 }
             }
             // Time left, and played.

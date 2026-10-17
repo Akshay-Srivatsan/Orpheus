@@ -44,6 +44,9 @@ QtObject {
     readonly property int waveformHeight: 58
     readonly property int decksHeight: 262
     readonly property int sidebarWidth: 220
+    /// The decks' narrowest, and the transport's width between them (from the font size).
+    readonly property int deckMinimumWidth: 300
+    readonly property int transportWidth: Math.round(fieldHeight * 11)
     readonly property int rightPanelWidth: 380
     /// A colour (e.g. a dance style's) made readable as text: the same hue, lighter
     /// on a dark background, darker on a light one (`onDark`: the window's theme).

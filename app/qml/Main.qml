@@ -186,7 +186,7 @@ ApplicationWindow {
             Deck {
                 deck: 0
                 Layout.row: 0; Layout.column: 0
-                Layout.minimumWidth: 300
+                Layout.minimumWidth: Theme.deckMinimumWidth
                 Layout.fillWidth: true
                 Layout.fillHeight: true
             }
@@ -195,15 +195,17 @@ ApplicationWindow {
                 Layout.row: window.wide ? 0 : window.single ? 2 : 1
                 Layout.column: window.wide ? 1 : 0
                 Layout.columnSpan: window.wide || window.single ? 1 : 2
-                Layout.preferredWidth: window.wide ? Math.max(250, implicitWidth) : -1
-                Layout.minimumWidth: window.wide ? implicitWidth : -1
+                // A fixed width between the decks (its contents fit themselves to it).
+                Layout.preferredWidth: window.wide ? Theme.transportWidth : -1
+                Layout.minimumWidth: window.wide ? Theme.transportWidth : -1
+                Layout.maximumWidth: window.wide ? Theme.transportWidth : -1
                 Layout.fillWidth: !window.wide
                 Layout.fillHeight: true
             }
             Deck {
                 deck: 1
                 Layout.row: window.single ? 1 : 0; Layout.column: window.wide ? 2 : window.single ? 0 : 1
-                Layout.minimumWidth: 300
+                Layout.minimumWidth: Theme.deckMinimumWidth
                 Layout.fillWidth: true
                 Layout.fillHeight: true
             }

@@ -45,7 +45,7 @@ Frame {
             id: playNext
             Layout.row: 0; Layout.column: 0
             Layout.fillWidth: true
-            Layout.minimumWidth: implicitWidth
+            Layout.minimumWidth: 0
             Layout.preferredWidth: root.compact ? 200 : -1
             readonly property bool armed: !!root.p && root.p.armed
             readonly property bool pending: !!root.p && root.p.pendingNext
