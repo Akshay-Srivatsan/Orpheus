@@ -26,7 +26,7 @@ ApplicationWindow {
             layoutAudit.run(window.contentItem, "main " + window.width + "×" + window.height);
             if (settingsWindow.visible) layoutAudit.run(settingsWindow.contentItem, "settings " + Session.settingsPage + " " + settingsWindow.width + "×" + settingsWindow.height);
             if (projector.visible) layoutAudit.run(projector.contentItem, "projector");
-            for (const d of [newSetlistDialog, combineDialog, smartCrate])
+            for (const d of [newSetlistDialog, combineDialog, smartCrate, libraryColumns])
                 if (d.visible) layoutAudit.run(d.contentItem, "dialog " + d.title);
         }
     }
@@ -131,6 +131,7 @@ ApplicationWindow {
             MenuSeparator {}
             Action { text: qsTr("E&xpand All Songs"); onTriggered: library.table.expandAll() }
             Action { text: qsTr("C&ollapse All Songs"); onTriggered: library.table.collapseAll() }
+            Action { text: qsTr("Library &Columns…"); onTriggered: libraryColumns.open() }
             MenuSeparator {}
             Action { text: qsTr("&Projector in a Window"); onTriggered: projector.showOn(-1, false) }
             Action { text: qsTr("Close the P&rojector"); onTriggered: projector.close() }
@@ -286,6 +287,8 @@ ApplicationWindow {
     // ------------------------------------------------------------ dialogs
 
     NewSetlistDialog { id: newSetlistDialog }
+    LibraryColumnsDialog { id: libraryColumns; table: library.table }
+    Connections { target: library.table; function onConfigureColumns() { libraryColumns.open(); } }
     CombineDialog { id: combineDialog }
     SmartCrateDialog { id: smartCrate }
     ProjectorWindow { id: projector }

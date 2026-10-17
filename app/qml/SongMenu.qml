@@ -7,6 +7,8 @@ Menu {
     id: root
 
     property var rows: []
+    /// The clicked song's values the table has no room for: { name, value }.
+    property var details: []
     /// The row right-clicked (history rows can be removed from history).
     property var historyRow: null
 
@@ -21,6 +23,18 @@ Menu {
 
     function allHave(key) { return rows.length > 0 && rows.every(r => r.styles.some(s => s.key === key)); }
 
+    // What the table had no room to show.
+    Instantiator {
+        model: root.details
+        delegate: MenuItem {
+            required property var modelData
+            enabled: false
+            text: modelData.name + ": " + modelData.value
+        }
+        onObjectAdded: (i, o) => root.insertItem(i, o)
+        onObjectRemoved: (i, o) => root.removeItem(o)
+    }
+    MenuSeparator { visible: root.details.length > 0 }
     MenuItem {
         visible: !!root.historyRow && !!root.historyRow.historyEntryId
         height: visible ? implicitHeight : 0

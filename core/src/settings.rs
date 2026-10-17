@@ -148,11 +148,14 @@ pub struct SpotifySettings {
     pub auto_connect: bool,
 }
 
-/// The library table's columns on this computer: which are hidden, and the
-/// widths you dragged them to (the others share the space).
+/// The library table's columns on this computer: their order (most important
+/// first: when the table is narrow, the last ones move to each row's details),
+/// which are hidden, and the widths you dragged them to (the others share the
+/// space). An empty order is the default one.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct LibraryColumns {
+    pub order: Vec<String>,
     pub hidden: Vec<String>,
     pub widths: std::collections::BTreeMap<String, f64>,
 }

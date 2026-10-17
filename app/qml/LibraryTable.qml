@@ -21,74 +21,136 @@ FocusScope {
 
     // ------------------------------------------------------------ columns
 
-    /// The model's columns, in order. Hidden ones get no width.
-    /// Title comes first: the tree (folding) is in the first column. In ordered
-    /// views (setlists, crates, history) the title cell starts with the position.
-    readonly property var keys: ["title", "artist", "version", "style", "bpm", "time", "meter", "plays", "actions"]
+    /// The columns you can choose and order (Library Columns…): most important
+    /// first. Title comes first (the tree, folding, is in the first column; in
+    /// ordered views the title cell starts with the position) and the row's
+    /// buttons last. When the table is too narrow, the last chosen columns give
+    /// way: their values show at the top of the row's menu (right-click).
+    readonly property var optional: ["artist", "version", "style", "bpm", "time", "meter", "plays"]
+    readonly property var saved: Session.settings && Session.settings.libraryColumns ? Session.settings.libraryColumns : ({ order: [], hidden: [], widths: {} })
+    /// Your order (columns it lacks go at the end, in the default order).
+    readonly property var order: {
+        const mine = (saved.order || []).filter(k => optional.includes(k));
+        return mine.concat(optional.filter(k => !mine.includes(k)));
+    }
+    readonly property var chosen: order.filter(k => !saved.hidden.includes(k))
+    /// The model's columns, in order (all of them have the same data, so any order works).
+    readonly property var keys: ["title"].concat(order).concat(["actions"])
     readonly property string playsKey: Session.view.kind === "history" ? "played" : "plays"
     readonly property var names: ({
         title: positioned ? qsTr("#  Title") : qsTr("Title"), artist: qsTr("Artist"), version: qsTr("Version"), style: qsTr("Style"),
         bpm: qsTr("BPM"), time: qsTr("Time"), meter: qsTr("Meter"), plays: Session.view.kind === "history" ? qsTr("Played") : qsTr("Plays"), actions: ""
     })
-    /// Columns you can hide (right-click the header), and the order they give way when narrow.
-    readonly property var optional: ["artist", "version", "style", "bpm", "time", "meter", "plays"]
-    readonly property var dropOrder: ["plays", "meter", "version", "style", "artist", "time", "bpm"]
     /// Widths (px): fixed ones, and the share of the rest the flexible ones take.
-    readonly property var defaults: ({ style: 100, bpm: 90, time: 60, meter: 64, plays: 60, played: 130, actions: 64 })
+    readonly property var defaults: ({ style: 100, bpm: 90, time: 60, meter: 64, plays: 60, played: 130, actions: 96 })
     readonly property var weights: ({ title: 2.2, artist: 1.4, version: 0.8 })
     readonly property var minimums: ({ title: 120, artist: 90, version: 70 })
-    readonly property var saved: Session.settings && Session.settings.libraryColumns ? Session.settings.libraryColumns : ({ hidden: [], widths: {} })
 
     function widthOf(k) {
         const key = k === "plays" ? playsKey : k;
         return saved.widths[key] !== undefined ? saved.widths[key] : defaults[key];
     }
+    function minimumOf(k) { return widthOf(k) !== undefined ? widthOf(k) : minimums[k]; }
+    /// The chosen columns that fit, in your order (the first that doesn't fit, and those after it, don't show).
     readonly property var shownColumns: {
-        let shown = optional.filter(k => !saved.hidden.includes(k));
-        const need = cols => widthOf("actions") + (widthOf("title") || minimums.title)
-            + cols.reduce((n, k) => n + (widthOf(k) !== undefined ? widthOf(k) : minimums[k]), 0);
-        for (const k of dropOrder) {
-            if (need(shown) <= tree.width) break;
-            shown = shown.filter(x => x !== k);
+        let room = tree.width - widthOf("actions") - minimumOf("title");
+        const shown = [];
+        for (const k of chosen) {
+            if (minimumOf(k) > room) break;
+            shown.push(k);
+            room -= minimumOf(k);
         }
         return shown;
     }
+    /// The chosen columns that don't fit: shown in each row's menu.
+    readonly property var overflow: chosen.filter(k => !shownColumns.includes(k))
     function shows(k) {
         if (k === "title" || k === "actions") return true;
         return shownColumns.includes(k);
     }
-    /// A column's width: hidden 0, fixed, or a share of what's left.
+    /// The flexible columns' widths: shares (by `weights`) of what the fixed ones
+    /// leave, any below its minimum held at it and the rest shared again, so they
+    /// add up to the room there is.
+    readonly property var flexWidths: {
+        let free = tree.width;
+        let flex = [];
+        for (const k of keys) {
+            if (!shows(k)) continue;
+            if (widthOf(k) !== undefined) free -= widthOf(k);
+            else flex.push(k);
+        }
+        const out = {};
+        for (;;) {
+            const weight = flex.reduce((n, k) => n + weights[k], 0);
+            const low = flex.filter(k => free * weights[k] / weight < minimums[k]);
+            if (!low.length) break;
+            for (const k of low) { out[k] = minimums[k]; free -= minimums[k]; }
+            flex = flex.filter(k => !low.includes(k));
+        }
+        const weight = flex.reduce((n, k) => n + weights[k], 0);
+        for (const k of flex) out[k] = Math.floor(free * weights[k] / weight);
+        return out;
+    }
+    /// A column's width: hidden 0, fixed, or its share of what's left.
     function columnWidth(c) {
         const k = keys[c];
         if (!shows(k)) return 0;
-        if (widthOf(k) !== undefined) return widthOf(k);
-        let free = tree.width;
-        let weight = 0;
-        for (const x of keys) {
-            if (!shows(x)) continue;
-            if (widthOf(x) !== undefined) free -= widthOf(x);
-            else weight += weights[x];
-        }
-        return Math.max(minimums[k], Math.floor(free * weights[k] / weight));
+        return widthOf(k) !== undefined ? widthOf(k) : flexWidths[k];
     }
+    onFlexWidthsChanged: tree.forceLayout()
     onShownColumnsChanged: tree.forceLayout()
     onSavedChanged: tree.forceLayout()
+    // Dragged widths belong to positions: a new order starts from the saved ones.
+    onKeysChanged: { tree.clearColumnWidths(); tree.forceLayout(); }
 
-    /// Saves the widths dragged in the header, and which columns are hidden.
-    function saveColumns(hidden) {
+    /// Saves the widths dragged in the header (and `patch`: order, hidden).
+    function saveColumns(patch) {
         const widths = Object.assign({}, saved.widths);
         for (let c = 0; c < keys.length; c++) {
             const w = tree.explicitColumnWidth(c);
-            if (w > 0) widths[keys[c] === "plays" ? playsKey : keys[c]] = w;
+            if (w > 0 && keys[c] !== "actions") widths[keys[c] === "plays" ? playsKey : keys[c]] = w;
         }
-        Session.saveSettings({ libraryColumns: { hidden: hidden || saved.hidden, widths: widths } });
-    }
-    function toggleColumn(k) {
-        saveColumns(saved.hidden.includes(k) ? saved.hidden.filter(x => x !== k) : saved.hidden.concat([k]));
+        Session.saveSettings({ libraryColumns: Object.assign({ order: order, hidden: saved.hidden, widths: widths }, patch || {}) });
     }
     function resetColumns() {
         tree.clearColumnWidths();
-        Session.saveSettings({ libraryColumns: { hidden: saved.hidden, widths: {} } });
+        Session.saveSettings({ libraryColumns: { order: order, hidden: saved.hidden, widths: {} } });
+    }
+    /// The columns dialog (from the header's menu or the View menu).
+    signal configureColumns()
+
+    /// A row's menu (selecting it, unless it's in the selection), at the pointer or
+    /// below `button`. It starts with the row's values the table has no room for.
+    function openMenu(row, r, button) {
+        const index = tree.index(row, 0);
+        if (!selection.isRowSelected(row, index.parent))
+            selection.setCurrentIndex(index, ItemSelectionModel.ClearAndSelect | ItemSelectionModel.Rows);
+        menu.rows = selectedRows();
+        menu.historyRow = r;
+        menu.details = overflow.map(k => ({ name: names[k], value: cellText(r, k) })).filter(d => d.value !== "");
+        if (button) menu.popup(button, 0, button.height);
+        else menu.popup();
+    }
+
+    /// A row's value in a column, as text.
+    function cellText(r, key) {
+        if (!r) return "";
+        switch (key) {
+        case "artist": return r.artist;
+        case "version": return r.versionLabel;
+        case "bpm": return (r.analyzing ? "… " : "") + Session.fmtBpm(r.bpm) + (Math.abs(r.rate - 1) > 0.001 ? "  " + Session.fmtPct(r.rate) : "");
+        case "time": return Session.fmtTime(r.durationMs);
+        case "meter": return Session.meterName(r.meter);
+        case "plays": return r.playedAt ? new Date(r.playedAt).toLocaleString(Qt.locale(), "MMM d, h:mm ap") : r.plays ? String(r.plays) : "";
+        case "style": return stylesText(r, true);
+        }
+        return "";
+    }
+    /// Its styles, in their colours (`plain`: without).
+    function stylesText(r, plain) {
+        if (!r) return "";
+        if (r.suggested) return qsTr("tempo fits");
+        return r.styles.map(s => plain ? s.short || s.name : "<font color='" + Theme.readable(s.color) + "'>" + (s.short || s.name) + "</font>").join(", ");
     }
 
     // ------------------------------------------------------------ rows
@@ -325,19 +387,7 @@ FocusScope {
                                 : cell.key === "bpm" ? (cell.r.tempoFit === "sweet" ? Theme.ok : cell.r.tempoFit === "outside" ? Theme.warn : cell.fg)
                                 : cell.key === "time" && cell.r.long ? Theme.warn
                                 : cell.fg
-                            text: {
-                                const r = cell.r;
-                                if (!r) return "";
-                                switch (cell.key) {
-                                case "artist": return r.artist;
-                                case "version": return r.versionLabel;
-                                case "bpm": return (r.analyzing ? "… " : "") + Session.fmtBpm(r.bpm) + (Math.abs(r.rate - 1) > 0.001 ? "  " + Session.fmtPct(r.rate) : "");
-                                case "time": return Session.fmtTime(r.durationMs);
-                                case "meter": return Session.meterName(r.meter);
-                                case "plays": return r.playedAt ? new Date(r.playedAt).toLocaleString(Qt.locale(), "MMM d, h:mm ap") : r.plays || "";
-                                }
-                                return "";
-                            }
+                            text: root.cellText(cell.r, cell.key)
                             ToolTip.visible: tipHover.hovered && !!ToolTip.text
                             ToolTip.delay: 600
                             ToolTip.text: !cell.r ? "" : cell.key === "version" ? cell.r.comment || ""
@@ -399,8 +449,7 @@ FocusScope {
                             opacity: cell.dim ? Theme.dim : 1
                             color: cell.fg
                             font.italic: !!cell.r && cell.r.suggested
-                            text: !cell.r ? "" : cell.r.suggested ? qsTr("tempo fits")
-                                : cell.r.styles.map(s => cell.highlighted ? s.short || s.name : "<font color='" + Theme.readable(s.color) + "'>" + (s.short || s.name) + "</font>").join(", ")
+                            text: root.stylesText(cell.r, cell.highlighted)
                             ToolTip.visible: styleHover.hovered && !!cell.r && cell.r.styles.length > 0
                             ToolTip.text: cell.r ? cell.r.styles.map(s => [s.name].concat(s.problems).join(": ")).join("\n") : ""
                             ToolTip.delay: 600
@@ -428,6 +477,16 @@ FocusScope {
                                 ToolTip.text: Session.fillingSlot ? qsTr("Use this song for the slot") : qsTr("Play next")
                                 onClicked: Session.fillingSlot ? Session.fillSlot(cell.r.versionId) : Session.addToSet([cell.r.versionId], "next")
                             }
+                            ToolButton {
+                                id: moreButton
+                                icon.source: Theme.icon("dots")
+                                icon.width: Theme.smallIconSize; icon.height: Theme.smallIconSize
+                                icon.color: cell.fg
+                                implicitHeight: 22
+                                ToolTip.visible: hovered
+                                ToolTip.text: root.overflow.length ? qsTr("More: its other details, and what you can do with it") : qsTr("What you can do with it")
+                                onClicked: root.openMenu(cell.row, cell.r, moreButton)
+                            }
                         }
                     }
 
@@ -437,14 +496,7 @@ FocusScope {
                     }
                     TapHandler {
                         acceptedButtons: Qt.RightButton
-                        onTapped: {
-                            const index = cell.treeView.index(cell.row, 0);
-                            if (!selection.isRowSelected(cell.row, index.parent))
-                                selection.setCurrentIndex(index, ItemSelectionModel.ClearAndSelect | ItemSelectionModel.Rows);
-                            menu.rows = root.selectedRows();
-                            menu.historyRow = cell.r;
-                            menu.popup();
-                        }
+                        onTapped: root.openMenu(cell.row, cell.r, null)
                     }
                     // Drag the selected songs (or this one) to the set, a deck, a crate or a style.
                     DragHandler {
