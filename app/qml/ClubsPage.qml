@@ -100,24 +100,21 @@ SettingsPage {
     ColorDialog { id: colors; property var apply; onAccepted: if (apply) apply(String(selectedColor)) }
     function pickColor(c, apply) { colors.selectedColor = c || Theme.neutral; colors.apply = apply; colors.open(); }
 
-    RowLayout {
+    ColumnLayout {
         Layout.fillWidth: true
         Layout.fillHeight: true
         spacing: Theme.spacing * 2
 
-        // The clubs.
-        ColumnLayout {
-            Layout.preferredWidth: 200
-            Layout.alignment: Qt.AlignTop
-            Repeater {
-                model: Session.clubs
-                delegate: ItemDelegate {
-                    required property var modelData
-                    Layout.fillWidth: true
-                    highlighted: !!page.sel && page.sel.id === modelData.id
-                    text: modelData.name + (Session.settings && Session.settings.defaultClub === modelData.id ? qsTr("  (default)") : "")
-                    onClicked: { page.selId = modelData.id; page.versionId = ""; }
-                }
+        // The clubs (above the selected one, so its form gets the page's width).
+        RowLayout {
+            Layout.fillWidth: true
+            Label { text: qsTr("Club") }
+            ComboBox {
+                visible: Session.clubs.length > 0
+                Layout.preferredWidth: 280
+                model: Session.clubs.map(c => c.name + (Session.settings && Session.settings.defaultClub === c.id ? qsTr("  (default)") : ""))
+                currentIndex: page.sel ? Session.clubs.findIndex(c => c.id === page.sel.id) : -1
+                onActivated: i => { page.selId = Session.clubs[i].id; page.versionId = ""; }
             }
             Label { visible: !Session.clubs.length; text: qsTr("No clubs yet."); opacity: 0.6 }
             Button {
@@ -150,6 +147,7 @@ SettingsPage {
                     }
                 }
             }
+            Item { Layout.fillWidth: true }
         }
 
         // The selected club.
