@@ -48,6 +48,7 @@ ToolBar {
             onClicked: Session.runToastAction(root.latest.toastId)
         }
         ToolButton {
+            icon.color: palette.buttonText
             visible: !!root.latest
             icon.source: Theme.icon("x")
             icon.width: Theme.smallIconSize; icon.height: Theme.smallIconSize

@@ -161,6 +161,7 @@ ColumnLayout {
                 }
             }
             ToolButton {
+                icon.color: palette.buttonText
                 visible: root.r.sources.length > 1
                 icon.source: Theme.icon("x")
                 ToolTip.visible: hovered

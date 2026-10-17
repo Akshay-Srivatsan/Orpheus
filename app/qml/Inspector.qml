@@ -11,8 +11,8 @@ Pane {
 
     property var view: null
     property bool editLinkShown: false
-    /// Versions whose cards are folded (ids).
-    property var folded: []
+    /// Versions whose cards are open (ids); the rest start folded.
+    property var unfolded: []
 
     function reload() {
         if (!Session.inspectTrack && !Session.inspectEntry) { view = null; return; }
@@ -206,10 +206,10 @@ Pane {
                     view: modelData
                     song: root.view
                     position: index
-                    folded: root.folded.includes(modelData.version.id)
+                    folded: !root.unfolded.includes(modelData.version.id)
                     onToggleFold: {
                         const id = modelData.version.id;
-                        root.folded = folded ? root.folded.filter(x => x !== id) : root.folded.concat([id]);
+                        root.unfolded = folded ? root.unfolded.concat([id]) : root.unfolded.filter(x => x !== id);
                     }
                     onMoveBy: by => {
                         const ids = root.view.versions.map(x => x.version.id);

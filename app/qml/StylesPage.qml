@@ -76,8 +76,9 @@ SettingsPage {
                         ok => { if (ok) Session.run("styles_rekey", { from: modelData.key, to: into.key }); });
                 }
             }
-            ToolButton { icon.source: Theme.icon("up"); ToolTip.visible: hovered; ToolTip.text: qsTr("Move up"); enabled: index > 0; onClicked: page.update(l => l.styles.splice(index - 1, 0, ...l.styles.splice(index, 1))) }
+            ToolButton { icon.color: palette.buttonText; icon.source: Theme.icon("up"); ToolTip.visible: hovered; ToolTip.text: qsTr("Move up"); enabled: index > 0; onClicked: page.update(l => l.styles.splice(index - 1, 0, ...l.styles.splice(index, 1))) }
             ToolButton {
+                icon.color: palette.buttonText
                 icon.source: Theme.icon("trash")
                 onClicked: {
                     const n = page.info.usage[modelData.key] || 0;
@@ -141,6 +142,7 @@ SettingsPage {
             }
             Label { Layout.preferredWidth: 50; text: page.info.tagUsage[modelData.key] || 0; opacity: 0.6; horizontalAlignment: Text.AlignRight }
             ToolButton {
+                icon.color: palette.buttonText
                 icon.source: Theme.icon("trash")
                 onClicked: {
                     const n = page.info.tagUsage[modelData.key] || 0;
@@ -205,6 +207,7 @@ SettingsPage {
                     + (gone ? " · " + qsTr("not a style any more") : "")
             }
             ToolButton {
+                icon.color: palette.buttonText
                 icon.source: Theme.icon("trash")
                 onClicked: Session.run("club_rule_set", { clubId: page.info.club.id, mine: modelData.mine, theirs: modelData.club, on: false })
             }

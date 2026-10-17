@@ -76,9 +76,12 @@ pub struct SetFileEntry {
     /// What is said before it (the entry's choice, else its version's or song's).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub announcement: Option<String>,
-    /// Its chime (the entry's choice, else its set's, version's or song's).
-    #[serde(skip_serializing_if = "ChimeChoice::is_default")]
-    pub chime: ChimeChoice,
+    /// Whether a chime plays before its announcement, and which (the
+    /// entry's choice, else its set's, version's or song's).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chime: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chime_song: Option<SetChime>,
     /// How it played there (informational: an imported set starts afresh).
     #[serde(skip_serializing_if = "String::is_empty")]
     pub status: String,
@@ -93,6 +96,17 @@ fn is_song(k: &EntryKind) -> bool {
 
 fn is_default_settings(o: &Overrides) -> bool {
     o == &Overrides::default()
+}
+
+/// A chime: a version of a song (linked like the set's songs), played as set.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct SetChime {
+    #[serde(flatten)]
+    pub song: SetSong,
+    pub version: String,
+    #[serde(skip_serializing_if = "is_default_settings")]
+    pub settings: Overrides,
 }
 
 /// What identifies a song's audio: any one of these is enough.
@@ -133,7 +147,8 @@ pub fn export(store: &Store, setlist_id: &str, club_name: Option<String>, club_r
             pause_before: e.pause_before,
             pause_after: e.pause_after,
             announcement: layers.announcement().map(String::from),
-            chime: layers.chosen_chime(),
+            chime: layers.chosen_chime().enabled,
+            chime_song: layers.chosen_chime().sound.and_then(|vid| song_of(store, &vid)).map(|(song, v)| SetChime { song, version: v.name, settings: v.settings }),
             status: e.status.clone(),
             styles: e.styles.clone().unwrap_or_default(),
             settings: e.overrides.clone(),
@@ -207,7 +222,7 @@ pub fn import(store: &Store, text: &str, club: Option<ClubRef>) -> Result<Import
                 kind: e.kind,
                 pause_before: e.pause_before,
                 announcement: e.announcement.clone(),
-                chime: e.chime.clone(),
+                chime: ChimeChoice { enabled: e.chime, sound: e.chime_song.as_ref().map(|c| link_chime(store, c)).transpose()? },
                 styles: (!e.styles.is_empty()).then(|| e.styles.clone()),
                 club_styles: e.club_styles.clone(),
                 label: e.label.clone(),
@@ -290,6 +305,50 @@ fn link(store: &Store, song: &SetSong, version: Option<&str>, display_name: Opti
     )?;
     let how = if song.spotify.is_empty() { Linked::Missing } else { Linked::Spotify };
     Ok((vid, how))
+}
+
+/// The version a set file's chime plays: the library's version of that name
+/// for its audio, else a new version (hidden from the library) with its settings.
+fn link_chime(store: &Store, c: &SetChime) -> Result<Id> {
+    let (vid, _) = link(store, &c.song, Some(&c.version), None, &[], false)?;
+    let (v, tid) = store.version(&vid)?;
+    if v.name == c.version {
+        // Just made for it (its audio wasn't here): give it the chime's settings.
+        if v.settings == Overrides::default() && c.settings != Overrides::default() {
+            let o = &c.settings;
+            store.version_update(
+                &vid,
+                &VersionPatch {
+                    target_bpm: Some(o.target_bpm),
+                    cue_in_ms: Some(o.cue_in_ms),
+                    cue_out_ms: Some(o.cue_out_ms),
+                    fade_out_ms: Some(o.fade_out_ms),
+                    gain_db: Some(o.gain_db),
+                    ..Default::default()
+                },
+            )?;
+        }
+        return Ok(vid);
+    }
+    let made = store.version_create(
+        &tid,
+        Version {
+            id: String::new(),
+            name: c.version.clone(),
+            display_name: None,
+            styles: vec![],
+            legacy_style: None,
+            settings: c.settings.clone(),
+            comment: String::new(),
+            announcement: None,
+            chime: ChimeChoice::default(),
+            tags: vec![],
+            hidden: false,
+            unlisted: true,
+            ..v
+        },
+    )?;
+    Ok(made.id)
 }
 
 /// A crate as a crate file: its songs (with their audio's identity), or a
@@ -455,5 +514,36 @@ mod tests {
         assert_eq!(b.crates().into_iter().find(|c| c.id == r.setlist_id).unwrap().smart, Some(rules));
         let _ = std::fs::remove_dir_all(base_a);
         let _ = std::fs::remove_dir_all(base_b);
+    }
+
+    #[test]
+    fn a_chime_travels_as_a_song() {
+        let (a, base_a) = store();
+        let (orig, _) = song(&a, "Bell", "file", "h-bell");
+        let bell_song = a.version(&orig).unwrap().1;
+        let ding = a
+            .version_create(&bell_song, Version { name: "Ding".into(), settings: Overrides { cue_in_ms: Some(500), cue_out_ms: Some(2500), ..Default::default() }, ..a.version(&orig).unwrap().0 })
+            .unwrap();
+        let (tune, _) = song(&a, "Tune", "file", "h-tune");
+        let sid = a.setlist_create("Chimes", "preset", None, None).unwrap();
+        a.setlist_update(&sid, &SetlistPatch { chime: Some(ChimeChoice { enabled: Some(true), sound: Some(ding.id.clone()) }), ..Default::default() }).unwrap();
+        a.entries_insert(&sid, None, &[NewEntry { version_id: Some(tune.clone()), ..Default::default() }]).unwrap();
+        let text = export(&a, &sid, None, None).unwrap();
+        assert!(text.contains("Ding") && text.contains("h-bell") && !text.contains(&ding.id), "{text}");
+
+        // Here: the same version.
+        let r = import(&a, &text, None).unwrap();
+        let e = &a.setlist(&r.setlist_id).unwrap().entries[0];
+        assert_eq!(e.chime, ChimeChoice { enabled: Some(true), sound: Some(ding.id.clone()) });
+
+        // Another library with the file but not the excerpt: it's made, hidden from the library.
+        let (b, base_b) = store();
+        song(&b, "Bell", "file", "h-bell");
+        let r = import(&b, &text, None).unwrap();
+        let chime = b.setlist(&r.setlist_id).unwrap().entries[0].chime.sound.clone().unwrap();
+        let (v, _) = b.version(&chime).unwrap();
+        assert_eq!((v.name.as_str(), v.settings.cue_in_ms, v.settings.cue_out_ms, v.unlisted), ("Ding", Some(500), Some(2500), true));
+        std::fs::remove_dir_all(base_a).ok();
+        std::fs::remove_dir_all(base_b).ok();
     }
 }

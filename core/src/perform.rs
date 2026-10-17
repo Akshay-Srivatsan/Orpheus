@@ -38,6 +38,10 @@ pub const CENTER: f64 = 0.5;
 /// Pause between songs when neither you nor the club set one (seconds).
 pub const DEFAULT_PAUSE_SECS: f64 = 8.0;
 
+/// How long auto-load waits before trying again a song it couldn't load
+/// (e.g. Spotify isn't connected).
+const AUTO_LOAD_RETRY: Duration = Duration::from_secs(30);
+
 /// How long the controller's lights flash when an action is refused.
 pub const ERROR_FLASH: Duration = Duration::from_millis(1200);
 
@@ -89,6 +93,9 @@ pub struct Perform {
     pub auto: AutoPhase,
     /// Last announcement pattern used (not repeated next time).
     pub last_pattern: Option<usize>,
+    /// The set entry auto-load last failed to load, and when (it waits
+    /// `AUTO_LOAD_RETRY` before trying it again).
+    pub auto_load_failed: Option<(Id, Instant)>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -113,6 +120,8 @@ pub struct PerformState {
     pub live_deck: usize,
     /// Where songs load (see `App::free_deck`).
     pub free_deck: usize,
+    /// The chime the next entry would have (whether or not it's on).
+    pub next_chime: Option<Id>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -622,14 +631,21 @@ impl App {
         if !replaceable || self.perform.lock().pending.is_some() {
             return;
         }
+        if self.perform.lock().auto_load_failed.as_ref().is_some_and(|(id, at)| *id == next.id && at.elapsed() < AUTO_LOAD_RETRY) {
+            return;
+        }
         let Ok((version, track_id)) = self.store.version(&version_id) else { return };
         let Ok(track) = self.store.track(&track_id) else { return };
         match self.load_request(free, &track, &version, Some(&next), false) {
             Ok(req) => {
+                self.perform.lock().auto_load_failed = None;
                 self.untake(&[&format!("deck{free}.tempo")]);
                 d.load(req);
             }
-            Err(e) => log::warn!("auto-load: {e:#}"),
+            Err(e) => {
+                log::warn!("auto-load: {e:#}");
+                self.perform.lock().auto_load_failed = Some((next.id.clone(), Instant::now()));
+            }
         }
     }
 
@@ -688,6 +704,18 @@ impl App {
     fn has_announcement(&self, entry: &SetlistEntry) -> bool {
         let a = self.settings.read().announce.clone();
         self.with_layers(entry, |l| l.speaks(&a))
+    }
+
+    /// The chime chosen for `entry`, whether or not it's on.
+    fn chime_version_for(&self, entry: &SetlistEntry) -> Option<Id> {
+        let a = self.settings.read().announce.clone();
+        self.with_layers(entry, |l| l.chime_sound(&a))
+    }
+
+    /// The chime to play for the next entry now (manual button, even with chimes off).
+    pub fn next_chime(&self) -> Result<Id> {
+        let next = self.next_entry().ok_or_else(|| anyhow!("Nothing is coming up"))?;
+        self.chime_version_for(&next).ok_or_else(|| anyhow!("No chime is chosen for the next song"))
     }
 
     /// The chime before `entry`'s announcement, if one plays.
@@ -757,18 +785,26 @@ impl App {
     /// What the chime version plays: its audio file, from its start to its
     /// end (or through its fade), at its gain.
     fn chime_excerpt(&self, version_id: &str) -> Result<crate::chime::Excerpt> {
-        let (v, _) = self.store.version(version_id).map_err(|_| anyhow!("its version was removed"))?;
+        let (v, tid) = self.store.version(version_id).map_err(|_| anyhow!("its version was removed"))?;
+        let track = self.store.track(&tid)?;
         let path = crate::library::resolve_path(&self.store, &v.recording).ok_or_else(|| anyhow!("its audio isn't a file on this computer"))?;
         let st = Self::resolve_settings(&v, None);
         let secs = |ms: i64| ms as f64 / 1000.0;
         // Like a deck: it fades out from its fade point, else stops at its end.
         let fade = st.fade_out_ms.map(|_| self.fade_secs()).unwrap_or(0.0);
+        let (keylock, engine) = {
+            let s = self.settings.read();
+            (s.keylock, s.stretch_engine.clone())
+        };
         Ok(crate::chime::Excerpt {
             path,
             start_secs: st.cue_in_ms.map_or(0.0, secs),
             end_secs: st.fade_out_ms.map(|f| secs(f) + fade).or(st.cue_out_ms.map(secs)),
             fade_secs: fade,
             gain: 10f32.powf(st.gain_db.unwrap_or(0.0) as f32 / 20.0),
+            rate: crate::views::playback(track.recording_of(&v.id), &v, None, None).rate,
+            keylock,
+            stretch: crate::audio::stretch::Engine::from_setting(&engine),
         })
     }
 
@@ -909,11 +945,7 @@ impl App {
                 // Don't announce a song the crossfader wouldn't let the room hear.
                 if let Some(deck) = self.deck_for(&PendingNext::Next) {
                     if let Err(e) = self.check_crossfader(deck) {
-                        emit(&self.handle, "toast", format!("Auto mode stopped: {e:#}"));
-                        let mut p = self.perform.lock();
-                        p.gap_started = None;
-                        p.auto = AutoPhase::Idle;
-                        return;
+                        return self.stop_auto(e);
                     }
                 }
                 let phase = match result {
@@ -944,13 +976,22 @@ impl App {
                 }
                 let r = if is_pause { self.complete_pause(&next) } else { self.play_next().map(|_| ()) };
                 if let Err(e) = r {
-                    emit(&self.handle, "toast", format!("{e:#}"));
-                    let mut p = self.perform.lock();
-                    p.gap_started = None;
-                    p.auto = AutoPhase::Idle;
+                    self.stop_auto(e);
                 }
             }
         }
+    }
+
+    /// Auto mode can't go on (the next song can't start): it stops, says why,
+    /// and the pause ends (the DJ goes on with Play Next).
+    fn stop_auto(&self, why: anyhow::Error) {
+        emit(&self.handle, "toast", format!("Auto mode stopped: {why:#}"));
+        {
+            let mut p = self.perform.lock();
+            p.gap_started = None;
+            p.auto = AutoPhase::Idle;
+        }
+        self.emit_perform();
     }
 
     pub fn perform_state(&self) -> PerformState {
@@ -970,6 +1011,7 @@ impl App {
         let entries = self.entries();
         let started_at = entries.iter().filter_map(|e| e.played_at).min();
         let next = self.next_entry();
+        let next_chime = next.as_ref().and_then(|e| self.chime_version_for(e));
         let next_ready = next.as_ref().map(|e| e.version_id.is_some() || e.kind == EntryKind::Pause).unwrap_or(false);
         let next_held = next.as_ref().is_some_and(|e| e.hold);
         let (before, after, speaks) = match &next {
@@ -1012,6 +1054,7 @@ impl App {
             crossfader,
             live_deck,
             free_deck: self.free_deck(),
+            next_chime,
         }
     }
 

@@ -52,6 +52,7 @@ SettingsPage {
                     Layout.fillWidth: true
                     Label { Layout.fillWidth: true; text: modelData; elide: Text.ElideMiddle }
                     ToolButton {
+                        icon.color: palette.buttonText
                         icon.source: Theme.icon("x")
                         ToolTip.visible: hovered; ToolTip.text: qsTr("Remove")
                         onClicked: page.set({ libraryFolders: page.s.libraryFolders.filter(f => f !== modelData) })

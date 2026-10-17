@@ -60,6 +60,11 @@ Menu {
         onTriggered: Session.addEdit({ recording: root.rows[0].recordingId })
     }
     MenuItem { text: qsTr("Play Next"); onTriggered: Session.addToSet(root.ids, "next") }
+    MenuItem {
+        readonly property bool unlisted: root.rows.length > 0 && root.rows.every(r => r.unlisted)
+        text: unlisted ? qsTr("Show in the Library") : qsTr("Hide from the Library")
+        onTriggered: Session.setUnlisted(root.ids, !unlisted)
+    }
     MenuItem { text: qsTr("Add to End of Set"); onTriggered: Session.addToSet(root.ids, "end") }
     MenuItem { text: qsTr("Preview in Headphones (free deck)"); onTriggered: Session.preview(root.ids[0], null) }
     Menu {

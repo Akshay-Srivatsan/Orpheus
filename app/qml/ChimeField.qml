@@ -100,6 +100,7 @@ ColumnLayout {
             }
         }
         ToolButton {
+            icon.color: palette.buttonText
             icon.source: Theme.icon("play")
             enabled: !!root.sound
             ToolTip.visible: hovered

@@ -165,6 +165,7 @@ Pane {
                 }
             }
             ToolButton {
+                icon.color: palette.buttonText
                 icon.source: Theme.icon("dots")
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("More for this set")

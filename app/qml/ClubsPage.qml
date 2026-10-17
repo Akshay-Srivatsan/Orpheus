@@ -210,11 +210,13 @@ SettingsPage {
                         }
                         Label { Layout.preferredWidth: 60; text: qsTr("%1 sets").arg(page.usage[modelData.id] || 0); opacity: 0.6 }
                         ToolButton {
+                            icon.color: palette.buttonText
                             icon.source: Theme.icon("edit")
                             ToolTip.visible: hovered; ToolTip.text: qsTr("Name this version")
                             onClicked: { versionName.target = modelData; versionName.open(); }
                         }
                         ToolButton {
+                            icon.color: palette.buttonText
                             icon.source: Theme.icon("x")
                             ToolTip.visible: hovered; ToolTip.text: qsTr("Delete this version")
                             onClicked: {

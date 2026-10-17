@@ -123,7 +123,7 @@ SettingsPage {
                             page.setAnnounce({ patterns: patterns });
                         }
                     }
-                    ToolButton { icon.source: Theme.icon("x"); onClicked: page.setAnnounce({ patterns: page.a.patterns.filter((_, j) => j !== index) }) }
+                    ToolButton { icon.color: palette.buttonText; icon.source: Theme.icon("x"); onClicked: page.setAnnounce({ patterns: page.a.patterns.filter((_, j) => j !== index) }) }
                 }
             }
             Button { icon.source: Theme.icon("plus"); text: qsTr("Add Sentence"); onClicked: page.setAnnounce({ patterns: page.a.patterns.concat([qsTr("Next up: {dance}.")]) }) }
@@ -218,6 +218,7 @@ SettingsPage {
                             onEditingFinished: page.saveProns(page.prons.map((p, j) => j === index ? Object.assign({}, p, { say: text }) : p))
                         }
                         ToolButton {
+                            icon.color: palette.buttonText
                             icon.source: Theme.icon("speaker")
                             enabled: !!page.tts && page.tts.state === "ready" && !!modelData.word
                             ToolTip.visible: hovered; ToolTip.text: qsTr("Say it with this pronunciation")
@@ -234,7 +235,7 @@ SettingsPage {
                                 page.phonemes = next;
                             })
                         }
-                        ToolButton { icon.source: Theme.icon("x"); onClicked: page.saveProns(page.prons.filter((_, j) => j !== index)) }
+                        ToolButton { icon.color: palette.buttonText; icon.source: Theme.icon("x"); onClicked: page.saveProns(page.prons.filter((_, j) => j !== index)) }
                     }
                     Label { visible: !!page.phonemes[index]; text: page.phonemes[index] || ""; font.family: "monospace"; opacity: 0.8 }
                 }

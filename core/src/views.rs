@@ -429,6 +429,8 @@ pub struct LibraryQuery {
     pub descending: bool,
     /// With one style filtered on, also suggest unlabelled songs whose tempo fits it.
     pub suggest_by_tempo: bool,
+    /// Versions you hid from the library are listed too.
+    pub show_unlisted: bool,
 }
 
 /// Where a song plays from.
@@ -460,6 +462,8 @@ pub struct LibraryRow {
     pub album: String,
     /// The version's name where it matters (several versions, or not "Original").
     pub version_label: String,
+    /// You hid it from the library (listed only when hidden versions are shown).
+    pub unlisted: bool,
     pub comment: String,
     /// Your styles on it.
     pub styles: Vec<Shown>,
@@ -578,7 +582,8 @@ pub fn library_view(ctx: &ViewContext, data: &LibraryData, q: &LibraryQuery) -> 
     let in_library: Vec<&Track> = data.tracks.iter().filter(|t| t.rec.in_library).collect();
     let by_version: HashMap<&str, (&Track, &Version)> =
         data.tracks.iter().flat_map(|t| t.rec.versions.iter().map(move |v| (v.id.as_str(), (t, v)))).collect();
-    let library_items = || in_library.iter().flat_map(|t| t.rec.versions.iter().filter(|v| !v.hidden).map(move |v| (*t, v)));
+    let listed = |v: &Version| !v.hidden && (q.show_unlisted || !v.unlisted);
+    let library_items = || in_library.iter().flat_map(move |t| t.rec.versions.iter().filter(move |v| listed(v)).map(move |v| (*t, v)));
     let crate_ = match &q.view {
         View::Crate { id } => data.crates.iter().find(|c| &c.id == id),
         _ => None,
@@ -592,7 +597,7 @@ pub fn library_view(ctx: &ViewContext, data: &LibraryData, q: &LibraryQuery) -> 
         View::ClubSongs => data
             .tracks
             .iter()
-            .flat_map(|t| t.rec.versions.iter().filter(|v| !v.hidden).map(move |v| (t, v)))
+            .flat_map(|t| t.rec.versions.iter().filter(move |v| listed(v)).map(move |v| (t, v)))
             .filter(|(t, v)| t.recording_of(&v.id).is_some_and(|r| ctx.song_matches.get(&r.rec.id).is_some_and(|m| !m.is_empty())))
             .map(|(t, v)| item(t, v, v.id.clone()))
             .collect(),
@@ -812,6 +817,7 @@ pub fn library_view(ctx: &ViewContext, data: &LibraryData, q: &LibraryQuery) -> 
         artist: it.track.rec.artist.clone(),
         album: it.track.rec.album.clone(),
         version_label: version_label(it.version, it.track),
+        unlisted: it.version.unlisted,
         comment: it.version.comment.clone(),
         styles: it.version.styles.iter().map(|k| mine_shown(&ctx.styles, k)).collect(),
         tags: it.version.tags.clone(),
@@ -884,7 +890,7 @@ pub fn library_summary(ctx: &ViewContext, tracks: &[Track], crates: &[Crate], no
     let in_library: Vec<&Track> = tracks.iter().filter(|t| t.rec.in_library).collect();
     let candidates: Vec<crate::smart::Candidate> = in_library
         .iter()
-        .flat_map(|t| t.rec.versions.iter().filter(|v| !v.hidden).map(move |v| crate::smart::Candidate { track: t, version: v }))
+        .flat_map(|t| t.rec.versions.iter().filter(|v| !v.hidden && !v.unlisted).map(move |v| crate::smart::Candidate { track: t, version: v }))
         .collect();
     let ev = crate::smart::Evaluator { ctx, crates, library: &candidates, now };
     let club_songs: std::collections::HashSet<&str> = tracks

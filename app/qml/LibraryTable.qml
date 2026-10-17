@@ -373,8 +373,8 @@ FocusScope {
                     readonly property var r: model.display !== undefined ? root.flat[model.display] : null
                     readonly property bool onDeck: !!r && Session.decks.some(d => d && d.versionId === r.versionId)
                     readonly property bool audible: !!r && Session.decks.some(d => d && d.versionId === r.versionId && d.audible)
-                    /// Dimmed: played in the open set, suggested by tempo, or missing.
-                    readonly property bool dim: !!r && (r.playedInSet || r.suggested || r.availability === "missing")
+                    /// Dimmed: played in the open set, suggested by tempo, missing, or hidden from the library.
+                    readonly property bool dim: !!r && (r.playedInSet || r.suggested || r.availability === "missing" || r.unlisted)
                     readonly property color fg: highlighted ? palette.highlightedText : palette.text
 
                     contentItem: Loader {
@@ -510,10 +510,18 @@ FocusScope {
                     DragHandler {
                         id: dragging
                         target: null
-                        onActiveChanged: if (!active) dragProxy.Drag.drop()
+                        onActiveChanged: {
+                            if (active) { Session.dragging = true; return; }
+                            dragProxy.Drag.drop();
+                            // No platform drag came of it: nothing to wait for.
+                            if (!dragProxy.started) Session.dragging = false;
+                        }
                     }
                     Item {
                         id: dragProxy
+                        property bool started: false
+                        Drag.onDragStarted: started = true
+                        Drag.onDragFinished: { started = false; Session.dragging = false; }
                         Drag.active: dragging.active
                         Drag.dragType: Drag.Automatic
                         Drag.supportedActions: Qt.CopyAction

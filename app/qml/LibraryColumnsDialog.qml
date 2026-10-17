@@ -60,12 +60,14 @@ AppDialog {
                             onToggled: root.hidden = checked ? root.hidden.filter(k => k !== item.modelData) : root.hidden.concat([item.modelData])
                         }
                         ToolButton {
+                            icon.color: palette.buttonText
                             icon.source: Theme.icon("up")
                             enabled: item.index > 0
                             ToolTip.visible: hovered; ToolTip.text: qsTr("More important")
                             onClicked: root.move(item.index, -1)
                         }
                         ToolButton {
+                            icon.color: palette.buttonText
                             icon.source: Theme.icon("down")
                             enabled: item.index < root.order.length - 1
                             ToolTip.visible: hovered; ToolTip.text: qsTr("Less important")

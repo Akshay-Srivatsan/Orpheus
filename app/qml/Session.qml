@@ -45,6 +45,12 @@ QtObject {
     /// Songs whose other versions are unfolded in the library (track ids).
     property var unfolded: []
     property bool suggestByTempo: true
+    /// The library lists versions you hid from it too.
+    property bool showUnlisted: false
+    /// Hides versions from the library's lists, or shows them again.
+    function setUnlisted(versionIds, value) {
+        return Promise.all(versionIds.map(id => run("version_update", { id: id, patch: { unlisted: value } })));
+    }
     /// Selected library rows (version ids) and set entries.
     property var selected: []
     property var selectedEntries: []
@@ -175,10 +181,20 @@ QtObject {
         run("settings_set", { settings: next });
     }
 
+    /// Something is being dragged (songs, set entries). Views keep their rows
+    /// meanwhile: replacing them would destroy the row being dragged, or the
+    /// one it's over, while the drag still uses it (that crashed). They catch
+    /// up once it's over (`draggingChanged`).
+    property bool dragging: false
+    property bool setMissed: false
+    onDraggingChanged: if (!dragging && setMissed) refreshSet()
+
     function refreshSet() {
+        setMissed = false;
         const id = perform ? perform.setlistId : null;
+        if (dragging) { setMissed = true; return; }
         if (!id) { set = null; return; }
-        Backend.call("set_view", { id: id }).then(v => set = v, () => set = null);
+        Backend.call("set_view", { id: id }).then(v => { if (dragging) setMissed = true; else set = v; }, () => set = null);
     }
     function refreshClub() { Backend.call("active_club").then(v => activeClub = v); }
     function refreshMidi() { Backend.call("midi_info").then(m => midiPorts = m.ports, () => {}); }

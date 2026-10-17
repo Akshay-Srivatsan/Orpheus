@@ -73,7 +73,9 @@ impl<'a> Layers<'a> {
 }
 
 /// Audio to play as a chime: part of a file (from `start`, to `end` or
-/// `MAX_OPEN_SECS` later, fading out over `fade` before the end), at `gain`.
+/// `MAX_OPEN_SECS` later, fading out over `fade` before the end), at `gain`,
+/// played `rate` times as fast (with `stretch`'s engine, keeping its pitch
+/// with `keylock`), as a deck plays it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Excerpt {
     pub path: std::path::PathBuf,
@@ -81,34 +83,65 @@ pub struct Excerpt {
     pub end_secs: Option<f64>,
     pub fade_secs: f64,
     pub gain: f32,
+    pub rate: f64,
+    pub keylock: bool,
+    pub stretch: crate::audio::stretch::Engine,
 }
+
+/// Source frames stretched at a time.
+const STRETCH_BLOCK: usize = 4096;
 
 /// An excerpt, mono at `rate`.
 pub fn render(x: &Excerpt, rate: u32) -> Result<Vec<f32>> {
     let mut dec = crate::decode::LocalDecoder::open(&x.path)?;
+    let src_rate = dec.sample_rate;
     if x.start_secs > 0.0 {
         dec.seek(x.start_secs)?;
     }
     let (end, fade) = match x.end_secs {
         Some(e) if e > x.start_secs => (e, x.fade_secs),
-        _ => (x.start_secs + MAX_OPEN_SECS, CUT_FADE_SECS),
+        _ => (x.start_secs + MAX_OPEN_SECS * x.rate.max(0.01), CUT_FADE_SECS),
     };
-    let frames = ((end - x.start_secs) * dec.sample_rate as f64) as usize;
-    let (mut stereo, mut mono) = (Vec::new(), Vec::with_capacity(frames));
-    while mono.len() < frames && dec.read(&mut stereo)? {
-        mono.extend(stereo.chunks_exact(2).map(|f| (f[0] + f[1]) * 0.5 * x.gain));
-        stereo.clear();
+    let frames = ((end - x.start_secs) * src_rate as f64) as usize;
+    let (mut block, mut stereo) = (Vec::new(), Vec::with_capacity(frames * 2));
+    while stereo.len() < frames * 2 && dec.read(&mut block)? {
+        stereo.extend_from_slice(&block);
+        block.clear();
     }
-    mono.truncate(frames);
-    if mono.is_empty() {
+    stereo.truncate(frames * 2);
+    if stereo.is_empty() {
         return Err(anyhow!("{} has no audio there", x.path.display()));
     }
-    let fade_frames = ((fade * dec.sample_rate as f64) as usize).min(mono.len());
-    let n = mono.len();
-    for (i, s) in mono[n - fade_frames..].iter_mut().enumerate() {
-        *s *= 1.0 - i as f32 / fade_frames as f32;
+    let n = stereo.len() / 2;
+    let fade_frames = ((fade * src_rate as f64) as usize).min(n);
+    for (i, f) in stereo[(n - fade_frames) * 2..].chunks_exact_mut(2).enumerate() {
+        let g = 1.0 - i as f32 / fade_frames as f32;
+        f[0] *= g;
+        f[1] *= g;
     }
-    Ok(resample(&mono, dec.sample_rate, rate))
+    let stereo = if (x.rate - 1.0).abs() > 1e-3 { stretch(&stereo, src_rate, x) } else { stereo };
+    let mono: Vec<f32> = stereo.chunks_exact(2).map(|f| (f[0] + f[1]) * 0.5 * x.gain).collect();
+    Ok(resample(&mono, src_rate, rate))
+}
+
+/// `stereo` played `x.rate` times as fast, at the same sample rate.
+fn stretch(stereo: &[f32], src_rate: u32, x: &Excerpt) -> Vec<f32> {
+    let mut s = crate::audio::stretch::create(x.stretch, src_rate);
+    s.set_pitch(if x.keylock { 1.0 } else { x.rate as f32 });
+    let mut out = Vec::with_capacity((stereo.len() as f64 / x.rate) as usize + STRETCH_BLOCK * 2);
+    let mut buf = Vec::new();
+    for chunk in stereo.chunks(STRETCH_BLOCK * 2) {
+        buf.resize(((chunk.len() / 2) as f64 / x.rate).round() as usize * 2, 0.0);
+        s.process(chunk, &mut buf);
+        out.extend_from_slice(&buf);
+    }
+    let mut tail = Vec::new();
+    s.flush(&mut tail);
+    out.extend_from_slice(&tail);
+    // The engine's delay: drop it from the start.
+    let delay = ((s.latency_src_frames() / x.rate) as usize * 2).min(out.len());
+    out.drain(..delay);
+    out
 }
 
 /// Linear resampling (plenty for a chime).
@@ -195,8 +228,68 @@ mod tests {
         assert_eq!(&out[..c.len()], &c[..]);
         assert_eq!(out.len(), 50 + (GAP_SECS * rate as f32) as usize + 100);
         assert_eq!(&out[out.len() - 100..], &speech[..]);
-        let missing = Excerpt { path: "/nonexistent/chime.ogg".into(), start_secs: 0.0, end_secs: None, fade_secs: 0.0, gain: 1.0 };
+        let missing = Excerpt {
+            path: "/nonexistent/chime.ogg".into(),
+            start_secs: 0.0,
+            end_secs: None,
+            fade_secs: 0.0,
+            gain: 1.0,
+            rate: 1.0,
+            keylock: true,
+            stretch: crate::audio::stretch::Engine::Signalsmith,
+        };
         assert!(render(&missing, rate).is_err());
         assert_eq!(resample(&[0.0, 1.0], 1, 2).len(), 4);
+    }
+
+    /// A WAV file: `secs` of a tone, 16-bit stereo at `rate`.
+    fn tone_file(dir: &std::path::Path, secs: f64, rate: u32) -> std::path::PathBuf {
+        let n = (secs * rate as f64) as u32;
+        let mut b = Vec::new();
+        b.extend_from_slice(b"RIFF");
+        b.extend_from_slice(&(36 + n * 4).to_le_bytes());
+        b.extend_from_slice(b"WAVEfmt ");
+        b.extend_from_slice(&16u32.to_le_bytes());
+        b.extend_from_slice(&1u16.to_le_bytes());
+        b.extend_from_slice(&2u16.to_le_bytes());
+        b.extend_from_slice(&rate.to_le_bytes());
+        b.extend_from_slice(&(rate * 4).to_le_bytes());
+        b.extend_from_slice(&4u16.to_le_bytes());
+        b.extend_from_slice(&16u16.to_le_bytes());
+        b.extend_from_slice(b"data");
+        b.extend_from_slice(&(n * 4).to_le_bytes());
+        for i in 0..n {
+            let v = ((i as f32 / rate as f32 * 440.0 * std::f32::consts::TAU).sin() * 8000.0) as i16;
+            b.extend_from_slice(&v.to_le_bytes());
+            b.extend_from_slice(&v.to_le_bytes());
+        }
+        let p = dir.join("tone.wav");
+        std::fs::write(&p, b).unwrap();
+        p
+    }
+
+    #[test]
+    fn a_chime_plays_at_its_tempo_and_stops_at_its_end() {
+        let dir = std::env::temp_dir().join(format!("orpheus-chime-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = tone_file(&dir, 4.0, 44_100);
+        let x = |rate: f64, end: Option<f64>| Excerpt {
+            path: path.clone(),
+            start_secs: 1.0,
+            end_secs: end,
+            fade_secs: 0.0,
+            gain: 1.0,
+            rate,
+            keylock: true,
+            stretch: crate::audio::stretch::Engine::Signalsmith,
+        };
+        let secs = |s: Vec<f32>| s.len() as f64 / 24_000.0;
+        // 1 s to 3 s: 2 s as it is, about 1 s at double tempo.
+        assert!((secs(render(&x(1.0, Some(3.0)), 24_000).unwrap()) - 2.0).abs() < 0.01);
+        let fast = secs(render(&x(2.0, Some(3.0)), 24_000).unwrap());
+        assert!((fast - 1.0).abs() < 0.15, "{fast}");
+        // No end of its own: the rest of the file (under the limit).
+        assert!((secs(render(&x(1.0, None), 24_000).unwrap()) - 3.0).abs() < 0.01);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -834,6 +834,12 @@ pub fn chime_preview(app: &Arc<App>, version_id: Id) -> Res<()> {
     Ok(())
 }
 
+/// Plays the next song's chime now.
+pub fn chime_next(app: &Arc<App>) -> Res<()> {
+    let v = app.next_chime().map_err(ae)?;
+    chime_preview(app, v)
+}
+
 /// Chime versions in words (see `App::chime_label`).
 pub fn chime_labels(app: &Arc<App>, version_ids: Vec<Id>) -> Res<Vec<String>> {
     Ok(version_ids.iter().map(|v| app.chime_label(v)).collect())
@@ -2321,7 +2327,7 @@ pub fn smart_preview(app: &Arc<App>, rules: crate::smart::Rules, editing: Option
     let candidates: Vec<crate::smart::Candidate> = tracks
         .iter()
         .filter(|t| t.rec.in_library)
-        .flat_map(|t| t.rec.versions.iter().filter(|v| !v.hidden).map(move |v| crate::smart::Candidate { track: t, version: v }))
+        .flat_map(|t| t.rec.versions.iter().filter(|v| !v.hidden && !v.unlisted).map(move |v| crate::smart::Candidate { track: t, version: v }))
         .collect();
     let ev = crate::smart::Evaluator { ctx: &ctx, crates: &crates, library: &candidates, now: crate::model::now_ms() };
     let hits: Vec<&crate::smart::Candidate> = candidates.iter().filter(|c| ev.matches(&rules, c, 0)).collect();
@@ -2982,6 +2988,7 @@ pub fn call(app: &Arc<App>, name: &str, args: serde_json::Value) -> Res<serde_js
             json(tts_phonemes(app, a.text))
         }
         "announce_next" => json(announce_next(app)),
+        "chime_next" => json(chime_next(app)),
         "clubs_list" => json(clubs_list(app)),
         "club_get" => {
             #[derive(Deserialize)]

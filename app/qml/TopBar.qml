@@ -72,6 +72,7 @@ ToolBar {
 
         ToolButton {
             id: announce
+            icon.color: palette.buttonText
             display: root.display
             icon.source: Theme.icon("mic")
             text: qsTr("Announce")
@@ -104,6 +105,7 @@ ToolBar {
         }
         ToolButton {
             id: projectorButton
+            icon.color: palette.buttonText
             display: root.display
             icon.source: Theme.icon("projector")
             text: qsTr("Projector")
@@ -188,6 +190,7 @@ ToolBar {
             }
         }
         ToolButton {
+            icon.color: palette.buttonText
             icon.source: Theme.icon("gear")
             ToolTip.visible: hovered
             ToolTip.text: qsTr("Settings (%1)").arg(Qt.platform.os === "osx" ? "⌘," : "Ctrl+,")

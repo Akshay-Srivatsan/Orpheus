@@ -119,6 +119,7 @@ Frame {
                 HoverHandler { id: levelHover }
             }
             ToolButton {
+                icon.color: palette.buttonText
                 checkable: true
                 checked: !!root.d && root.d.pfl
                 icon.source: Theme.icon("headphones")
@@ -127,6 +128,7 @@ Frame {
                 onClicked: root.call("deck_set", { pfl: checked })
             }
             ToolButton {
+                icon.color: palette.buttonText
                 icon.source: Theme.icon("dots")
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("More for deck %1").arg(root.letter)

@@ -106,6 +106,7 @@ SettingsPage {
                 onClicked: page.learn(index)
             }
             ToolButton {
+                icon.color: palette.buttonText
                 icon.source: Theme.icon("x")
                 onClicked: Session.run("midi_control_remove", { mappingId: page.mapping.id, index: index }).then(() => page.load())
             }

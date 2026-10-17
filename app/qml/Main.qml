@@ -132,6 +132,7 @@ ApplicationWindow {
             Action { text: qsTr("E&xpand All Songs"); onTriggered: library.table.expandAll() }
             Action { text: qsTr("C&ollapse All Songs"); onTriggered: library.table.collapseAll() }
             Action { text: qsTr("Library &Columns…"); onTriggered: libraryColumns.open() }
+            Action { text: qsTr("Show &Hidden Versions"); checkable: true; checked: Session.showUnlisted; onTriggered: Session.showUnlisted = checked }
             MenuSeparator {}
             Action { text: qsTr("&Projector in a Window"); onTriggered: projector.showOn(-1, false) }
             Action { text: qsTr("Close the P&rojector"); onTriggered: projector.close() }

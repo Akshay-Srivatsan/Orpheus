@@ -158,6 +158,11 @@ pub struct Version {
     /// library views, deleted once no set does.
     #[serde(default, skip_serializing_if = "is_false")]
     pub hidden: bool,
+    /// Left out of library lists by you (e.g. a chime, or an edit you rarely
+    /// want): still in its song's Info, in sets and crates it's in, and shown
+    /// with View → Show Hidden Versions.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub unlisted: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -189,6 +194,7 @@ pub struct VersionPatch {
     pub tags: Option<Vec<String>>,
     /// Shows it in the library again (`false`).
     pub hidden: Option<bool>,
+    pub unlisted: Option<bool>,
 }
 
 /// One of *your* dance styles: what versions in your library are tagged with.

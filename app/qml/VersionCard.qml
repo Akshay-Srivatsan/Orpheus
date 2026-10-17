@@ -42,6 +42,7 @@ Frame {
         RowLayout {
             Layout.fillWidth: true
             ToolButton {
+                icon.color: palette.buttonText
                 icon.source: Theme.icon(root.folded ? "chevron-right" : "chevron-down")
                 icon.width: 12; icon.height: 12
                 ToolTip.visible: hovered
@@ -63,6 +64,7 @@ Frame {
                 onEditingFinished: if (text !== root.v.name) root.patch({ name: text })
             }
             ToolButton {
+                icon.color: palette.buttonText
                 visible: root.song.versions.length > 1
                 icon.source: Theme.icon("up")
                 enabled: root.position > 0
@@ -70,6 +72,7 @@ Frame {
                 onClicked: root.moveBy(-1)
             }
             ToolButton {
+                icon.color: palette.buttonText
                 visible: root.song.versions.length > 1
                 icon.source: Theme.icon("down")
                 enabled: root.position < root.song.versions.length - 1
@@ -77,29 +80,53 @@ Frame {
                 onClicked: root.moveBy(1)
             }
             ToolButton {
+                icon.color: palette.buttonText
                 icon.source: Theme.icon("headphones")
                 ToolTip.visible: hovered; ToolTip.text: qsTr("Preview this version on the free deck")
                 onClicked: Session.preview(root.v.id, null)
             }
-            ToolButton {
-                icon.source: Theme.icon("copy")
-                ToolTip.visible: hovered; ToolTip.text: qsTr("Duplicate")
-                onClicked: {
-                    const copy = Object.assign({}, root.v);
-                    delete copy.id;
-                    copy.name = qsTr("%1 (copy)").arg(root.v.name);
-                    Session.run("version_create", { trackId: root.song.track.id, version: copy });
-                }
+            // Hidden from the library's lists: say so even when folded.
+            Icon {
+                visible: !!root.v.unlisted
+                glyph: "hidden"
+                opacity: Theme.dim
+                ToolTip.visible: hiddenHover.hovered
+                ToolTip.text: qsTr("Hidden from the library's lists (View → Show Hidden Versions lists it)")
+                HoverHandler { id: hiddenHover }
             }
             ToolButton {
-                visible: !root.v.hidden
-                icon.source: Theme.icon("trash")
-                ToolTip.visible: hovered; ToolTip.text: qsTr("Remove this version from the library (sets that play it keep it)")
-                onClicked: {
-                    const last = root.song.versions.filter(x => !x.version.hidden).length < 2;
-                    Session.confirm(last ? qsTr("Remove “%1” from the library? Sets that play it keep it.").arg(root.song.track.title)
-                        : qsTr("Remove version “%1” from the library? Sets that play it keep it.").arg(root.v.name),
-                        qsTr("Remove"), ok => { if (ok) Session.run("version_delete", { id: root.v.id }); });
+                icon.color: palette.buttonText
+                icon.source: Theme.icon("dots")
+                ToolTip.visible: hovered; ToolTip.text: qsTr("More for this version")
+                onClicked: moreMenu.popup()
+                Menu {
+                    id: moreMenu
+                    MenuItem {
+                        text: qsTr("Duplicate")
+                        onTriggered: {
+                            const copy = Object.assign({}, root.v);
+                            delete copy.id;
+                            copy.name = qsTr("%1 (copy)").arg(root.v.name);
+                            Session.run("version_create", { trackId: root.song.track.id, version: copy });
+                        }
+                    }
+                    MenuItem {
+                        text: qsTr("Hidden from the Library")
+                        checkable: true
+                        checked: !!root.v.unlisted
+                        onTriggered: root.patch({ unlisted: checked })
+                    }
+                    MenuSeparator {}
+                    MenuItem {
+                        enabled: !root.v.hidden
+                        text: qsTr("Remove from the Library…")
+                        onTriggered: {
+                            const last = root.song.versions.filter(x => !x.version.hidden).length < 2;
+                            Session.confirm(last ? qsTr("Remove “%1” from the library? Sets that play it keep it.").arg(root.song.track.title)
+                                : qsTr("Remove version “%1” from the library? Sets that play it keep it.").arg(root.v.name),
+                                qsTr("Remove"), ok => { if (ok) Session.run("version_delete", { id: root.v.id }); });
+                        }
+                    }
                 }
             }
         }
@@ -120,6 +147,7 @@ Frame {
                 visible: !!root.a
                 Layout.fillWidth: true
                 ToolButton {
+                    icon.color: palette.buttonText
                     icon.source: Theme.icon(root.audioOpen ? "chevron-down" : "chevron-right")
                     icon.width: 12; icon.height: 12
                     text: qsTr("Audio")
@@ -232,8 +260,8 @@ Frame {
                 RowLayout {
                     TimeField { value: root.v.cueInMs; placeholderText: qsTr("auto"); onEdited: ms => root.patch({ cueInMs: ms }) }
                     TimeField { value: root.v.cueOutMs; placeholderText: qsTr("auto"); onEdited: ms => root.patch({ cueOutMs: ms }) }
-                    ToolButton { visible: !!root.deck; icon.source: Theme.icon("to-start"); ToolTip.visible: hovered; ToolTip.text: qsTr("Set start to the deck position"); onClicked: root.patch({ cueInMs: Math.round(root.deck.positionMs) }) }
-                    ToolButton { visible: !!root.deck; icon.source: Theme.icon("to-end"); ToolTip.visible: hovered; ToolTip.text: qsTr("Set end to the deck position"); onClicked: root.patch({ cueOutMs: Math.round(root.deck.positionMs) }) }
+                    ToolButton { icon.color: palette.buttonText; visible: !!root.deck; icon.source: Theme.icon("to-start"); ToolTip.visible: hovered; ToolTip.text: qsTr("Set start to the deck position"); onClicked: root.patch({ cueInMs: Math.round(root.deck.positionMs) }) }
+                    ToolButton { icon.color: palette.buttonText; visible: !!root.deck; icon.source: Theme.icon("to-end"); ToolTip.visible: hovered; ToolTip.text: qsTr("Set end to the deck position"); onClicked: root.patch({ cueOutMs: Math.round(root.deck.positionMs) }) }
                 }
                 FormLabel { text: qsTr("Fade at") }
                 RowLayout {

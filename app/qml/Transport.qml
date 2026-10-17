@@ -213,6 +213,13 @@ Frame {
                 ToolTip.text: qsTr("Announce the next dance now")
                 onClicked: Session.run("announce_next")
             }
+            Button {
+                visible: !!root.p && !!root.p.nextChime
+                icon.source: Theme.icon("bell")
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Play the next song's chime now")
+                onClicked: Session.run("chime_next")
+            }
             Item { Layout.fillWidth: true }
             Button {
                 text: qsTr("Auto")

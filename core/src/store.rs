@@ -218,6 +218,7 @@ fn original_version(recording: &str) -> Version {
         chime: Default::default(),
         tags: vec![],
         hidden: false,
+        unlisted: false,
     }
 }
 
@@ -1800,6 +1801,7 @@ impl Store {
             if let Some(x) = &p.chime { v.chime = x.clone(); }
             if let Some(x) = &p.tags { v.tags = x.clone(); }
             if let Some(x) = p.hidden { v.hidden = x; }
+            if let Some(x) = p.unlisted { v.unlisted = x; }
             Ok(v.clone())
         })
     }
@@ -2550,6 +2552,7 @@ mod tests {
                     chime: Default::default(),
                     tags: vec![],
                     hidden: false,
+                    unlisted: false,
                 },
             )
             .unwrap();
@@ -2680,7 +2683,7 @@ mod tests {
         let (va, ra) = first(&store, &a);
         let (vb, rb) = first(&store, &b);
         let teaching = store
-            .version_create(&b, Version { id: String::new(), name: "Teaching".into(), recording: String::new(), display_name: None, styles: vec![], legacy_style: None, settings: Overrides { target_bpm: Some(100.0), ..Default::default() }, comment: String::new(), announcement: None, chime: Default::default(), tags: vec![], hidden: false })
+            .version_create(&b, Version { id: String::new(), name: "Teaching".into(), recording: String::new(), display_name: None, styles: vec![], legacy_style: None, settings: Overrides { target_bpm: Some(100.0), ..Default::default() }, comment: String::new(), announcement: None, chime: Default::default(), tags: vec![], hidden: false, unlisted: false })
             .unwrap();
         let sid = store.setlist_create("Set", "live", None, None).unwrap();
         let eid = store.entries_insert(&sid, None, &[NewEntry { version_id: Some(vb.clone()), ..Default::default() }]).unwrap()[0].clone();
@@ -2875,7 +2878,7 @@ mod tests {
 
         // A version: hidden while a set plays it, deleted after.
         let c = song(&store, "Two versions", file("c"));
-        let v2 = store.version_create(&c, Version { id: String::new(), name: "Short".into(), recording: String::new(), display_name: None, styles: vec![], legacy_style: None, settings: Overrides { cue_out_ms: Some(60_000), ..Default::default() }, comment: String::new(), announcement: None, chime: Default::default(), tags: vec![], hidden: false }).unwrap();
+        let v2 = store.version_create(&c, Version { id: String::new(), name: "Short".into(), recording: String::new(), display_name: None, styles: vec![], legacy_style: None, settings: Overrides { cue_out_ms: Some(60_000), ..Default::default() }, comment: String::new(), announcement: None, chime: Default::default(), tags: vec![], hidden: false, unlisted: false }).unwrap();
         let e2 = store.entries_insert(&sid, None, &[NewEntry { version_id: Some(v2.id.clone()), ..Default::default() }]).unwrap()[0].clone();
         store.remove_version(&v2.id, &[]).unwrap();
         assert!(store.version(&v2.id).unwrap().0.hidden);

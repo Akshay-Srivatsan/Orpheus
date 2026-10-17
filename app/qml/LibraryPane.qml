@@ -44,6 +44,8 @@ Pane {
             sort: Session.sort || null,
             descending: Session.descending,
             suggestByTempo: Session.suggestByTempo,
+            // A chime is often a version kept out of the lists.
+            showUnlisted: Session.showUnlisted || !!Session.chimePick,
         };
     }
     /// Club songs: how many of the club's suggested songs are here.
@@ -63,11 +65,15 @@ Pane {
     }
     onCrateChanged: reloadHeader()
 
+    /// A reload waits while something is dragged (see `Session.dragging`).
+    property bool missed: false
     function reload() {
+        missed = false;
+        if (Session.dragging) { missed = true; return; }
         reloadHeader();
         if (spotifyView || filesView) return;
         const q = query();
-        Backend.call("library_view", { query: q }).then(v => root.view = v, e => Session.toast(String(e)));
+        Backend.call("library_view", { query: q }).then(v => { if (Session.dragging) root.missed = true; else root.view = v; }, e => Session.toast(String(e)));
     }
 
     // Anything the view depends on: ask again (once, shortly after).
@@ -80,6 +86,9 @@ Pane {
         function onSortChanged() { later.restart(); }
         function onDescendingChanged() { later.restart(); }
         function onSuggestByTempoChanged() { later.restart(); }
+        function onShowUnlistedChanged() { later.restart(); }
+        function onDraggingChanged() { if (!Session.dragging && root.missed) later.restart(); }
+        function onChimePickChanged() { later.restart(); }
         function onLibraryChanged() { later.restart(); }
         function onSetlistChanged(id) { if (Session.view.kind === "setlist" || Session.view.kind === "history") later.restart(); }
         function onHistoryChanged() { if (Session.view.kind === "history") later.restart(); }

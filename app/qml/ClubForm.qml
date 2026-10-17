@@ -284,6 +284,7 @@ ColumnLayout {
                         }
                         Label { visible: !songRow.own; text: qsTr("song library: %1").arg(songRow.modelData.id || ""); opacity: 0.6 }
                         ToolButton {
+                            icon.color: palette.buttonText
                             icon.source: Theme.icon("x")
                             ToolTip.visible: hovered
                             ToolTip.text: songRow.own ? qsTr("Remove") : qsTr("Don't suggest it for this style")

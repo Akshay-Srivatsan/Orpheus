@@ -178,12 +178,14 @@ AppDialog {
                 }
                 Item { Layout.fillWidth: !!cond.op && (cond.op.input === "none" || cond.op.input === "number" || cond.op.input === "days" || cond.op.input === "range") }
                 ToolButton {
+                    icon.color: palette.buttonText
                     icon.source: Theme.icon("minus")
                     enabled: root.rules.conditions.length > 1
                     ToolTip.visible: hovered; ToolTip.text: qsTr("Remove rule")
                     onClicked: root.setRules(r => r.conditions.splice(cond.index, 1))
                 }
                 ToolButton {
+                    icon.color: palette.buttonText
                     icon.source: Theme.icon("plus")
                     ToolTip.visible: hovered; ToolTip.text: qsTr("Add rule")
                     onClicked: Backend.call("smart_default_condition", { field: "bpm" }).then(c => {

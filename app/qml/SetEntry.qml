@@ -59,6 +59,7 @@ ItemDelegate {
             Icon { glyph: "pause"; sourceSize.width: 12; sourceSize.height: 12; color: Theme.warn }
             Label { Layout.fillWidth: true; text: qsTr("Auto mode stops here"); color: Theme.warn; font.pointSize: Theme.smallPointSize }
             ToolButton {
+                icon.color: palette.buttonText
                 icon.source: Theme.icon("x")
                 icon.width: 10; icon.height: 10
                 implicitHeight: 18; implicitWidth: 18
@@ -261,10 +262,18 @@ ItemDelegate {
     DragHandler {
         id: dragging
         target: null
-        onActiveChanged: if (!active) dragProxy.Drag.drop()
+        onActiveChanged: {
+            if (active) { Session.dragging = true; return; }
+            dragProxy.Drag.drop();
+            // No platform drag came of it: nothing to wait for.
+            if (!dragProxy.started) Session.dragging = false;
+        }
     }
     Item {
         id: dragProxy
+        property bool started: false
+        Drag.onDragStarted: started = true
+        Drag.onDragFinished: { started = false; Session.dragging = false; }
         Drag.active: dragging.active
         Drag.dragType: Drag.Automatic
         Drag.supportedActions: Qt.MoveAction | Qt.CopyAction
