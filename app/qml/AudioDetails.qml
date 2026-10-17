@@ -96,6 +96,7 @@ ColumnLayout {
         }
         FormLabel { text: qsTr("Meter") }
         ComboBox {
+            implicitContentWidthPolicy: ComboBox.WidestText
             readonly property var values: ["auto", 3, 4]
             model: [qsTr("Detected") + (root.r.detectedMeter ? ": " + Session.meterName(root.r.detectedMeter) : root.r.analyzed ? qsTr(": unclear") : ""),
                 qsTr("Triple (3/4, 6/8)"), qsTr("Duple (2/4, 4/4)")]
@@ -193,6 +194,7 @@ ColumnLayout {
         visible: root.r.sources.some(s => s.kind === "spotify") && root.r.sources.some(s => s.kind === "file")
         Label { text: qsTr("Play from") }
         ComboBox {
+            implicitContentWidthPolicy: ComboBox.WidestText
             model: [qsTr("The file"), qsTr("Spotify")]
             currentIndex: root.r.preferredSource === "spotify" ? 1 : 0
             onActivated: index => root.patch({ preferredSource: index === 1 ? "spotify" : null })

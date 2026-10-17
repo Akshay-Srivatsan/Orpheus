@@ -100,6 +100,7 @@ SettingsPage {
             RowLayout {
                 Label { text: qsTr("Time-stretch engine") }
                 ComboBox {
+                    implicitContentWidthPolicy: ComboBox.WidestText
                     readonly property var values: ["signalsmith", "rubberband", "soundtouch", "bungee"]
                     model: [qsTr("Signalsmith Stretch (default, smooth)"), qsTr("Rubber Band R3 (high quality, more CPU)"), qsTr("SoundTouch (crisp rhythm)"), qsTr("Bungee")]
                     currentIndex: s ? Math.max(0, values.indexOf(s.stretchEngine || "signalsmith")) : 0

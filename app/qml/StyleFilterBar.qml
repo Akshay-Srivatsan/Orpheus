@@ -58,6 +58,7 @@ ColumnLayout {
             onDropped: ids => root.label("__none", ids)
         }
         ComboBox {
+            implicitContentWidthPolicy: ComboBox.WidestText
             readonly property var hidden: root.view ? Session.myStyles.filter(s => !root.view.styleCounts.some(c => c.key === s.key)) : []
             visible: hidden.length > 0
             model: [qsTr("More…")].concat(hidden.map(s => s.name))

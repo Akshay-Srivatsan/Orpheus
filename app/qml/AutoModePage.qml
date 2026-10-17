@@ -113,6 +113,7 @@ SettingsPage {
             RowLayout {
                 visible: !!page.voices
                 ComboBox {
+                    implicitContentWidthPolicy: ComboBox.WidestText
                     model: [qsTr("All languages")].concat(page.languages)
                     currentIndex: page.languages.indexOf(page.language) + 1
                     onActivated: index => page.language = index === 0 ? "" : page.languages[index - 1]
@@ -148,6 +149,7 @@ SettingsPage {
             RowLayout {
                 Label { text: qsTr("Quality") }
                 ComboBox {
+                    implicitContentWidthPolicy: ComboBox.WidestText
                     model: [qsTr("Standard (160 MB)"), qsTr("Full precision (325 MB)")]
                     currentIndex: page.a && page.a.model === "fp32" ? 1 : 0
                     onActivated: index => page.setAnnounce({ model: index === 1 ? "fp32" : "fp16" })

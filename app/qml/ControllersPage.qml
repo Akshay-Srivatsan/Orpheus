@@ -88,6 +88,7 @@ SettingsPage {
             Layout.fillWidth: true
             Label { Layout.preferredWidth: 90; text: page.hex(modelData.status) + " " + page.hex(modelData.data1); font.family: "monospace" }
             ComboBox {
+                implicitContentWidthPolicy: ComboBox.WidestText
                 model: [qsTr("Button"), qsTr("Button (press & release)"), qsTr("Fader/knob"), qsTr("Encoder/jog")]
                 currentIndex: Math.max(0, page.kinds.indexOf(modelData.kind))
                 onActivated: i => page.setControl(index, Object.assign({}, modelData, { kind: page.kinds[i] }))

@@ -57,6 +57,7 @@ Pane {
             Layout.margins: Theme.spacing
             Label { text: qsTr("Show") }
             ComboBox {
+                implicitContentWidthPolicy: ComboBox.WidestText
                 readonly property var values: ["all", "in", "out"]
                 model: [qsTr("All files"), qsTr("In the library"), qsTr("Not in the library (%1)").arg(root.outCount)]
                 currentIndex: values.indexOf(root.show)

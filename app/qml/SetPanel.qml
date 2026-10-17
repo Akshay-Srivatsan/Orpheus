@@ -201,6 +201,7 @@ Pane {
             Layout.rightMargin: Theme.spacing
             Layout.bottomMargin: 6
             ComboBox {
+                implicitContentWidthPolicy: ComboBox.WidestText
                 readonly property var modes: ["live", "preset"]
                 model: [qsTr("Live"), qsTr("Preset")]
                 currentIndex: root.set && root.set.mode === "preset" ? 1 : 0
@@ -211,6 +212,7 @@ Pane {
             ComboBox {
                 id: clubBox
                 Layout.fillWidth: true
+                Layout.preferredWidth: 100
                 readonly property var choices: [{ label: qsTr("No club"), ref: null }].concat(Session.clubs.map(c => ({ label: c.name, ref: { id: c.id, version: c.versions[0].id } })))
                 model: choices.map(c => c.label).concat(root.v && root.v.club && root.v.club.newerVersion ? [root.v.club.label] : [])
                 currentIndex: !root.v || !root.v.club ? 0 : root.v.club.newerVersion ? model.length - 1 : Math.max(0, choices.findIndex(c => c.ref && c.ref.id === root.v.club.id))
@@ -398,7 +400,7 @@ Pane {
                 ToolTip.text: qsTr("Add a pause without a song: a break, an extra pause, an announcement or a stop for auto mode")
                 onClicked: root.addPause()
             }
-            Item { Layout.fillWidth: true }
+
             Button {
                 visible: !!root.v && !!root.v.check
                 checkable: true
@@ -411,6 +413,9 @@ Pane {
                 ToolTip.text: qsTr("How the set follows the club's guidelines")
             }
             Label {
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignRight
+                elide: Text.ElideRight
                 opacity: Theme.dim
                 text: !root.v ? "" : qsTr("%1 songs · %2").arg(root.v.rows.filter(r => r.number).length).arg(Session.fmtTime(root.v.totalMs))
                     + (root.v.remainingMs && root.p && root.p.startedAt ? " · " + qsTr("%1 left").arg(Session.fmtTime(root.v.remainingMs)) : "")

@@ -28,6 +28,7 @@ SettingsPage {
 
         FormLabel { text: qsTr("Layout") }
         ComboBox {
+            implicitContentWidthPolicy: ComboBox.WidestText
             readonly property var values: ["auto", "live", "preset"]
             model: [qsTr("Follow the set's mode"), qsTr("Now playing"), qsTr("Full setlist")]
             currentIndex: page.p ? Math.max(0, values.indexOf(page.p.displayMode)) : 0
@@ -66,6 +67,7 @@ SettingsPage {
         }
         FormLabel { text: qsTr("Theme") }
         ComboBox {
+            implicitContentWidthPolicy: ComboBox.WidestText
             model: [qsTr("Dark"), qsTr("Light")]
             currentIndex: page.p && page.p.theme === "light" ? 1 : 0
             onActivated: index => page.setProj({ theme: index === 1 ? "light" : "dark" })

@@ -38,6 +38,7 @@ SettingsPage {
                 onActivated: index => page.setAudio({ masterDevice: index === 0 ? null : page.devices[index - 1].id })
             }
             ComboBox {
+                implicitContentWidthPolicy: ComboBox.WidestText
                 readonly property var choices: page.pairs(page.masterDevice ? page.masterDevice.channels : 2)
                 model: choices.map(p => qsTr("Channels %1–%2").arg(p[0] + 1).arg(p[1] + 1))
                 currentIndex: page.s ? Math.max(0, choices.findIndex(p => p[0] === page.s.audio.masterChannels[0])) : 0
@@ -59,6 +60,7 @@ SettingsPage {
                 onActivated: index => page.setAudio({ cueDevice: index === 0 ? null : page.devices[index - 1].id })
             }
             ComboBox {
+                implicitContentWidthPolicy: ComboBox.WidestText
                 visible: !!page.s && !!page.s.audio.cueDevice
                 readonly property var choices: page.pairs(page.cueDevice ? page.cueDevice.channels : 2)
                 model: choices.map(p => qsTr("Channels %1–%2").arg(p[0] + 1).arg(p[1] + 1))

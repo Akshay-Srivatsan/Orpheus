@@ -100,6 +100,7 @@ AppDialog {
         RowLayout {
             Label { text: qsTr("Songs matching") }
             ComboBox {
+                implicitContentWidthPolicy: ComboBox.WidestText
                 model: [qsTr("all"), qsTr("any")]
                 currentIndex: root.rules.match === "any" ? 1 : 0
                 onActivated: index => root.setRules(r => r.match = index === 1 ? "any" : "all")

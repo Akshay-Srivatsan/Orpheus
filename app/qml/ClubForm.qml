@@ -86,6 +86,7 @@ ColumnLayout {
         }
         FormLabel { text: qsTr("Auto mode") }
         ComboBox {
+            implicitContentWidthPolicy: ComboBox.WidestText
             model: [qsTr("Not specified"), qsTr("Manual (Play Next)"), qsTr("Automatic")]
             currentIndex: !root.c || root.c.set.auto_advance === null || root.c.set.auto_advance === undefined ? 0 : root.c.set.auto_advance ? 2 : 1
             onActivated: index => root.edit(d => d.set.auto_advance = index === 0 ? null : index === 2)
