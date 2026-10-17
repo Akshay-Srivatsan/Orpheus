@@ -236,6 +236,21 @@ QtObject {
 
     /// Adds songs to the open set: "next", "end" or a position. While a style
     /// is filtered on, they're danced as it; with a slot selected, one song fills it.
+    /// What can be dropped as songs: library versions, or Spotify tracks.
+    readonly property var songKeys: ["application/x-orpheus-versions", "application/x-orpheus-spotify"]
+    /// The versions a drop carries (a promise): library songs as they are,
+    /// Spotify tracks made into versions (`library`: they join the library too).
+    /// The drop's data is read right away (it's gone once the handler returns).
+    function droppedVersions(drop, library) {
+        if (drop.formats.includes("application/x-orpheus-versions"))
+            return Promise.resolve(JSON.parse(drop.getDataAsString("application/x-orpheus-versions") || "[]"));
+        if (drop.formats.includes("application/x-orpheus-spotify")) {
+            const tracks = JSON.parse(drop.getDataAsString("application/x-orpheus-spotify") || "[]");
+            return run("spotify_versions", { tracks: tracks, inLibrary: !!library }).then(v => v || []);
+        }
+        return Promise.resolve([]);
+    }
+
     function addToSet(versionIds, where) {
         const position = typeof where === "number" ? { at: where } : where;
         const style = styleFilter.length === 1 && styleFilter[0] !== "__none" ? styleFilter[0] : null;

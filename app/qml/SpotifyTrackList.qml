@@ -72,6 +72,14 @@ ColumnLayout {
             }
 
             TapHandler { acceptedButtons: Qt.RightButton; onTapped: trackMenu.popup() }
+            // Drag it to the set, a deck or a style.
+            DragHandler { id: dragging; target: null }
+            Item {
+                Drag.active: dragging.active
+                Drag.dragType: Drag.Automatic
+                Drag.supportedActions: Qt.CopyAction
+                Drag.mimeData: ({ "application/x-orpheus-spotify": JSON.stringify([item.modelData]) })
+            }
             Menu {
                 id: trackMenu
                 popupType: Popup.Native

@@ -221,14 +221,14 @@ Pane {
             Layout.fillHeight: true
             DropArea {
                 anchors.fill: parent
-                keys: ["application/x-orpheus-versions", "application/x-orpheus-entries"]
+                keys: Session.songKeys.concat(["application/x-orpheus-entries"])
                 onEntered: entries.dropIndex = root.v ? root.v.rows.length : 0
                 onExited: entries.dropIndex = -1
                 onDropped: d => {
                     const at = root.v.rows.length;
                     entries.dropIndex = -1;
                     if (d.formats.includes("application/x-orpheus-entries")) root.moveEntries(JSON.parse(d.getDataAsString("application/x-orpheus-entries")), at);
-                    else root.insertSongs(JSON.parse(d.getDataAsString("application/x-orpheus-versions") || "[]"), at);
+                    else Session.droppedVersions(d, false).then(ids => { if (ids.length) root.insertSongs(ids, at); });
                 }
             }
             ListView {

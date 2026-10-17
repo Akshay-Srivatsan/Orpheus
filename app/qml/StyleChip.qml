@@ -40,8 +40,9 @@ Button {
     DropArea {
         id: drop
         anchors.fill: parent
-        keys: ["application/x-orpheus-versions"]
-        onDropped: d => root.dropped(JSON.parse(d.getDataAsString("application/x-orpheus-versions") || "[]"))
+        keys: Session.songKeys
+        // Spotify songs given a style join the library.
+        onDropped: d => Session.droppedVersions(d, true).then(ids => root.dropped(ids))
     }
 
     ToolTip.visible: hovered && !!tip

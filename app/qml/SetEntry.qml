@@ -265,7 +265,7 @@ Item {
     DropArea {
         id: slotDrop
         anchors.fill: parent
-        keys: ["application/x-orpheus-versions", "application/x-orpheus-entries"]
+        keys: Session.songKeys.concat(["application/x-orpheus-entries"])
         /// Set entries (not songs) are being dragged over it.
         property bool moving: false
         onEntered: d => moving = d.formats.includes("application/x-orpheus-entries")
@@ -278,8 +278,8 @@ Item {
                 root.entriesDropped(JSON.parse(d.getDataAsString("application/x-orpheus-entries")), at);
                 return;
             }
-            const ids = JSON.parse(d.getDataAsString("application/x-orpheus-versions") || "[]");
-            if (ids.length) root.songsDropped(ids, at, onSlot(d.y));
+            const slot = onSlot(d.y);
+            Session.droppedVersions(d, false).then(ids => { if (ids.length) root.songsDropped(ids, at, slot); });
         }
     }
 

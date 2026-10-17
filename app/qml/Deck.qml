@@ -46,13 +46,12 @@ Pane {
 
     DropArea {
         anchors.fill: parent
-        keys: ["application/x-orpheus-versions"]
+        keys: Session.songKeys
         enabled: !(root.d && root.d.audible)
         onDropped: drop => {
-            const ids = JSON.parse(drop.getDataAsString("application/x-orpheus-versions") || "[]");
             // A set entry dragged here plays as that entry.
             const entries = drop.formats.includes("application/x-orpheus-entries") ? JSON.parse(drop.getDataAsString("application/x-orpheus-entries")) : [];
-            if (ids.length) Session.loadDeck(root.deck, ids[0], entries.length === 1 ? entries[0] : null);
+            Session.droppedVersions(drop, false).then(ids => { if (ids.length) Session.loadDeck(root.deck, ids[0], entries.length === 1 ? entries[0] : null); });
         }
     }
 

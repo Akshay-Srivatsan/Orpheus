@@ -148,6 +148,17 @@ ToolBar {
             status: Session.spotify && Session.spotify.connected ? "ok" : Session.spotify && Session.spotify.connecting ? "warn" : ""
             tip: Session.spotify && Session.spotify.connected ? qsTr("Spotify: %1").arg(Session.spotify.username) : qsTr("Spotify not connected")
             onClicked: Session.settingsPage = "spotify"
+            onContextMenu: spotifyMenu.popup()
+            Menu {
+                id: spotifyMenu
+                popupType: Popup.Native
+                MenuItem {
+                    text: qsTr("Refresh the Session")
+                    enabled: !!Session.spotify && Session.spotify.hasCachedCredentials
+                    onTriggered: Session.run("spotify_refresh").then(r => { if (r) Session.toast(qsTr("Spotify session refreshed."), "info"); })
+                }
+                MenuItem { text: qsTr("Spotify Settings…"); onTriggered: Session.settingsPage = "spotify" }
+            }
         }
         ToolButton {
             icon.source: Theme.icon("gear")

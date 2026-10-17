@@ -8,6 +8,7 @@ ToolButton {
     id: root
     property string status: ""
     property string tip: ""
+    signal contextMenu()
 
     contentItem: RowLayout {
         spacing: 4
@@ -17,6 +18,7 @@ ToolButton {
         }
         Label { text: root.text }
     }
+    TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.contextMenu() }
     ToolTip.visible: hovered && !!tip
     ToolTip.text: tip
 }
