@@ -65,7 +65,7 @@ GroupBox {
 
             FormLabel { visible: !root.pause; text: root.e.versionId ? qsTr("Show as") : qsTr("Slot") }
             // Without a club, a slot (or a version without styles) takes any of your styles.
-            ChipEditor {
+            StylePicker {
                 visible: !root.pause && root.anyStyle
                 Layout.fillWidth: true
                 value: root.e.styles || []

@@ -229,7 +229,9 @@ Pane {
         }
 
         // The entries. Songs dropped below them (or on an empty set) go at the end.
-        Item {
+        ViewFrame {
+            Layout.leftMargin: Theme.spacing
+            Layout.rightMargin: Theme.spacing
             Layout.fillWidth: true
             Layout.fillHeight: true
             DropArea {

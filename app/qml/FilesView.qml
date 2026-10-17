@@ -1,7 +1,9 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
+import Qt.labs.qmlmodels
 import Orpheus
 
 // Library → Files: the audio files in your library folders. A file removed
@@ -99,107 +101,116 @@ Pane {
             }
         }
 
-        ListView {
-            id: fileList
+        // The files: a table (name, folder, its songs, what you can do).
+        ViewFrame {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            clip: true
-            model: root.shown
-            ScrollBar.vertical: ScrollBar {}
-            readonly property real wFile: width * 0.32
-            readonly property real wFolder: width * 0.25
-            headerPositioning: ListView.OverlayHeader
-            header: Rectangle {
-                z: 2
-                width: ListView.view.width
-                implicitHeight: Theme.rowHeight
-                color: Theme.system.button
-                Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.system.mid }
-                Row {
-                    anchors.fill: parent
-                    HeaderCell { width: fileList.wFile; text: qsTr("File"); hoverEnabled: false }
-                    HeaderCell { width: fileList.wFolder; text: qsTr("Folder"); hoverEnabled: false }
-                    HeaderCell { width: parent.width - fileList.wFile - fileList.wFolder; text: qsTr("In the Library As"); hoverEnabled: false }
+            Layout.leftMargin: Theme.spacing
+            Layout.rightMargin: Theme.spacing
+            Layout.bottomMargin: Theme.spacing
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 0
+                HorizontalHeaderView {
+                    Layout.fillWidth: true
+                    syncView: fileTable
+                    clip: true
+                    resizableColumns: true
+                    model: [qsTr("File"), qsTr("Folder"), qsTr("In the Library As"), ""]
+                    // Labels over their columns' text (as in the library).
+                    delegate: HorizontalHeaderViewDelegate {
+                        id: section
+                        contentItem: Label { text: section.model.modelData; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter }
+                    }
                 }
-            }
-            delegate: Rectangle {
-                id: fileRow
-                required property var modelData
-                required property int index
-                width: ListView.view.width
-                height: Theme.rowHeight + 4
-                color: hover.hovered ? Qt.alpha(Theme.system.highlight, 0.12) : index % 2 ? Theme.system.alternateBase : Theme.system.base
-                HoverHandler { id: hover }
-                Row {
-                    anchors.fill: parent
-                    opacity: fileRow.modelData.out ? Theme.dim : 1
-                    Label {
-                        width: fileList.wFile
-                        height: parent.height
-                        leftPadding: 6; rightPadding: 6
-                        verticalAlignment: Text.AlignVCenter
-                        text: fileRow.modelData.name
-                        elide: Text.ElideMiddle
-                        ToolTip.visible: nameHover.hovered
-                        ToolTip.text: fileRow.modelData.path
-                        ToolTip.delay: 600
-                        HoverHandler { id: nameHover }
+                TreeView {
+                    id: fileTable
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+                    alternatingRows: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    selectionBehavior: TableView.SelectionDisabled
+                    ScrollBar.vertical: ScrollBar {}
+                    readonly property var shares: [0.3, 0.22, 0.32, 0.16]
+                    columnWidthProvider: c => Math.max(80, Math.floor(width * shares[c]))
+                    onWidthChanged: forceLayout()
+                    // Each row is its index into `shown`, once per column (rows have mixed types;
+                    // the model wants one type, and one property, per column).
+                    model: TreeModel {
+                        TableModelColumn { display: "k0" }
+                        TableModelColumn { display: "k1" }
+                        TableModelColumn { display: "k2" }
+                        TableModelColumn { display: "k3" }
+                        rows: root.shown.map((f, i) => ({ k0: i, k1: i, k2: i, k3: i }))
                     }
-                    Label {
-                        width: fileList.wFolder
-                        height: parent.height
-                        leftPadding: 6; rightPadding: 6
-                        verticalAlignment: Text.AlignVCenter
-                        elide: Text.ElideMiddle
-                        opacity: Theme.dim
-                        text: fileRow.modelData.folder === null || fileRow.modelData.folder === undefined ? qsTr("(added from elsewhere)") : fileRow.modelData.folder
-                        ToolTip.visible: folderHover.hovered && !!fileRow.modelData.root
-                        ToolTip.text: qsTr("In the library folder %1").arg(fileRow.modelData.root || "")
-                        ToolTip.delay: 600
-                        HoverHandler { id: folderHover }
-                    }
-                    RowLayout {
-                        width: parent.width - fileList.wFile - fileList.wFolder
-                        height: parent.height
+                    delegate: TreeViewDelegate {
+                        id: cell
+                        required property int column
+                        readonly property var f: model.display !== undefined ? root.shown[model.display] : null
+                        contentItem: Loader {
+                            sourceComponent: cell.column === 3 ? actions : cell.column === 2 ? songs : plain
+                        }
+                        Component {
+                            id: plain
+                            Label {
+                                verticalAlignment: Text.AlignVCenter
+                                elide: Text.ElideMiddle
+                                opacity: !cell.f || cell.f.out || cell.column === 1 ? Theme.dim : 1
+                                text: !cell.f ? "" : cell.column === 0 ? cell.f.name
+                                    : cell.f.folder === null || cell.f.folder === undefined ? qsTr("(added from elsewhere)") : cell.f.folder
+                                ToolTip.visible: tip.hovered
+                                ToolTip.delay: 600
+                                ToolTip.text: !cell.f ? "" : cell.column === 0 ? cell.f.path : cell.f.root ? qsTr("In the library folder %1").arg(cell.f.root) : ""
+                                HoverHandler { id: tip }
+                            }
+                        }
                         // Its songs are links (they open in Info); a removed file songs
                         // still play is a warning.
-                        Label {
-                            readonly property var f: fileRow.modelData
-                            readonly property string songs: f.songTitles.map(s => "<a href=\"" + s.id + "\">" + s.label.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</a>").join(", ")
-                            Layout.fillWidth: true
-                            leftPadding: 6
-                            elide: Text.ElideRight
-                            textFormat: Text.StyledText
-                            linkColor: f.removed ? Theme.warn : palette.link
-                            color: f.removed && f.songTitles.length ? Theme.warn : Theme.system.text
-                            opacity: (f.removed && !f.songTitles.length) || !f.recording ? Theme.dim : 1
-                            text: f.removed
-                                ? qsTr("Removed") + (f.songTitles.length ? " · " + qsTr("still in %1").arg(songs) : "")
-                                : !f.recording ? qsTr("Not added") : songs
-                            onLinkActivated: id => { Session.inspectTrack = id; Session.rightTab = "info"; }
-                            HoverHandler { cursorShape: parent.hoveredLink ? Qt.PointingHandCursor : Qt.ArrowCursor }
+                        Component {
+                            id: songs
+                            Label {
+                                readonly property var f: cell.f
+                                readonly property string links: f ? f.songTitles.map(s => "<a href=\"" + s.id + "\">" + s.label.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</a>").join(", ") : ""
+                                verticalAlignment: Text.AlignVCenter
+                                elide: Text.ElideRight
+                                textFormat: Text.StyledText
+                                linkColor: f && f.removed ? Theme.warn : palette.link
+                                color: f && f.removed && f.songTitles.length ? Theme.warn : Theme.system.text
+                                opacity: !f || (f.removed && !f.songTitles.length) || !f.recording ? Theme.dim : 1
+                                text: !f ? "" : f.removed
+                                    ? qsTr("Removed") + (f.songTitles.length ? " · " + qsTr("still in %1").arg(links) : "")
+                                    : !f.recording ? qsTr("Not added") : links
+                                onLinkActivated: id => { Session.inspectTrack = id; Session.rightTab = "info"; }
+                                HoverHandler { cursorShape: parent.hoveredLink ? Qt.PointingHandCursor : Qt.ArrowCursor }
+                            }
                         }
-                        Button {
-                            visible: fileRow.modelData.out
-                            flat: true
-                            icon.source: Theme.icon("plus")
-                            text: qsTr("Add to Library")
-                            onClicked: root.add([fileRow.modelData.path])
-                        }
-                        Button {
-                            visible: !fileRow.modelData.out && !!fileRow.modelData.recording
-                            flat: true
-                            text: qsTr("Remove…")
-                            onClicked: root.remove(fileRow.modelData)
+                        Component {
+                            id: actions
+                            RowLayout {
+                                Button {
+                                    visible: !!cell.f && cell.f.out
+                                    flat: true
+                                    icon.source: Theme.icon("plus")
+                                    text: qsTr("Add to Library")
+                                    onClicked: root.add([cell.f.path])
+                                }
+                                Button {
+                                    visible: !!cell.f && !cell.f.out && !!cell.f.recording
+                                    flat: true
+                                    text: qsTr("Remove…")
+                                    onClicked: root.remove(cell.f)
+                                }
+                            }
                         }
                     }
+                    Label {
+                        anchors.centerIn: parent
+                        visible: !!root.view && !root.shown.length
+                        opacity: Theme.dim
+                        text: root.show === "out" ? qsTr("Every file in your library folders is in the library.") : qsTr("No audio files yet: add a music folder in Settings → Library, or Add Files…")
+                    }
                 }
-            }
-            Label {
-                anchors.centerIn: parent
-                visible: !!root.view && !root.shown.length
-                opacity: 0.6
-                text: root.show === "out" ? qsTr("Every file in your library folders is in the library.") : qsTr("No audio files yet: add a music folder in Settings → Library, or Add Files…")
             }
         }
     }

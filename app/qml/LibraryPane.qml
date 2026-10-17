@@ -182,6 +182,9 @@ Pane {
             visible: !root.filesView
             Layout.fillWidth: true
             Layout.fillHeight: true
+            Layout.leftMargin: Theme.spacing
+            Layout.rightMargin: Theme.spacing
+            Layout.bottomMargin: Theme.spacing
             view: root.view
             onCombine: (songs, recordings) => root.combine(songs, recordings)
         }

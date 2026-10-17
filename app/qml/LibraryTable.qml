@@ -136,13 +136,19 @@ FocusScope {
     ItemSelectionModel {
         id: selection
         model: songs
-        onSelectionChanged: {
-            Session.selected = root.selectedRows().map(r => r.versionId);
-            const current = currentIndex.valid ? root.flat[songs.data(currentIndex, Qt.DisplayRole)] : null;
-            if (current) {
-                Session.inspectTrack = current.trackId;
-                Session.inspectEntry = "";
-            }
+        onSelectionChanged: root.syncSelection()
+        onCurrentChanged: root.syncSelection()
+    }
+    /// The selected songs (else the current row) are Session's; Info shows the
+    /// current row (the one clicked), else the last selected.
+    function syncSelection() {
+        const rows = selectedRows();
+        const current = selection.currentIndex.valid ? flat[songs.data(selection.currentIndex, Qt.DisplayRole)] : null;
+        Session.selected = (rows.length ? rows : current ? [current] : []).map(r => r.versionId);
+        const shown = current || rows[rows.length - 1];
+        if (shown) {
+            Session.inspectTrack = shown.trackId;
+            Session.inspectEntry = "";
         }
     }
     /// After a reload, the songs that were selected stay selected.
@@ -222,233 +228,237 @@ FocusScope {
 
     // ------------------------------------------------------------ the table
 
-    ColumnLayout {
+    // The header and rows, in a view frame.
+    ViewFrame {
         anchors.fill: parent
-        spacing: 0
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 0
 
-        HorizontalHeaderView {
-            id: header
-            Layout.fillWidth: true
-            syncView: tree
-            clip: true
-            resizableColumns: true
-            // A list of the columns' keys (each delegate gets one as `model.modelData`).
-            model: root.keys
-            delegate: HorizontalHeaderViewDelegate {
-                id: section
-                readonly property string column: model.modelData
-                readonly property string key: column === "plays" ? root.playsKey : column
-                readonly property bool sorted: !!root.view && root.view.sort === key
-                contentItem: RowLayout {
-                    spacing: 2
-                    Label {
-                        Layout.fillWidth: true
-                        text: root.names[section.column] || ""
-                        elide: Text.ElideRight
-                        horizontalAlignment: section.key === "bpm" || section.key === "time" || section.key === "plays" ? Text.AlignRight : Text.AlignLeft
-                    }
-                    Icon {
-                        visible: section.sorted
-                        glyph: Session.descending ? "sort-down" : "sort-up"
-                        sourceSize.width: 12; sourceSize.height: 12
-                    }
-                }
-                TapHandler { onTapped: root.sortBy(section.key) }
-                TapHandler { acceptedButtons: Qt.RightButton; onTapped: columnMenu.popup() }
-            }
-        }
-
-        TreeView {
-            id: tree
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            clip: true
-            focus: true
-            model: songs
-            selectionModel: selection
-            selectionBehavior: TableView.SelectRows
-            selectionMode: TableView.ExtendedSelection
-            alternatingRows: true
-            boundsBehavior: Flickable.StopAtBounds
-            columnWidthProvider: c => root.columnWidth(c)
-            onWidthChanged: forceLayout()
-            ScrollBar.vertical: ScrollBar {}
-            // Widths dragged in the header are saved once the drag pauses.
-            onLayoutChanged: saveWidths.restart()
-            Timer { id: saveWidths; interval: 800; onTriggered: { if (tree.columnWidthsChanged()) root.saveColumns(); } }
-            function columnWidthsChanged() {
-                for (let c = 0; c < root.keys.length; c++) {
-                    const w = explicitColumnWidth(c);
-                    const k = root.keys[c] === "plays" ? root.playsKey : root.keys[c];
-                    if (w > 0 && root.saved.widths[k] !== w) return true;
-                }
-                return false;
-            }
-            onExpanded: (row, depth) => { const r = root.rowAt(row); if (r && !Session.unfolded.includes(r.trackId)) Session.unfolded = Session.unfolded.concat([r.trackId]); }
-            onCollapsed: (row, recursively) => { const r = root.rowAt(row); if (r) Session.unfolded = Session.unfolded.filter(t => t !== r.trackId); }
-
-            delegate: TreeViewDelegate {
-                id: cell
-                required property int column
-                readonly property string key: root.keys[column]
-                readonly property var r: model.display !== undefined ? root.flat[model.display] : null
-                readonly property bool onDeck: !!r && Session.decks.some(d => d && d.versionId === r.versionId)
-                readonly property bool audible: !!r && Session.decks.some(d => d && d.versionId === r.versionId && d.audible)
-                /// Dimmed: played in the open set, suggested by tempo, or missing.
-                readonly property bool dim: !!r && (r.playedInSet || r.suggested || r.availability === "missing")
-                readonly property color fg: highlighted ? palette.highlightedText : palette.text
-
-                contentItem: Loader {
-                    sourceComponent: cell.key === "title" ? titleCell
-                        : cell.key === "style" ? styleCell
-                        : cell.key === "actions" ? actionsCell
-                        : textCell
-                }
-                Component {
-                    id: textCell
-                    Label {
-                        verticalAlignment: Text.AlignVCenter
-                        opacity: cell.dim || ["version", "meter", "plays"].includes(cell.key) ? Theme.dim : 1
-                        elide: Text.ElideRight
-                        font.features: { "tnum": 1 }
-                        horizontalAlignment: ["bpm", "time", "plays"].includes(cell.key) && !(cell.r && cell.r.playedAt) ? Text.AlignRight : Text.AlignLeft
-                        color: cell.highlighted || !cell.r ? cell.fg
-                            : cell.key === "bpm" ? (cell.r.tempoFit === "sweet" ? Theme.ok : cell.r.tempoFit === "outside" ? Theme.warn : cell.fg)
-                            : cell.key === "time" && cell.r.long ? Theme.warn
-                            : cell.fg
-                        text: {
-                            const r = cell.r;
-                            if (!r) return "";
-                            switch (cell.key) {
-                            case "artist": return r.artist;
-                            case "version": return r.versionLabel;
-                            case "bpm": return (r.analyzing ? "… " : "") + Session.fmtBpm(r.bpm) + (Math.abs(r.rate - 1) > 0.001 ? "  " + Session.fmtPct(r.rate) : "");
-                            case "time": return Session.fmtTime(r.durationMs);
-                            case "meter": return Session.meterName(r.meter);
-                            case "plays": return r.playedAt ? new Date(r.playedAt).toLocaleString(Qt.locale(), "MMM d, h:mm ap") : r.plays || "";
-                            }
-                            return "";
-                        }
-                        ToolTip.visible: tipHover.hovered && !!ToolTip.text
-                        ToolTip.delay: 600
-                        ToolTip.text: !cell.r ? "" : cell.key === "version" ? cell.r.comment || ""
-                            : cell.key === "meter" && cell.r.meter ? (cell.r.meterByYou ? qsTr("Set by you") : qsTr("Detected")) : ""
-                        HoverHandler { id: tipHover }
-                    }
-                }
-                // The title, after where it plays from: nothing for a file, ○ Spotify
-                // only, ● a file and Spotify, a warning when missing. On a deck, in the
-                // deck's colour (red while the room hears it).
-                Component {
-                    id: titleCell
-                    RowLayout {
-                        spacing: 4
-                        Label {
-                            visible: root.positioned
-                            Layout.preferredWidth: 24
-                            horizontalAlignment: Text.AlignRight
-                            text: cell.r && cell.r.position ? cell.r.position : ""
-                            color: cell.fg
-                            opacity: Theme.dim
-                            font.features: { "tnum": 1 }
-                        }
-                        Item {
-                            implicitWidth: 12
-                            implicitHeight: 12
-                            Rectangle {
-                                anchors.centerIn: parent
-                                width: 7; height: 7; radius: 4
-                                visible: !!cell.r && (cell.r.availability === "spotifyOnly" || cell.r.availability === "fileAndSpotify")
-                                color: cell.r && cell.r.availability === "fileAndSpotify" ? Theme.spotify : "transparent"
-                                border.color: Theme.spotify
-                                border.width: 1.5
-                            }
-                            Icon {
-                                anchors.centerIn: parent
-                                visible: !!cell.r && cell.r.availability === "missing"
-                                glyph: "warning"
-                                sourceSize.width: 12; sourceSize.height: 12
-                                color: Theme.warn
-                            }
-                        }
+            HorizontalHeaderView {
+                id: header
+                Layout.fillWidth: true
+                syncView: tree
+                clip: true
+                resizableColumns: true
+                // A list of the columns' keys (each delegate gets one as `model.modelData`).
+                model: root.keys
+                delegate: HorizontalHeaderViewDelegate {
+                    id: section
+                    readonly property string column: model.modelData
+                    readonly property string key: column === "plays" ? root.playsKey : column
+                    readonly property bool sorted: !!root.view && root.view.sort === key
+                    contentItem: RowLayout {
+                        spacing: 2
                         Label {
                             Layout.fillWidth: true
-                            text: cell.r ? cell.r.title : ""
+                            text: root.names[section.column] || ""
                             elide: Text.ElideRight
-                            font.italic: !!cell.r && cell.r.suggested
-                            opacity: cell.dim || (cell.r && cell.r.child) ? Theme.dim : 1
-                            color: cell.onDeck && !cell.highlighted ? (cell.audible ? Theme.onAir : Theme.deckColors[0]) : cell.fg
+                            horizontalAlignment: section.key === "bpm" || section.key === "time" || section.key === "plays" ? Text.AlignRight : Text.AlignLeft
+                        }
+                        Icon {
+                            visible: section.sorted
+                            glyph: Session.descending ? "sort-down" : "sort-up"
+                            sourceSize.width: 12; sourceSize.height: 12
                         }
                     }
+                    TapHandler { onTapped: root.sortBy(section.key) }
+                    TapHandler { acceptedButtons: Qt.RightButton; onTapped: columnMenu.popup() }
                 }
-                Component {
-                    id: styleCell
-                    Label {
-                        verticalAlignment: Text.AlignVCenter
-                        elide: Text.ElideRight
-                        textFormat: Text.StyledText
-                        opacity: cell.dim ? Theme.dim : 1
-                        color: cell.fg
-                        font.italic: !!cell.r && cell.r.suggested
-                        text: !cell.r ? "" : cell.r.suggested ? qsTr("tempo fits")
-                            : cell.r.styles.map(s => cell.highlighted ? s.short || s.name : "<font color='" + s.color + "'>" + (s.short || s.name) + "</font>").join(", ")
-                        ToolTip.visible: styleHover.hovered && !!cell.r && cell.r.styles.length > 0
-                        ToolTip.text: cell.r ? cell.r.styles.map(s => [s.name].concat(s.problems).join(": ")).join("\n") : ""
-                        ToolTip.delay: 600
-                        HoverHandler { id: styleHover }
-                    }
-                }
-                Component {
-                    id: actionsCell
-                    RowLayout {
-                        spacing: 0
-                        ToolButton {
-                            icon.source: Theme.icon("headphones")
-                            icon.width: Theme.smallIconSize; icon.height: Theme.smallIconSize
-                            icon.color: cell.fg
-                            implicitHeight: 22
-                            ToolTip.visible: hovered; ToolTip.text: qsTr("Preview on the free deck")
-                            onClicked: Session.preview(cell.r.versionId, null)
-                        }
-                        ToolButton {
-                            icon.source: Theme.icon(Session.fillingSlot ? "check" : "plus")
-                            icon.width: Theme.smallIconSize; icon.height: Theme.smallIconSize
-                            icon.color: cell.fg
-                            implicitHeight: 22
-                            ToolTip.visible: hovered
-                            ToolTip.text: Session.fillingSlot ? qsTr("Use this song for the slot") : qsTr("Play next")
-                            onClicked: Session.fillingSlot ? Session.fillSlot(cell.r.versionId) : Session.addToSet([cell.r.versionId], "next")
-                        }
-                    }
-                }
+            }
 
-                TapHandler {
-                    acceptedButtons: Qt.LeftButton
-                    onDoubleTapped: root.choose(cell.r)
-                }
-                TapHandler {
-                    acceptedButtons: Qt.RightButton
-                    onTapped: {
-                        const index = cell.treeView.index(cell.row, 0);
-                        if (!selection.isRowSelected(cell.row, index.parent))
-                            selection.setCurrentIndex(index, ItemSelectionModel.ClearAndSelect | ItemSelectionModel.Rows);
-                        menu.rows = root.selectedRows();
-                        menu.historyRow = cell.r;
-                        menu.popup();
+            TreeView {
+                id: tree
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                focus: true
+                model: songs
+                selectionModel: selection
+                selectionBehavior: TableView.SelectRows
+                selectionMode: TableView.ExtendedSelection
+                alternatingRows: true
+                boundsBehavior: Flickable.StopAtBounds
+                columnWidthProvider: c => root.columnWidth(c)
+                onWidthChanged: forceLayout()
+                ScrollBar.vertical: ScrollBar {}
+                // Widths dragged in the header are saved once the drag pauses.
+                onLayoutChanged: saveWidths.restart()
+                Timer { id: saveWidths; interval: 800; onTriggered: { if (tree.columnWidthsChanged()) root.saveColumns(); } }
+                function columnWidthsChanged() {
+                    for (let c = 0; c < root.keys.length; c++) {
+                        const w = explicitColumnWidth(c);
+                        const k = root.keys[c] === "plays" ? root.playsKey : root.keys[c];
+                        if (w > 0 && root.saved.widths[k] !== w) return true;
                     }
+                    return false;
                 }
-                // Drag the selected songs (or this one) to the set, a deck, a crate or a style.
-                DragHandler {
-                    id: dragging
-                    target: null
-                    onActiveChanged: if (!active) dragProxy.Drag.drop()
-                }
-                Item {
-                    id: dragProxy
-                    Drag.active: dragging.active
-                    Drag.dragType: Drag.Automatic
-                    Drag.supportedActions: Qt.CopyAction
-                    Drag.mimeData: ({ "application/x-orpheus-versions": JSON.stringify(Session.selected.length && cell.r && Session.selected.includes(cell.r.versionId) ? Session.selected : cell.r ? [cell.r.versionId] : []) })
+                onExpanded: (row, depth) => { const r = root.rowAt(row); if (r && !Session.unfolded.includes(r.trackId)) Session.unfolded = Session.unfolded.concat([r.trackId]); }
+                onCollapsed: (row, recursively) => { const r = root.rowAt(row); if (r) Session.unfolded = Session.unfolded.filter(t => t !== r.trackId); }
+
+                delegate: TreeViewDelegate {
+                    id: cell
+                    required property int column
+                    readonly property string key: root.keys[column]
+                    readonly property var r: model.display !== undefined ? root.flat[model.display] : null
+                    readonly property bool onDeck: !!r && Session.decks.some(d => d && d.versionId === r.versionId)
+                    readonly property bool audible: !!r && Session.decks.some(d => d && d.versionId === r.versionId && d.audible)
+                    /// Dimmed: played in the open set, suggested by tempo, or missing.
+                    readonly property bool dim: !!r && (r.playedInSet || r.suggested || r.availability === "missing")
+                    readonly property color fg: highlighted ? palette.highlightedText : palette.text
+
+                    contentItem: Loader {
+                        sourceComponent: cell.key === "title" ? titleCell
+                            : cell.key === "style" ? styleCell
+                            : cell.key === "actions" ? actionsCell
+                            : textCell
+                    }
+                    Component {
+                        id: textCell
+                        Label {
+                            verticalAlignment: Text.AlignVCenter
+                            opacity: cell.dim || ["version", "meter", "plays"].includes(cell.key) ? Theme.dim : 1
+                            elide: Text.ElideRight
+                            font.features: { "tnum": 1 }
+                            horizontalAlignment: ["bpm", "time", "plays"].includes(cell.key) && !(cell.r && cell.r.playedAt) ? Text.AlignRight : Text.AlignLeft
+                            color: cell.highlighted || !cell.r ? cell.fg
+                                : cell.key === "bpm" ? (cell.r.tempoFit === "sweet" ? Theme.ok : cell.r.tempoFit === "outside" ? Theme.warn : cell.fg)
+                                : cell.key === "time" && cell.r.long ? Theme.warn
+                                : cell.fg
+                            text: {
+                                const r = cell.r;
+                                if (!r) return "";
+                                switch (cell.key) {
+                                case "artist": return r.artist;
+                                case "version": return r.versionLabel;
+                                case "bpm": return (r.analyzing ? "… " : "") + Session.fmtBpm(r.bpm) + (Math.abs(r.rate - 1) > 0.001 ? "  " + Session.fmtPct(r.rate) : "");
+                                case "time": return Session.fmtTime(r.durationMs);
+                                case "meter": return Session.meterName(r.meter);
+                                case "plays": return r.playedAt ? new Date(r.playedAt).toLocaleString(Qt.locale(), "MMM d, h:mm ap") : r.plays || "";
+                                }
+                                return "";
+                            }
+                            ToolTip.visible: tipHover.hovered && !!ToolTip.text
+                            ToolTip.delay: 600
+                            ToolTip.text: !cell.r ? "" : cell.key === "version" ? cell.r.comment || ""
+                                : cell.key === "meter" && cell.r.meter ? (cell.r.meterByYou ? qsTr("Set by you") : qsTr("Detected")) : ""
+                            HoverHandler { id: tipHover }
+                        }
+                    }
+                    // The title, after where it plays from: nothing for a file, ○ Spotify
+                    // only, ● a file and Spotify, a warning when missing. On a deck, in the
+                    // deck's colour (red while the room hears it).
+                    Component {
+                        id: titleCell
+                        RowLayout {
+                            spacing: 4
+                            Label {
+                                visible: root.positioned
+                                Layout.preferredWidth: 24
+                                horizontalAlignment: Text.AlignRight
+                                text: cell.r && cell.r.position ? cell.r.position : ""
+                                color: cell.fg
+                                opacity: Theme.dim
+                                font.features: { "tnum": 1 }
+                            }
+                            Item {
+                                implicitWidth: 12
+                                implicitHeight: 12
+                                Rectangle {
+                                    anchors.centerIn: parent
+                                    width: 7; height: 7; radius: 4
+                                    visible: !!cell.r && (cell.r.availability === "spotifyOnly" || cell.r.availability === "fileAndSpotify")
+                                    color: cell.r && cell.r.availability === "fileAndSpotify" ? Theme.spotify : "transparent"
+                                    border.color: Theme.spotify
+                                    border.width: 1.5
+                                }
+                                Icon {
+                                    anchors.centerIn: parent
+                                    visible: !!cell.r && cell.r.availability === "missing"
+                                    glyph: "warning"
+                                    sourceSize.width: 12; sourceSize.height: 12
+                                    color: Theme.warn
+                                }
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: cell.r ? cell.r.title : ""
+                                elide: Text.ElideRight
+                                font.italic: !!cell.r && cell.r.suggested
+                                opacity: cell.dim || (cell.r && cell.r.child) ? Theme.dim : 1
+                                color: cell.onDeck && !cell.highlighted ? (cell.audible ? Theme.onAir : Theme.deckColors[0]) : cell.fg
+                            }
+                        }
+                    }
+                    Component {
+                        id: styleCell
+                        Label {
+                            verticalAlignment: Text.AlignVCenter
+                            elide: Text.ElideRight
+                            textFormat: Text.StyledText
+                            opacity: cell.dim ? Theme.dim : 1
+                            color: cell.fg
+                            font.italic: !!cell.r && cell.r.suggested
+                            text: !cell.r ? "" : cell.r.suggested ? qsTr("tempo fits")
+                                : cell.r.styles.map(s => cell.highlighted ? s.short || s.name : "<font color='" + s.color + "'>" + (s.short || s.name) + "</font>").join(", ")
+                            ToolTip.visible: styleHover.hovered && !!cell.r && cell.r.styles.length > 0
+                            ToolTip.text: cell.r ? cell.r.styles.map(s => [s.name].concat(s.problems).join(": ")).join("\n") : ""
+                            ToolTip.delay: 600
+                            HoverHandler { id: styleHover }
+                        }
+                    }
+                    Component {
+                        id: actionsCell
+                        RowLayout {
+                            spacing: 0
+                            ToolButton {
+                                icon.source: Theme.icon("headphones")
+                                icon.width: Theme.smallIconSize; icon.height: Theme.smallIconSize
+                                icon.color: cell.fg
+                                implicitHeight: 22
+                                ToolTip.visible: hovered; ToolTip.text: qsTr("Preview on the free deck")
+                                onClicked: Session.preview(cell.r.versionId, null)
+                            }
+                            ToolButton {
+                                icon.source: Theme.icon(Session.fillingSlot ? "check" : "plus")
+                                icon.width: Theme.smallIconSize; icon.height: Theme.smallIconSize
+                                icon.color: cell.fg
+                                implicitHeight: 22
+                                ToolTip.visible: hovered
+                                ToolTip.text: Session.fillingSlot ? qsTr("Use this song for the slot") : qsTr("Play next")
+                                onClicked: Session.fillingSlot ? Session.fillSlot(cell.r.versionId) : Session.addToSet([cell.r.versionId], "next")
+                            }
+                        }
+                    }
+
+                    TapHandler {
+                        acceptedButtons: Qt.LeftButton
+                        onDoubleTapped: root.choose(cell.r)
+                    }
+                    TapHandler {
+                        acceptedButtons: Qt.RightButton
+                        onTapped: {
+                            const index = cell.treeView.index(cell.row, 0);
+                            if (!selection.isRowSelected(cell.row, index.parent))
+                                selection.setCurrentIndex(index, ItemSelectionModel.ClearAndSelect | ItemSelectionModel.Rows);
+                            menu.rows = root.selectedRows();
+                            menu.historyRow = cell.r;
+                            menu.popup();
+                        }
+                    }
+                    // Drag the selected songs (or this one) to the set, a deck, a crate or a style.
+                    DragHandler {
+                        id: dragging
+                        target: null
+                        onActiveChanged: if (!active) dragProxy.Drag.drop()
+                    }
+                    Item {
+                        id: dragProxy
+                        Drag.active: dragging.active
+                        Drag.dragType: Drag.Automatic
+                        Drag.supportedActions: Qt.CopyAction
+                        Drag.mimeData: ({ "application/x-orpheus-versions": JSON.stringify(Session.selected.length && cell.r && Session.selected.includes(cell.r.versionId) ? Session.selected : cell.r ? [cell.r.versionId] : []) })
+                    }
                 }
             }
         }

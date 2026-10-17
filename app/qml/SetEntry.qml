@@ -3,8 +3,10 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Orpheus
 
-// One entry of the set panel: a song, a style slot or a pause (`row` from `set_view`).
-Item {
+// One entry of the set panel: a song, a style slot or a pause (`row` from
+// `set_view`). Click to select (Ctrl: add, Shift: extend), double-click to
+// load, drag to move it (or onto a deck), right-click for its menu.
+ItemDelegate {
     id: root
 
     property var row
@@ -28,250 +30,242 @@ Item {
     signal remove()
     signal moveNext()
 
-    implicitHeight: body.implicitHeight + holdBar.height + 8
+    highlighted: selected || slotDrop.containsDrag
+    padding: 4
     /// Text colour (on the selection's colour when selected).
-    readonly property color fg: selected ? Theme.system.highlightedText : Theme.system.text
+    readonly property color fg: highlighted ? palette.highlightedText : palette.text
     /// Played and skipped entries are dimmed (their content, not the selection).
     readonly property real contentOpacity: e.status === "played" ? 0.45 : e.status === "skipped" ? 0.35 : 1
 
-    // Auto mode stops before this entry.
-    RowLayout {
-        id: holdBar
-        visible: !!root.e.hold
-        width: parent.width
-        height: visible ? 18 : 0
-        spacing: 4
-        Rectangle { Layout.leftMargin: 8; Layout.preferredWidth: 22; implicitHeight: 1; color: Theme.warn }
-        Icon { glyph: "pause"; sourceSize.width: 12; sourceSize.height: 12; color: Theme.warn }
-        Label { text: qsTr("Auto mode stops here"); color: Theme.warn; font.pointSize: Theme.smallPointSize }
-        ToolButton {
-            icon.source: Theme.icon("x")
-            icon.width: 10; icon.height: 10
-            implicitHeight: 18; implicitWidth: 18
-            padding: 0
-            ToolTip.visible: hovered; ToolTip.text: qsTr("Don't stop here")
-            onClicked: Session.run("entry_update", { id: root.e.id, patch: { hold: false } })
-        }
-        Rectangle { Layout.fillWidth: true; Layout.rightMargin: 8; implicitHeight: 1; color: Theme.warn }
-    }
-
+    // The playing entry is tinted in the room's colour; the slot being filled is outlined.
     Rectangle {
         anchors.fill: parent
-        anchors.topMargin: holdBar.height
-        color: root.selected ? Theme.system.highlight : root.current ? Qt.alpha(Theme.deckColors[1], 0.16)
-            : slotDrop.containsDrag || hover.hovered ? Qt.alpha(Theme.system.highlight, 0.12) : "transparent"
+        visible: (root.current && !root.highlighted) || Session.fillingSlot === root.e.id
+        color: root.current && !root.highlighted ? Qt.alpha(Theme.deckColors[1], 0.16) : "transparent"
         border.color: Session.fillingSlot === root.e.id ? Theme.warn : "transparent"
     }
-    Rectangle { visible: root.next; x: 0; y: holdBar.height; width: 2; height: parent.height - holdBar.height; color: Theme.ok }
-    Rectangle { visible: root.dropAbove; width: parent.width; height: 2; y: holdBar.height; color: Theme.system.highlight }
-    HoverHandler { id: hover }
+    // The next entry: a bar at its left. Where a drop would go: a line above.
+    Rectangle { visible: root.next; width: 3; height: parent.height; color: Theme.ok }
+    Rectangle { visible: root.dropAbove; width: parent.width; height: 2; color: Theme.system.highlight }
 
-    RowLayout {
-        id: body
-        opacity: root.contentOpacity
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: holdBar.bottom
-        anchors.margins: 4
-        spacing: 6
-
-        Item {
-            Layout.preferredWidth: 22
-            Layout.fillHeight: true
-            Icon {
-                visible: root.playingNow
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                glyph: "play"
-                sourceSize.width: 12; sourceSize.height: 12
-                color: root.selected ? root.fg : Theme.deckColors[1]
-            }
-            Label {
-                visible: !root.playingNow
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                text: root.row.number || ""
-                color: root.fg
-                opacity: Theme.dim
-                font.features: { "tnum": 1 }
-            }
-        }
-        Rectangle {
-            Layout.preferredWidth: 4
-            Layout.fillHeight: true
-            radius: 2
-            color: root.row.styles.length ? root.row.styles[0].color : Theme.neutral
-        }
-        ColumnLayout {
+    contentItem: ColumnLayout {
+        spacing: 2
+        // Auto mode stops before this entry.
+        RowLayout {
+            id: holdBar
+            visible: !!root.e.hold
             Layout.fillWidth: true
-            spacing: 1
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 4
+            spacing: 4
+            Icon { glyph: "pause"; sourceSize.width: 12; sourceSize.height: 12; color: Theme.warn }
+            Label { Layout.fillWidth: true; text: qsTr("Auto mode stops here"); color: Theme.warn; font.pointSize: Theme.smallPointSize }
+            ToolButton {
+                icon.source: Theme.icon("x")
+                icon.width: 10; icon.height: 10
+                implicitHeight: 18; implicitWidth: 18
+                padding: 0
+                ToolTip.visible: hovered; ToolTip.text: qsTr("Don't stop here")
+                onClicked: Session.run("entry_update", { id: root.e.id, patch: { hold: false } })
+            }
+        }
+
+        RowLayout {
+            id: body
+            Layout.fillWidth: true
+            opacity: root.contentOpacity
+            spacing: 6
+
+            Item {
+                Layout.preferredWidth: 22
+                Layout.fillHeight: true
+                Icon {
+                    visible: root.playingNow
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    glyph: "play"
+                    sourceSize.width: 12; sourceSize.height: 12
+                    color: root.selected ? root.fg : Theme.deckColors[1]
+                }
                 Label {
-                    visible: !root.row.isPause
-                    text: root.row.label || "—"
-                    font.bold: true
-                    font.italic: root.row.noStyle
-                    font.pointSize: Theme.smallPointSize
-                    color: root.selected || !root.row.styles.length ? root.fg : root.row.styles[0].color
-                    ToolTip.visible: labelHover.hovered
-                    ToolTip.text: root.row.noStyle && root.club ? qsTr("Not one of %1's styles (right-click: Show As)").arg(root.club.name) : root.row.styles.map(s => s.name).join("\n")
-                    HoverHandler { id: labelHover }
-                }
-                Icon {
-                    visible: root.row.warnings.length > 0
-                    glyph: "warning"
-                    sourceSize.width: Theme.smallIconSize; sourceSize.height: Theme.smallIconSize
-                    color: root.selected ? root.fg : Theme.warn
-                    ToolTip.visible: warnHover.hovered
-                    ToolTip.text: root.row.warnings.join("\n")
-                    HoverHandler { id: warnHover }
-                }
-                Icon {
-                    visible: !!root.row.heardAs
-                    glyph: "reload"
-                    sourceSize.width: Theme.smallIconSize; sourceSize.height: Theme.smallIconSize
+                    visible: !root.playingNow
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.row.number || ""
                     color: root.fg
                     opacity: Theme.dim
-                    ToolTip.visible: heardHover.hovered
-                    ToolTip.text: qsTr("This recording was already played in this set (as “%1”)").arg(root.row.heardAs || "")
-                    HoverHandler { id: heardHover }
-                }
-                Icon {
-                    visible: root.row.isPause
-                    glyph: "pause"
-                    sourceSize.width: Theme.smallIconSize; sourceSize.height: Theme.smallIconSize
-                    color: root.fg
-                }
-                Label {
-                    Layout.fillWidth: true
-                    elide: Text.ElideRight
-                    // An empty slot stands out until a song is chosen.
-                    color: root.isSlot && !root.selected ? Theme.warn : root.fg
-                    text: root.row.title
-                    font.italic: root.isSlot
-                    font.strikeout: root.e.status === "skipped"
-                    opacity: root.row.repeat ? 0.55 : 1
+                    font.features: { "tnum": 1 }
                 }
             }
-            RowLayout {
+            Rectangle {
+                Layout.preferredWidth: 4
+                Layout.fillHeight: true
+                radius: 2
+                color: root.row.styles.length ? root.row.styles[0].color : Theme.neutral
+            }
+            ColumnLayout {
                 Layout.fillWidth: true
-                spacing: 6
-                Icon {
-                    visible: root.e.announcement !== undefined && root.e.announcement !== null
-                    glyph: "mic"
-                    sourceSize.width: 12; sourceSize.height: 12
-                    color: root.fg
-                    opacity: Theme.dim
-                }
-                Label {
-                    visible: root.e.announcement !== undefined && root.e.announcement !== null
-                    text: root.e.announcement ? root.e.announcement : qsTr("no announcement")
-                    ToolTip.visible: announceHover.hovered && !!root.e.announcement
-                    ToolTip.text: qsTr("Announced before it: “%1”").arg(root.e.announcement || "")
-                    HoverHandler { id: announceHover }
-                    font.pointSize: Theme.smallPointSize
-                    color: root.fg
-                    opacity: Theme.dim
-                    elide: Text.ElideRight
-                    Layout.maximumWidth: 160
-                }
-                Button {
-                    visible: root.isSlot
-                    flat: true
-                    text: Session.fillingSlot === root.e.id ? qsTr("Choosing… (Cancel)") : qsTr("Choose Song…")
-                    ToolTip.visible: hovered
-                    ToolTip.text: qsTr("Pick its song in the library, or drag a song here")
-                    font.pointSize: Theme.smallPointSize
-                    onClicked: Session.fillingSlot === root.e.id ? Session.fillingSlot = "" : Session.startFillingSlot(root.e)
-                }
-                Label {
-                    visible: !!root.row.trackId
+                spacing: 1
+                RowLayout {
                     Layout.fillWidth: true
-                    elide: Text.ElideRight
-                    font.pointSize: Theme.smallPointSize
-                    color: root.fg
-                    opacity: root.row.repeat ? Theme.faint : Theme.dim
-                    text: root.row.artist + (root.row.versionLabel ? " · " + root.row.versionLabel : "")
-                }
-                Repeater {
-                    model: root.row.tags
-                    delegate: Label {
-                        required property var modelData
-                        text: modelData.name
+                    spacing: 4
+                    Label {
+                        visible: !root.row.isPause
+                        text: root.row.label || "—"
+                        font.bold: true
+                        font.italic: root.row.noStyle
                         font.pointSize: Theme.smallPointSize
-                        color: modelData.color
+                        color: root.selected || !root.row.styles.length ? root.fg : root.row.styles[0].color
+                        ToolTip.visible: labelHover.hovered
+                        ToolTip.text: root.row.noStyle && root.club ? qsTr("Not one of %1's styles (right-click: Show As)").arg(root.club.name) : root.row.styles.map(s => s.name).join("\n")
+                        HoverHandler { id: labelHover }
+                    }
+                    Icon {
+                        visible: root.row.warnings.length > 0
+                        glyph: "warning"
+                        sourceSize.width: Theme.smallIconSize; sourceSize.height: Theme.smallIconSize
+                        color: root.selected ? root.fg : Theme.warn
+                        ToolTip.visible: warnHover.hovered
+                        ToolTip.text: root.row.warnings.join("\n")
+                        HoverHandler { id: warnHover }
+                    }
+                    Icon {
+                        visible: !!root.row.heardAs
+                        glyph: "reload"
+                        sourceSize.width: Theme.smallIconSize; sourceSize.height: Theme.smallIconSize
+                        color: root.fg
+                        opacity: Theme.dim
+                        ToolTip.visible: heardHover.hovered
+                        ToolTip.text: qsTr("This recording was already played in this set (as “%1”)").arg(root.row.heardAs || "")
+                        HoverHandler { id: heardHover }
+                    }
+                    Icon {
+                        visible: root.row.isPause
+                        glyph: "pause"
+                        sourceSize.width: Theme.smallIconSize; sourceSize.height: Theme.smallIconSize
+                        color: root.fg
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                        // An empty slot stands out until a song is chosen.
+                        color: root.isSlot && !root.selected ? Theme.warn : root.fg
+                        text: root.row.title
+                        font.italic: root.isSlot
+                        font.strikeout: root.e.status === "skipped"
+                        opacity: root.row.repeat ? 0.55 : 1
                     }
                 }
-                Icon {
-                    visible: !!root.e.note
-                    glyph: "edit"
-                    sourceSize.width: 12; sourceSize.height: 12
-                    color: root.fg
-                    opacity: Theme.dim
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+                    Icon {
+                        visible: root.e.announcement !== undefined && root.e.announcement !== null
+                        glyph: "mic"
+                        sourceSize.width: 12; sourceSize.height: 12
+                        color: root.fg
+                        opacity: Theme.dim
+                    }
+                    Label {
+                        visible: root.e.announcement !== undefined && root.e.announcement !== null
+                        text: root.e.announcement ? root.e.announcement : qsTr("no announcement")
+                        ToolTip.visible: announceHover.hovered && !!root.e.announcement
+                        ToolTip.text: qsTr("Announced before it: “%1”").arg(root.e.announcement || "")
+                        HoverHandler { id: announceHover }
+                        font.pointSize: Theme.smallPointSize
+                        color: root.fg
+                        opacity: Theme.dim
+                        elide: Text.ElideRight
+                        Layout.maximumWidth: 160
+                    }
+                    Button {
+                        visible: root.isSlot
+                        flat: true
+                        text: Session.fillingSlot === root.e.id ? qsTr("Choosing… (Cancel)") : qsTr("Choose Song…")
+                        ToolTip.visible: hovered
+                        ToolTip.text: qsTr("Pick its song in the library, or drag a song here")
+                        font.pointSize: Theme.smallPointSize
+                        onClicked: Session.fillingSlot === root.e.id ? Session.fillingSlot = "" : Session.startFillingSlot(root.e)
+                    }
+                    Label {
+                        visible: !!root.row.trackId
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                        font.pointSize: Theme.smallPointSize
+                        color: root.fg
+                        opacity: root.row.repeat ? Theme.faint : Theme.dim
+                        text: root.row.artist + (root.row.versionLabel ? " · " + root.row.versionLabel : "")
+                    }
+                    Repeater {
+                        model: root.row.tags
+                        delegate: Label {
+                            required property var modelData
+                            text: modelData.name
+                            font.pointSize: Theme.smallPointSize
+                            color: modelData.color
+                        }
+                    }
+                    Icon {
+                        visible: !!root.e.note
+                        glyph: "edit"
+                        sourceSize.width: 12; sourceSize.height: 12
+                        color: root.fg
+                        opacity: Theme.dim
+                    }
+                    Label {
+                        visible: !!root.e.note
+                        text: root.e.note || ""
+                        ToolTip.visible: noteHover.hovered
+                        ToolTip.text: root.e.note || ""
+                        HoverHandler { id: noteHover }
+                        font.pointSize: Theme.smallPointSize
+                        color: root.fg
+                        opacity: Theme.dim
+                        elide: Text.ElideRight
+                        Layout.maximumWidth: 120
+                    }
+                    Item { Layout.fillWidth: !root.row.trackId }
                 }
+            }
+            ColumnLayout {
+                spacing: 0
+                Label { Layout.alignment: Qt.AlignRight; text: root.row.bpm ? Session.fmtBpm(root.row.bpm) : ""; font.pointSize: Theme.smallPointSize; color: root.fg; font.features: { "tnum": 1 } }
                 Label {
-                    visible: !!root.e.note
-                    text: root.e.note || ""
-                    ToolTip.visible: noteHover.hovered
-                    ToolTip.text: root.e.note || ""
-                    HoverHandler { id: noteHover }
+                    Layout.alignment: Qt.AlignRight
+                    text: root.row.durationMs ? Session.fmtTime(root.row.durationMs) : ""
                     font.pointSize: Theme.smallPointSize
-                    color: root.fg
+                    font.features: { "tnum": 1 }
+                    color: root.row.long && !root.selected ? Theme.warn : root.fg
                     opacity: Theme.dim
-                    elide: Text.ElideRight
-                    Layout.maximumWidth: 120
                 }
-                Item { Layout.fillWidth: !root.row.trackId }
             }
         }
-        ColumnLayout {
-            spacing: 0
-            Label { Layout.alignment: Qt.AlignRight; text: root.row.bpm ? Session.fmtBpm(root.row.bpm) : ""; font.pointSize: Theme.smallPointSize; color: root.fg; font.features: { "tnum": 1 } }
-            Label {
-                Layout.alignment: Qt.AlignRight
-                text: root.row.durationMs ? Session.fmtTime(root.row.durationMs) : ""
-                font.pointSize: Theme.smallPointSize
-                font.features: { "tnum": 1 }
-                color: root.row.long && !root.selected ? Theme.warn : root.fg
-                opacity: Theme.dim
-            }
-        }
+
     }
 
-    MouseArea {
-        id: mouse
-        anchors.fill: parent
-        anchors.topMargin: holdBar.height
-        acceptedButtons: Qt.LeftButton | Qt.RightButton
-        drag.target: dragProxy
-        // Pressing a selected entry keeps the selection (to drag it all); a click
-        // without dragging then selects just that entry.
-        property bool reselect: false
-        onPressed: m => {
-            reselect = false;
-            if (m.button === Qt.RightButton) {
-                if (!root.selected) root.picked(0);
-                menu.popup();
-            } else if (!root.selected || m.modifiers) {
-                root.picked(m.modifiers);
-            } else {
-                reselect = true;
-            }
+    // Selecting (a click on a selected entry selects just it once released
+    // without dragging, so the whole selection can be dragged), loading, the menu.
+    TapHandler {
+        acceptedModifiers: Qt.NoModifier
+        onTapped: root.picked(0)
+        onDoubleTapped: root.chosen()
+    }
+    TapHandler { acceptedModifiers: Qt.ControlModifier; onTapped: root.picked(Qt.ControlModifier) }
+    TapHandler { acceptedModifiers: Qt.MetaModifier; onTapped: root.picked(Qt.MetaModifier) }
+    TapHandler { acceptedModifiers: Qt.ShiftModifier; onTapped: root.picked(Qt.ShiftModifier) }
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        onTapped: {
+            if (!root.selected) root.picked(0);
+            menu.popup();
         }
-        onReleased: m => {
-            const dragged = drag.active;
-            dragProxy.Drag.drop();
-            dragProxy.x = 0; dragProxy.y = 0;
-            if (reselect && !dragged) root.picked(0);
-            reselect = false;
-        }
-        onDoubleClicked: root.chosen()
+    }
+    DragHandler {
+        id: dragging
+        target: null
+        onActiveChanged: if (!active) dragProxy.Drag.drop()
     }
     Item {
         id: dragProxy
-        Drag.active: mouse.drag.active
+        Drag.active: dragging.active
         Drag.dragType: Drag.Automatic
         Drag.supportedActions: Qt.MoveAction | Qt.CopyAction
         Drag.mimeData: {

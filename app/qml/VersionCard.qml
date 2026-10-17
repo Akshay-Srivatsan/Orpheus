@@ -150,7 +150,7 @@ Frame {
             rowSpacing: 4
 
             FormLabel { text: qsTr("Styles") }
-            ChipEditor { Layout.fillWidth: true; value: root.v.styles || []; onEdited: keys => root.patch({ styles: keys }) }
+            StylePicker { Layout.fillWidth: true; value: root.v.styles || []; onEdited: keys => root.patch({ styles: keys }) }
             FormLabel { text: qsTr("Shown as"); ToolTip.visible: shownHover.hovered; ToolTip.text: qsTr("Shown to dancers instead of the style names, e.g. the name of a line dance"); HoverHandler { id: shownHover } }
             TextField {
                 Layout.fillWidth: true
@@ -159,7 +159,7 @@ Frame {
                 onEditingFinished: if (text.trim() !== (root.v.displayName || "")) root.patch({ displayName: text.trim() || null })
             }
             FormLabel { text: qsTr("Tags") }
-            ChipEditor { Layout.fillWidth: true; tags: true; value: root.v.tags || []; onEdited: keys => root.patch({ tags: keys }) }
+            StylePicker { Layout.fillWidth: true; tags: true; value: root.v.tags || []; onEdited: keys => root.patch({ tags: keys }) }
             FormLabel { text: qsTr("Tempo") }
             RowLayout {
                 TextField {

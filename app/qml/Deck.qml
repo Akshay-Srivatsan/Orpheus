@@ -215,14 +215,17 @@ Frame {
                     }
                     // Its custom label (e.g. a line dance's name), else its styles; the
                     // set entry's tags; and whether it streams (it needs the network).
-                    StyleBadge {
-                        visible: root.customLabel !== ""
-                        style: root.song && root.song.styles.length ? root.song.styles[0] : null
-                        label: root.customLabel
-                    }
-                    Repeater {
-                        model: root.song && root.customLabel === "" ? root.song.styles : []
-                        delegate: StyleBadge { required property var modelData; style: modelData }
+                    // In its colour; the style names on hover.
+                    Label {
+                        visible: !!root.song && (root.customLabel !== "" || root.song.styles.length > 0)
+                        textFormat: Text.StyledText
+                        font.bold: true
+                        text: !root.song ? "" : root.customLabel
+                            ? "<font color='" + (root.song.styles.length ? root.song.styles[0].color : Theme.system.text) + "'>" + root.customLabel + "</font>"
+                            : root.song.styles.map(s => "<font color='" + s.color + "'>" + s.short + "</font>").join(" ")
+                        ToolTip.visible: danceHover.hovered
+                        ToolTip.text: root.song ? root.song.styles.map(s => [s.name].concat(s.problems).join(": ")).join("\n") : ""
+                        HoverHandler { id: danceHover }
                     }
                     Repeater {
                         model: root.song ? root.song.tags : []
