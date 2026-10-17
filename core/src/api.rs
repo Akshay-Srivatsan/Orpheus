@@ -823,7 +823,14 @@ pub fn tts_remove(app: &Arc<App>) -> Res<()> {
 
 /// Speaks `text` now (to try a voice or pattern).
 pub fn tts_say(app: &Arc<App>, text: String) -> Res<()> {
-    app.speak(text);
+    app.speak(text, None);
+    Ok(())
+}
+
+/// Plays a chime (a file, or empty for the built-in one) to try it.
+pub fn chime_preview(app: &Arc<App>, sound: String) -> Res<()> {
+    let a = app.clone();
+    std::thread::spawn(move || a.preview_chime(&sound));
     Ok(())
 }
 
@@ -1627,17 +1634,22 @@ pub fn set_add(app: &Arc<App>, version_ids: Vec<Id>, position: SetPosition, styl
     entries_insert(app, set.id, at, entries).map(|_| ())
 }
 
-/// Moves entries to play next: after what's playing (and what's been played).
+/// Moves entries to play next: after what's playing (or, before anything
+/// plays, what was played last) — where `App::next_entry` looks. Played or
+/// skipped entries moved are to play again.
 pub fn entries_move_next(app: &Arc<App>, setlist_id: Id, ids: Vec<Id>) -> Res<()> {
     let set = app.store.setlist(&setlist_id).map_err(ae)?;
+    let rest: Vec<&SetlistEntry> = set.entries.iter().filter(|e| !ids.contains(&e.id)).collect();
     let current = app.current_entry_id();
-    let mut rest: Vec<&SetlistEntry> = set.entries.iter().filter(|e| !ids.contains(&e.id)).collect();
-    let cur = rest.iter().position(|e| Some(&e.id) == current.as_ref());
-    let last_done = rest.iter().rposition(|e| e.status != "pending");
-    let at = cur.max(last_done).map_or(0, |i| i + 1);
+    let cursor = current.as_ref().and_then(|c| rest.iter().position(|e| &e.id == c)).or_else(|| rest.iter().rposition(|e| e.status != "pending"));
+    let at = cursor.map_or(0, |i| i + 1);
     let moving: Vec<&SetlistEntry> = set.entries.iter().filter(|e| ids.contains(&e.id)).collect();
-    rest.splice(at..at, moving);
-    entries_reorder(app, setlist_id, rest.into_iter().map(|e| e.id.clone()).collect())
+    for e in moving.iter().filter(|e| e.status != "pending" && Some(&e.id) != current.as_ref()) {
+        app.store.entry_update(&e.id, &EntryPatch { status: Some("pending".into()), ..Default::default() }).map_err(ae)?;
+    }
+    let mut order: Vec<Id> = rest.iter().map(|e| e.id.clone()).collect();
+    order.splice(at..at, moving.iter().map(|e| e.id.clone()));
+    entries_reorder(app, setlist_id, order)
 }
 
 /// Writes a set as a CSV file (number, style, title, artist, version, BPM, length, tags, note, status).
@@ -1771,11 +1783,11 @@ pub fn song_view(app: &Arc<App>, track_id: Option<Id>, entry_id: Option<Id>) -> 
         (_, t) => t,
     };
     let set = entry.as_ref().and_then(|(_, sid)| app.store.setlist(sid).ok());
-    let ctx = app.view_context(set.and_then(|s| s.club));
+    let ctx = app.view_context(set.as_ref().and_then(|s| s.club.clone()));
     let ready = stems_ready(app)?;
     let is_ready = |r: &Recording| ready.contains(&r.rec.id);
     let announce = app.settings.read().announce.clone();
-    let sc = crate::views::SongContext { stems_ready: &is_ready, gap_secs: app.gap_seconds(), announce: &announce };
+    let sc = crate::views::SongContext { stems_ready: &is_ready, gap_secs: app.gap_seconds(), announce: &announce, set: set.as_ref() };
     let all = app.store.all_tracks();
     let Some(track) = tid.and_then(|t| all.iter().find(|x| x.rec.id == t).cloned()) else {
         // A slot or a pause: only the entry.
@@ -2928,6 +2940,15 @@ pub fn call(app: &Arc<App>, name: &str, args: serde_json::Value) -> Res<serde_js
         "tts_install" => json(tts_install(app)),
         "tts_voices" => json(tts_voices(app)),
         "tts_remove" => json(tts_remove(app)),
+        "chime_preview" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                sound: String,
+            }
+            let a: A = parse(args)?;
+            json(chime_preview(app, a.sound))
+        }
         "tts_say" => {
             #[derive(Deserialize)]
             #[serde(rename_all = "camelCase")]

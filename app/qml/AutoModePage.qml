@@ -57,6 +57,25 @@ SettingsPage {
             }
         }
 
+        FormLabel { text: qsTr("Chime"); Layout.alignment: Qt.AlignTop }
+        ColumnLayout {
+            Layout.fillWidth: true
+            ChimeField {
+                Layout.maximumWidth: 420
+                inherits: false
+                soundAlways: true
+                value: page.a ? { enabled: page.a.chime, sound: page.a.chimeSound } : ({})
+                onEdited: v => page.setAnnounce({ chime: !!v.enabled, chimeSound: v.sound || "" })
+            }
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                font.pointSize: Theme.smallPointSize
+                opacity: 0.7
+                text: qsTr("Unless something more specific chooses otherwise — first a song's place in a set, then the set, the version, the song, and last this setting. Songs and versions can also have their own words (Info panel).")
+            }
+        }
+
         FormLabel { text: qsTr("Timing") }
         RowLayout {
             Label { text: qsTr("Pause") }

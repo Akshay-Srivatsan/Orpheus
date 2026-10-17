@@ -220,26 +220,21 @@ GroupBox {
                 Label { text: "s" }
             }
             FormLabel { text: qsTr("Announce") }
-            ColumnLayout {
+            AnnouncementField {
                 Layout.fillWidth: true
-                ComboBox {
-                    readonly property var kinds: root.pause ? ["custom", "none"] : ["default", "custom", "none"]
-                    Layout.fillWidth: true
-                    model: root.pause ? [qsTr("This text:"), qsTr("Nothing")]
-                        : [Session.settings && Session.settings.announce.enabled ? qsTr("A random sentence") : qsTr("Nothing (announcements off)"), qsTr("This text:"), qsTr("Nothing for this song")]
-                    currentIndex: kinds.indexOf(root.e.announcement === undefined || root.e.announcement === null ? (root.pause ? "none" : "default") : root.e.announcement === "" ? "none" : "custom")
-                    onActivated: index => {
-                        const k = kinds[index];
-                        root.update({ announcement: k === "default" ? null : k === "none" ? "" : (root.e.announcement || (root.pause ? qsTr("We'll take a short break.") : qsTr("The next dance is a {dance}."))) });
-                    }
-                }
-                TextField {
-                    visible: !!root.e.announcement
-                    Layout.fillWidth: true
-                    text: root.e.announcement || ""
-                    onEditingFinished: root.update({ announcement: text })
-                }
-                Label { visible: !!root.e.announcement; text: qsTr("{dance} is replaced by the dance's name."); font.pointSize: Theme.smallPointSize; opacity: 0.6 }
+                pause: root.pause
+                value: root.e.announcement === undefined ? null : root.e.announcement
+                defaultLabel: Session.announcementDefault(root.view.inherited.announcement)
+                onEdited: v => root.update({ announcement: v })
+            }
+            FormLabel { visible: root.view.speaks; text: qsTr("Chime") }
+            ChimeField {
+                visible: root.view.speaks
+                Layout.fillWidth: true
+                value: root.e.chime || ({})
+                inheritedOn: root.view.inherited.chime
+                inheritedSound: root.view.inherited.chimeSound
+                onEdited: v => root.update({ chime: v })
             }
             FormLabel { visible: root.view.speaks; text: qsTr("Then pause") }
             RowLayout {

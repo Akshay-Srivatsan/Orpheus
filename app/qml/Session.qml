@@ -75,6 +75,14 @@ QtObject {
     function confirm(text, okLabel, callback) { confirmRequested(text, okLabel || qsTr("Delete"), callback); }
     function chooseFile(options, callback) { fileRequested(options, callback); }
 
+    /// The default choice of what to say, given what's chosen above (`text`:
+    /// the words, "" = nothing, null = your settings).
+    function announcementDefault(text) {
+        if (text === null || text === undefined)
+            return settings && settings.announce.enabled ? qsTr("Default (a random sentence)") : qsTr("Default (nothing: announcements off)");
+        return text ? qsTr("Default (“%1”)").arg(text) : qsTr("Default (nothing)");
+    }
+
     /// Counts for the sidebar (`library_summary`).
     property var summary: null
     function refreshSummary() { Backend.call("library_summary").then(v => summary = v); }

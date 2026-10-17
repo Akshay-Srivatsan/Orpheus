@@ -4,6 +4,7 @@
 pub mod analysis;
 pub mod api;
 pub mod app;
+pub mod chime;
 pub mod club;
 pub mod fingerprint;
 pub mod audio;

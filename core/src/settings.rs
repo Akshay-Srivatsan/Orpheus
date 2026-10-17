@@ -110,6 +110,10 @@ pub struct AnnounceSettings {
     pub speed: f64,
     /// Linear gain of announcements.
     pub volume: f64,
+    /// A chime plays before each announcement (songs and sets may say otherwise).
+    pub chime: bool,
+    /// The chime: an audio file, or empty for the built-in one.
+    pub chime_sound: String,
 }
 
 impl Default for AnnounceSettings {
@@ -123,6 +127,8 @@ impl Default for AnnounceSettings {
             model: "fp16".into(),
             speed: 1.0,
             volume: 0.8,
+            chime: false,
+            chime_sound: String::new(),
         }
     }
 }

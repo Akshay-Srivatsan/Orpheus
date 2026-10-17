@@ -82,6 +82,24 @@ impl SourceRef {
     }
 }
 
+/// Whether a chime plays before an announcement, and which. Each `None`
+/// inherits (entry → set → version → song → your settings; see `chime.rs`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ChimeChoice {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// An audio file; empty = the built-in chime.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sound: Option<String>,
+}
+
+impl ChimeChoice {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// Playback settings that a version defines and a setlist entry may override.
 /// `None` = inherit (entry → version → track defaults).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -126,6 +144,12 @@ pub struct Version {
     pub settings: Overrides,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub comment: String,
+    /// What auto mode says before it (may contain `{dance}`), unless a set
+    /// entry says otherwise; empty = nothing; absent: the song's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub announcement: Option<String>,
+    #[serde(default, skip_serializing_if = "ChimeChoice::is_default")]
+    pub chime: ChimeChoice,
     /// Your tags (keys into `styles.json`'s `tags`), e.g. "familiar".
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
@@ -158,6 +182,9 @@ pub struct VersionPatch {
     #[serde(default, with = "double_option")]
     pub stems: Option<Option<serde_json::Map<String, serde_json::Value>>>,
     pub comment: Option<String>,
+    #[serde(default, with = "double_option")]
+    pub announcement: Option<Option<String>>,
+    pub chime: Option<ChimeChoice>,
     pub tags: Option<Vec<String>>,
     /// Shows it in the library again (`false`).
     pub hidden: Option<bool>,
@@ -409,6 +436,12 @@ pub struct TrackRecord {
     pub rating: Option<i64>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub notes: String,
+    /// What auto mode says before it (may contain `{dance}`), unless its
+    /// version or a set entry says otherwise; empty = nothing; absent: yours.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub announcement: Option<String>,
+    #[serde(skip_serializing_if = "ChimeChoice::is_default")]
+    pub chime: ChimeChoice,
     pub added_at: i64,
     pub versions: Vec<Version>,
     /// The version that stands for the song (folded library rows, songs
@@ -525,6 +558,9 @@ pub struct TrackPatch {
     #[serde(default, with = "double_option")]
     pub rating: Option<Option<i64>>,
     pub notes: Option<String>,
+    #[serde(default, with = "double_option")]
+    pub announcement: Option<Option<String>>,
+    pub chime: Option<ChimeChoice>,
     /// The primary version (`null`: the first).
     #[serde(default, with = "double_option")]
     pub primary: Option<Option<Id>>,
@@ -625,6 +661,8 @@ pub struct SetlistEntry {
     /// of a random pattern; empty = no announcement.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub announcement: Option<String>,
+    #[serde(skip_serializing_if = "ChimeChoice::is_default")]
+    pub chime: ChimeChoice,
     /// `pending`, `playing`, `played`, `skipped`.
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -648,6 +686,7 @@ impl Default for SetlistEntry {
             pause_before: None,
             pause_after: None,
             announcement: None,
+            chime: ChimeChoice::default(),
             status: "pending".into(),
             played_at: None,
         }
@@ -675,6 +714,9 @@ pub struct Setlist {
     pub notes: String,
     /// `live` or `preset`; affects defaults and what the projector shows.
     pub mode: String,
+    /// The chime before announcements in this set, over its songs'.
+    #[serde(skip_serializing_if = "ChimeChoice::is_default")]
+    pub chime: ChimeChoice,
     pub created_at: i64,
     pub updated_at: i64,
     pub entries: Vec<SetlistEntry>,
@@ -729,6 +771,7 @@ pub struct SetlistPatch {
     pub club: Option<Option<ClubRef>>,
     pub notes: Option<String>,
     pub mode: Option<String>,
+    pub chime: Option<ChimeChoice>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -739,6 +782,8 @@ pub struct NewEntry {
     pub kind: EntryKind,
     pub pause_before: Option<f64>,
     pub announcement: Option<String>,
+    #[serde(default)]
+    pub chime: ChimeChoice,
     pub styles: Option<Vec<String>>,
     pub club_styles: Option<Vec<String>>,
     pub label: Option<String>,
@@ -771,6 +816,7 @@ pub struct EntryPatch {
     pub pause_after: Option<Option<f64>>,
     #[serde(default, with = "double_option")]
     pub announcement: Option<Option<String>>,
+    pub chime: Option<ChimeChoice>,
     pub tags: Option<Vec<String>>,
     pub status: Option<String>,
 }

@@ -269,7 +269,12 @@ impl App {
         if heard_any {
             return 1 - live;
         }
-        if matches!(self.decks[0].status().as_str(), "empty" | "ended" | "error") { 0 } else { 1 }
+        // The first song goes on A, unless A holds something else: a song
+        // loaded or playing there that isn't a set's earlier auto-load (a set
+        // entry, stopped, no longer next: auto-load replaces it).
+        let a = &self.decks[0];
+        let stale = !matches!(a.status().as_str(), "playing" | "loading") && a.entry_id().is_some_and(|e| self.next_entry().map_or(true, |n| n.id != e));
+        if stale || matches!(a.status().as_str(), "empty" | "ended" | "error") { 0 } else { 1 }
     }
 
     /// The on-air deck is protected from scrubbing / cue jumps while playing.
@@ -313,6 +318,10 @@ impl App {
 
     /// The entry of the song the room is hearing (or heard last).
     pub fn current_entry_id(&self) -> Option<Id> {
+        // Before the room has heard anything, a song cued on deck A isn't current.
+        if !self.perform.lock().heard_any {
+            return None;
+        }
         let d = &self.decks[self.live_deck()];
         if d.status() == "empty" {
             return None;
@@ -378,9 +387,13 @@ impl App {
         }
         // Something else audible? Fade it out first; never overlap by default.
         let busy: Vec<usize> = (0..2).filter(|&d| d != target_deck && self.audible(d)).collect();
+        // In auto mode the next song still comes after its pause and
+        // announcement: only fade out, and auto mode carries on from there.
+        let after_pause = matches!(target, PendingNext::Next) && self.auto_advance();
         if !busy.is_empty() {
+            let pending = (!after_pause).then(|| target.clone());
             if busy.iter().any(|&d| self.decks[d].is_fading()) {
-                self.perform.lock().pending = Some(target);
+                self.perform.lock().pending = pending;
                 self.emit_perform();
                 return Ok("queued".into());
             }
@@ -395,7 +408,7 @@ impl App {
                     return Ok("armed".into());
                 }
                 p.armed_until = None;
-                p.pending = Some(target);
+                p.pending = pending;
             }
             let secs = self.settings.read().manual_next_fade_ms as f64 / 1000.0;
             for d in busy {
@@ -468,7 +481,7 @@ impl App {
         if entry.kind == EntryKind::Pause {
             // Play Next on a pause entry: say its announcement; it's done.
             if let Some(text) = self.announcement_for(entry) {
-                self.speak(text);
+                self.speak(text, self.chime_for(entry));
             }
             return self.complete_pause(entry);
         }
@@ -663,20 +676,30 @@ impl App {
 
     // ------------------------------------------------------------ auto mode
 
-    /// Whether auto mode will say something before `entry`.
-    fn has_announcement(&self, entry: &SetlistEntry) -> bool {
-        match &entry.announcement {
-            Some(t) => !t.trim().is_empty(),
-            None => {
-                let a = &self.settings.read().announce;
-                a.enabled && entry.kind == EntryKind::Song && a.patterns.iter().any(|p| !p.trim().is_empty())
-            }
-        }
+    /// What `entry`'s announcement and chime come from: the entry, its set,
+    /// its version and its song (see `chime.rs`).
+    fn with_layers<R>(&self, entry: &SetlistEntry, f: impl FnOnce(&crate::chime::Layers) -> R) -> R {
+        let set = self.store.entry(&entry.id).ok().and_then(|(_, sid)| self.store.setlist(&sid).ok());
+        let vt = entry.version_id.as_ref().and_then(|v| self.store.version(v).ok()).and_then(|(v, tid)| Some((v, self.store.track(&tid).ok()?.rec)));
+        f(&crate::chime::Layers { entry: Some(entry), set: set.as_ref(), version: vt.as_ref().map(|x| &x.0), song: vt.as_ref().map(|x| &x.1) })
     }
 
-    /// What is said before `entry`: its own announcement (empty = nothing),
-    /// else, for songs with announcements on, a random pattern (never the same
-    /// twice in a row). `{dance}` becomes the dance's name.
+    /// Whether auto mode will say something before `entry`.
+    fn has_announcement(&self, entry: &SetlistEntry) -> bool {
+        let a = self.settings.read().announce.clone();
+        self.with_layers(entry, |l| l.speaks(&a))
+    }
+
+    /// The chime before `entry`'s announcement, if one plays.
+    fn chime_for(&self, entry: &SetlistEntry) -> crate::chime::Chime {
+        let a = self.settings.read().announce.clone();
+        self.with_layers(entry, |l| l.chime(&a))
+    }
+
+    /// What is said before `entry`: the announcement chosen for it (by the
+    /// entry, its version or its song; empty = nothing), else, for songs with
+    /// announcements on, a random pattern (never the same twice in a row).
+    /// `{dance}` becomes the dance's name.
     fn announcement_for(&self, entry: &SetlistEntry) -> Option<String> {
         if !self.has_announcement(entry) {
             return None;
@@ -689,7 +712,7 @@ impl App {
                 Some(t.to_string())
             }
         };
-        if let Some(t) = &entry.announcement {
+        if let Some(t) = self.with_layers(entry, |l| l.announcement().map(String::from)) {
             return fill(t.trim());
         }
         let patterns: Vec<String> = self.settings.read().announce.patterns.iter().filter(|p| !p.trim().is_empty()).cloned().collect();
@@ -731,22 +754,45 @@ impl App {
         (!name.is_empty()).then_some(name)
     }
 
-    /// Speaks `text` now (in a background thread).
-    pub fn speak(&self, text: String) {
-        let (tts, cfg, volume) = {
-            let s = self.settings.read();
-            (self.tts.clone(), s.announce.tts_config(), s.announce.volume as f32)
-        };
+    /// Synthesizes `text`, with `chime` before it (to run in a background thread).
+    fn clip_job(&self, text: String, chime: crate::chime::Chime) -> impl FnOnce() -> Clip + Send + 'static {
+        let (tts, cfg) = (self.tts.clone(), self.settings.read().announce.tts_config());
+        let prons = self.style_library().pronunciations;
+        let handle = self.handle.clone();
+        log::info!("announcement: {text}");
+        move || {
+            let (speech, rate) = tts.synthesize(&cfg, &text, &prons).map_err(|e| format!("{e:#}"))?;
+            let Some(sound) = chime else { return Ok((speech, rate)) };
+            let (samples, problem) = crate::chime::samples(&sound, rate);
+            if let Some(p) = problem {
+                emit(&handle, "toast", p);
+            }
+            Ok((Arc::new(crate::chime::before(samples, &speech, rate)), rate))
+        }
+    }
+
+    /// Speaks `text` now, after `chime` (in a background thread).
+    pub fn speak(&self, text: String, chime: crate::chime::Chime) {
+        let volume = self.settings.read().announce.volume as f32;
         let announcer = self.announcer.clone();
         let handle = self.handle.clone();
-        let prons = self.style_library().pronunciations;
-        log::info!("announcement: {text}");
-        std::thread::spawn(move || match tts.synthesize(&cfg, &text, &prons) {
+        let job = self.clip_job(text, chime);
+        std::thread::spawn(move || match job() {
             Ok((samples, rate)) => {
                 announcer.play(&samples, rate, volume);
             }
-            Err(e) => emit(&handle, "toast", format!("Announcement: {e:#}")),
+            Err(e) => emit(&handle, "toast", format!("Announcement: {e}")),
         });
+    }
+
+    /// Plays a chime alone (to try it).
+    pub fn preview_chime(&self, sound: &str) {
+        let volume = self.settings.read().announce.volume as f32;
+        let (samples, problem) = crate::chime::samples(sound, crate::chime::PREVIEW_RATE);
+        if let Some(p) = problem {
+            emit(&self.handle, "toast", p);
+        }
+        self.announcer.play(&samples, crate::chime::PREVIEW_RATE, volume);
     }
 
     /// Announces the next entry now (manual button): its announcement, or a pattern.
@@ -764,7 +810,7 @@ impl App {
                 }
             }
         };
-        self.speak(text);
+        self.speak(text, self.chime_for(&next));
         Ok(())
     }
 
@@ -813,13 +859,8 @@ impl App {
                 let clip = Arc::new(Mutex::new(None));
                 match self.announcement_for(&next) {
                     Some(text) => {
-                        log::info!("announcement: {text}");
-                        let (tts, cfg, slot) = (self.tts.clone(), self.settings.read().announce.tts_config(), clip.clone());
-                        let prons = self.style_library().pronunciations;
-                        std::thread::spawn(move || {
-                            let r = tts.synthesize(&cfg, &text, &prons).map_err(|e| format!("{e:#}"));
-                            *slot.lock() = Some(r);
-                        });
+                        let (job, slot) = (self.clip_job(text, self.chime_for(&next)), clip.clone());
+                        std::thread::spawn(move || *slot.lock() = Some(job()));
                     }
                     // Nothing to say (or no dance to name): just pause.
                     None => *clip.lock() = Some(Err(String::new())),

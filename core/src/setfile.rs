@@ -73,8 +73,12 @@ pub struct SetFileEntry {
     pub pause_before: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pause_after: Option<f64>,
+    /// What is said before it (the entry's choice, else its version's or song's).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub announcement: Option<String>,
+    /// Its chime (the entry's choice, else its set's, version's or song's).
+    #[serde(skip_serializing_if = "ChimeChoice::is_default")]
+    pub chime: ChimeChoice,
     /// How it played there (informational: an imported set starts afresh).
     #[serde(skip_serializing_if = "String::is_empty")]
     pub status: String,
@@ -117,6 +121,8 @@ pub fn export(store: &Store, setlist_id: &str, club_name: Option<String>, club_r
     let set = store.setlist(setlist_id)?;
     let mut entries = vec![];
     for e in &set.entries {
+        let vt = e.version_id.as_deref().and_then(|vid| store.version(vid).ok()).and_then(|(v, tid)| Some((v, store.track(&tid).ok()?.rec)));
+        let layers = crate::chime::Layers { entry: Some(e), set: Some(&set), version: vt.as_ref().map(|x| &x.0), song: vt.as_ref().map(|x| &x.1) };
         let mut out = SetFileEntry {
             kind: e.kind,
             club_styles: e.club_styles.clone(),
@@ -126,7 +132,8 @@ pub fn export(store: &Store, setlist_id: &str, club_name: Option<String>, club_r
             hold: e.hold,
             pause_before: e.pause_before,
             pause_after: e.pause_after,
-            announcement: e.announcement.clone(),
+            announcement: layers.announcement().map(String::from),
+            chime: layers.chosen_chime(),
             status: e.status.clone(),
             styles: e.styles.clone().unwrap_or_default(),
             settings: e.overrides.clone(),
@@ -200,6 +207,7 @@ pub fn import(store: &Store, text: &str, club: Option<ClubRef>) -> Result<Import
                 kind: e.kind,
                 pause_before: e.pause_before,
                 announcement: e.announcement.clone(),
+                chime: e.chime.clone(),
                 styles: (!e.styles.is_empty()).then(|| e.styles.clone()),
                 club_styles: e.club_styles.clone(),
                 label: e.label.clone(),

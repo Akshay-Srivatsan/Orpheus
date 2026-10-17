@@ -214,6 +214,8 @@ fn original_version(recording: &str) -> Version {
         legacy_style: None,
         settings: Overrides::default(),
         comment: String::new(),
+        announcement: None,
+        chime: Default::default(),
         tags: vec![],
         hidden: false,
     }
@@ -1063,6 +1065,8 @@ impl Store {
             if let Some(v) = &p.genre { t.genre = v.clone(); }
             if let Some(v) = &p.rating { t.rating = *v; }
             if let Some(v) = &p.notes { t.notes = v.clone(); }
+            if let Some(v) = &p.announcement { t.announcement = v.clone(); }
+            if let Some(v) = &p.chime { t.chime = v.clone(); }
             if let Some(v) = &p.primary {
                 if let Some(id) = v {
                     if !t.versions.iter().any(|x| &x.id == id) {
@@ -1792,6 +1796,8 @@ impl Store {
             if let Some(x) = &p.gain_db { v.settings.gain_db = *x; }
             if let Some(x) = &p.stems { v.settings.stems = x.clone(); }
             if let Some(x) = &p.comment { v.comment = x.clone(); }
+            if let Some(x) = &p.announcement { v.announcement = x.clone(); }
+            if let Some(x) = &p.chime { v.chime = x.clone(); }
             if let Some(x) = &p.tags { v.tags = x.clone(); }
             if let Some(x) = p.hidden { v.hidden = x; }
             Ok(v.clone())
@@ -1995,6 +2001,7 @@ impl Store {
             if let Some(v) = &p.club { s.club = v.clone(); }
             if let Some(v) = &p.notes { s.notes = v.clone(); }
             if let Some(v) = &p.mode { s.mode = v.clone(); }
+            if let Some(v) = &p.chime { s.chime = v.clone(); }
             Ok(())
         })
     }
@@ -2059,6 +2066,7 @@ impl Store {
                     kind: n.kind,
                     pause_before: n.pause_before,
                     announcement: n.announcement.clone(),
+                    chime: n.chime.clone(),
                     ..Default::default()
                 })
                 .collect();
@@ -2083,6 +2091,7 @@ impl Store {
             if let Some(v) = p.pause_before { e.pause_before = v.map(|x| x.max(0.0)); }
             if let Some(v) = p.pause_after { e.pause_after = v.map(|x| x.max(0.0)); }
             if let Some(v) = &p.announcement { e.announcement = v.clone(); }
+            if let Some(v) = &p.chime { e.chime = v.clone(); }
             if let Some(v) = &p.status {
                 e.status = v.clone();
                 if v == "pending" {
@@ -2537,6 +2546,8 @@ mod tests {
                     legacy_style: None,
                     settings: Overrides { target_bpm: Some(150.0), ..Default::default() },
                     comment: String::new(),
+                    announcement: None,
+                    chime: Default::default(),
                     tags: vec![],
                     hidden: false,
                 },
@@ -2669,7 +2680,7 @@ mod tests {
         let (va, ra) = first(&store, &a);
         let (vb, rb) = first(&store, &b);
         let teaching = store
-            .version_create(&b, Version { id: String::new(), name: "Teaching".into(), recording: String::new(), display_name: None, styles: vec![], legacy_style: None, settings: Overrides { target_bpm: Some(100.0), ..Default::default() }, comment: String::new(), tags: vec![], hidden: false })
+            .version_create(&b, Version { id: String::new(), name: "Teaching".into(), recording: String::new(), display_name: None, styles: vec![], legacy_style: None, settings: Overrides { target_bpm: Some(100.0), ..Default::default() }, comment: String::new(), announcement: None, chime: Default::default(), tags: vec![], hidden: false })
             .unwrap();
         let sid = store.setlist_create("Set", "live", None, None).unwrap();
         let eid = store.entries_insert(&sid, None, &[NewEntry { version_id: Some(vb.clone()), ..Default::default() }]).unwrap()[0].clone();
@@ -2864,7 +2875,7 @@ mod tests {
 
         // A version: hidden while a set plays it, deleted after.
         let c = song(&store, "Two versions", file("c"));
-        let v2 = store.version_create(&c, Version { id: String::new(), name: "Short".into(), recording: String::new(), display_name: None, styles: vec![], legacy_style: None, settings: Overrides { cue_out_ms: Some(60_000), ..Default::default() }, comment: String::new(), tags: vec![], hidden: false }).unwrap();
+        let v2 = store.version_create(&c, Version { id: String::new(), name: "Short".into(), recording: String::new(), display_name: None, styles: vec![], legacy_style: None, settings: Overrides { cue_out_ms: Some(60_000), ..Default::default() }, comment: String::new(), announcement: None, chime: Default::default(), tags: vec![], hidden: false }).unwrap();
         let e2 = store.entries_insert(&sid, None, &[NewEntry { version_id: Some(v2.id.clone()), ..Default::default() }]).unwrap()[0].clone();
         store.remove_version(&v2.id, &[]).unwrap();
         assert!(store.version(&v2.id).unwrap().0.hidden);

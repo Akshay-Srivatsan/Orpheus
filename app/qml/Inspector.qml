@@ -73,7 +73,7 @@ Pane {
                     const v = root.view.versions.find(x => x.version.id === root.view.entry.entry.versionId);
                     return v ? v.version.targetBpm || null : null;
                 }
-                view: root.view && root.view.entry ? root.view.entry : { entry: {}, showAs: [], versionChoices: [], tags: [], isPause: false, shownNames: "", playback: null, defaultPauseBefore: 0, defaultPauseAfter: 0, speaks: false }
+                view: root.view && root.view.entry ? root.view.entry : { entry: {}, showAs: [], versionChoices: [], tags: [], isPause: false, shownNames: "", playback: null, defaultPauseBefore: 0, defaultPauseAfter: 0, speaks: false, inherited: { announcement: null, speaks: false, chime: false, chimeSound: "" } }
             }
 
             Frame {
@@ -118,6 +118,32 @@ Pane {
                         wrapMode: TextEdit.Wrap
                         text: root.t ? root.t.notes || "" : ""
                         onEditingFinished: if (text !== (root.t.notes || "")) root.patchTrack({ notes: text })
+                    }
+                    // What auto mode says before it, unless a version or set says otherwise.
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: 2
+                        columnSpacing: Theme.spacing
+                        rowSpacing: 4
+                        readonly property var announce: Session.settings ? Session.settings.announce : null
+                        readonly property bool speaks: !root.t || root.t.announcement === undefined || root.t.announcement === null
+                            ? !!announce && announce.enabled : !!root.t.announcement.trim()
+                        FormLabel { text: qsTr("Announce") }
+                        AnnouncementField {
+                            Layout.fillWidth: true
+                            value: root.t && root.t.announcement !== undefined ? root.t.announcement : null
+                            defaultLabel: Session.announcementDefault(null)
+                            onEdited: v => root.patchTrack({ announcement: v })
+                        }
+                        FormLabel { visible: parent.speaks; text: qsTr("Chime") }
+                        ChimeField {
+                            visible: parent.speaks
+                            Layout.fillWidth: true
+                            value: root.t && root.t.chime ? root.t.chime : ({})
+                            inheritedOn: !!parent.announce && parent.announce.chime
+                            inheritedSound: parent.announce ? parent.announce.chimeSound : ""
+                            onEdited: v => root.patchTrack({ chime: v })
+                        }
                     }
                     Label {
                         opacity: Theme.dim

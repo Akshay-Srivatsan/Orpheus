@@ -173,6 +173,7 @@ Pane {
                     id: setMenu
                     MenuItem { text: qsTr("Rename"); onTriggered: root.renaming = true }
                     MenuItem { text: qsTr("Duplicate"); onTriggered: Session.run("setlist_duplicate", { id: root.set.id, name: qsTr("%1 (copy)").arg(root.set.name) }) }
+                    MenuItem { text: qsTr("Announcement Chime…"); onTriggered: chimeDialog.open() }
                     MenuItem {
                         text: qsTr("Reset Played / Skipped")
                         onTriggered: Session.confirm(qsTr("Mark every song in this set as not played?"), qsTr("Reset"), ok => { if (ok) Session.run("setlist_reset", { id: root.set.id }); })
@@ -190,6 +191,32 @@ Pane {
                         text: qsTr("Delete Set…")
                         onTriggered: Session.confirm(qsTr("Delete “%1”?").arg(root.set.name), qsTr("Delete"), ok => { if (ok) Session.run("setlist_delete", { id: root.set.id }); })
                     }
+                }
+            }
+        }
+
+        // The chime before announcements in this set.
+        AppDialog {
+            id: chimeDialog
+            title: qsTr("Announcement Chime")
+            standardButtons: Dialog.Close
+            readonly property var announce: Session.settings ? Session.settings.announce : null
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: Theme.spacing
+                Label {
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: 380
+                    wrapMode: Text.WordWrap
+                    text: qsTr("Whether a chime plays before each announcement in this set, and its sound. A song's own choice in this set comes first; by default, each song's (and version's) choice counts, else yours.")
+                }
+                ChimeField {
+                    Layout.fillWidth: true
+                    soundAlways: true
+                    value: root.set && root.set.chime ? root.set.chime : ({})
+                    inheritedOn: !!chimeDialog.announce && chimeDialog.announce.chime
+                    inheritedSound: chimeDialog.announce ? chimeDialog.announce.chimeSound : ""
+                    onEdited: v => Session.run("setlist_update", { id: root.set.id, patch: { chime: v } })
                 }
             }
         }
@@ -287,7 +314,7 @@ Pane {
                     }
                     onEntriesDropped: (ids, at) => { entries.dropIndex = -1; root.moveEntries(ids, at); }
                     onRemove: root.remove(Session.selectedEntries.includes(modelData.entry.id) ? Session.selectedEntries : [modelData.entry.id])
-                    onMoveNext: Session.run("entries_move_next", { setlistId: root.set.id, ids: Session.selectedEntries.length ? Session.selectedEntries : [modelData.entry.id] })
+                    onMoveNext: Session.run("entries_move_next", { setlistId: root.set.id, ids: Session.selectedEntries.includes(modelData.entry.id) ? Session.selectedEntries : [modelData.entry.id] })
                     club: root.v ? root.v.club : null
                 }
 

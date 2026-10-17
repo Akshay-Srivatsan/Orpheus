@@ -1251,6 +1251,25 @@ pub struct VersionView {
     /// Other versions of this song playing the same audio, and other songs playing it.
     pub shared_with: Vec<String>,
     pub other_songs: Vec<Choice>,
+    /// The announcement and chime it has unless it chooses its own (its song's, else yours).
+    pub inherited: Inherited,
+}
+
+/// What a level gets from those above it unless it chooses its own.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Inherited {
+    /// The text chosen above (empty = nothing); none: yours.
+    pub announcement: Option<String>,
+    /// Something is said (an entry), or would be (a song: if it were in a set).
+    pub speaks: bool,
+    pub chime: bool,
+    /// Empty = the built-in chime.
+    pub chime_sound: String,
+}
+
+fn inherited(l: &crate::chime::Layers, a: &crate::settings::AnnounceSettings) -> Inherited {
+    Inherited { announcement: l.announcement().map(String::from), speaks: l.speaks(a), chime: l.chime_enabled(a), chime_sound: l.chime_sound(a) }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1281,6 +1300,9 @@ pub struct EntryView {
     pub default_pause_after: f64,
     /// Something is said before it.
     pub speaks: bool,
+    /// The announcement and chime it has unless it chooses its own (its set's,
+    /// version's or song's, else yours).
+    pub inherited: Inherited,
     pub tags: Vec<TagOn>,
 }
 
@@ -1299,6 +1321,8 @@ pub struct SongContext<'a> {
     pub stems_ready: &'a dyn Fn(&Recording) -> bool,
     pub gap_secs: f64,
     pub announce: &'a crate::settings::AnnounceSettings,
+    /// The set of the entry shown.
+    pub set: Option<&'a crate::model::Setlist>,
 }
 
 fn bpm_from(r: &Recording) -> String {
@@ -1373,6 +1397,7 @@ pub fn song_view(ctx: &ViewContext, track: &Track, entry: Option<&SetlistEntry>,
                     })
                     .unwrap_or_default(),
                 audio,
+                inherited: inherited(&crate::chime::Layers { entry: None, set: None, version: None, song: Some(&track.rec) }, sc.announce),
                 version: v.clone(),
             }
         })
@@ -1418,10 +1443,9 @@ pub fn song_view(ctx: &ViewContext, track: &Track, entry: Option<&SetlistEntry>,
         } else {
             ev.map(|v| v.styles.iter().map(|k| ShowAs { key: k.clone(), name: style_name(&ctx.styles, k), fits: true, on: on(k) }).collect()).unwrap_or_default()
         };
-        let speaks = match &e.announcement {
-            Some(a) => !a.is_empty(),
-            None => sc.announce.enabled && !is_pause,
-        };
+        // A slot or pause has no song (an empty one stands in).
+        let layers = crate::chime::Layers { entry: Some(e), set: sc.set, version: ev, song: ev.map(|_| &track.rec) };
+        let speaks = layers.speaks(sc.announce);
         EntryView {
             is_pause,
             version_choices,
@@ -1431,6 +1455,7 @@ pub fn song_view(ctx: &ViewContext, track: &Track, entry: Option<&SetlistEntry>,
             default_pause_before: if speaks || sc.announce.enabled { sc.announce.pause_before_secs } else { sc.gap_secs },
             default_pause_after: sc.announce.pause_after_secs,
             speaks,
+            inherited: inherited(&layers.above_entry(), sc.announce),
             tags: club
                 .map(|c| {
                     c.tags

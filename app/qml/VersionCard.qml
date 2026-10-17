@@ -23,6 +23,9 @@ Frame {
     /// The deck holding this version, if any (its position sets start/end/fade).
     readonly property var deck: Session.decks.find(d => d && d.versionId === v.id && d.status !== "empty") || null
 
+    /// Something is said before it (in a set that doesn't say otherwise).
+    readonly property bool speaks: v.announcement === undefined || v.announcement === null ? view.inherited.speaks : !!v.announcement.trim()
+
     function patch(p) { return Session.run("version_update", { id: v.id, patch: p }); }
 
     // The selected one (or the set entry's) stands out.
@@ -247,6 +250,22 @@ Frame {
                         onEditingFinished: root.patch({ gainDb: text ? Number(text) : null })
                     }
                     Label { text: "dB" }
+                }
+                FormLabel { text: qsTr("Announce") }
+                AnnouncementField {
+                    Layout.fillWidth: true
+                    value: root.v.announcement === undefined ? null : root.v.announcement
+                    defaultLabel: Session.announcementDefault(root.view.inherited.announcement)
+                    onEdited: value => root.patch({ announcement: value })
+                }
+                FormLabel { visible: root.speaks; text: qsTr("Chime") }
+                ChimeField {
+                    visible: root.speaks
+                    Layout.fillWidth: true
+                    value: root.v.chime || ({})
+                    inheritedOn: root.view.inherited.chime
+                    inheritedSound: root.view.inherited.chimeSound
+                    onEdited: value => root.patch({ chime: value })
                 }
             }
 
