@@ -158,7 +158,7 @@ Pane {
 
         // Choosing a song for a style slot, or audio for an edit.
         Pane {
-            visible: !!Session.fillingSlot || !!Session.pickingEdit
+            visible: !!Session.fillingSlot || !!Session.pickingEdit || !!Session.chimePick
             Layout.fillWidth: true
             padding: 6
             background: Rectangle { color: Qt.alpha(Theme.system.highlight, 0.15); Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.system.highlight } }
@@ -167,14 +167,15 @@ Pane {
                 Label {
                     Layout.fillWidth: true
                     wrapMode: Text.WordWrap
-                    text: Session.fillingSlot
+                    text: Session.chimePick ? qsTr("Choosing the chime for %1: double-click a version of a song.").arg(Session.chimePick.title)
+                        : Session.fillingSlot
                         ? (Session.fillingRow ? qsTr("Choosing a song for slot %1 (%2): double-click a song, press its check button, or drag it onto the slot.")
                             .arg(Session.fillingRow.number || "").arg(Session.fillingRow.styles.map(s => s.name).join(" / ") || Session.fillingRow.title)
                             : qsTr("Choosing a song for the slot: double-click a song, press its check button, or drag it onto the slot."))
                         : qsTr("Choosing audio for a new version of “%1”: double-click a song to add its audio.").arg(Session.pickingEditTitle)
                 }
                 Button { flat: true; text: qsTr("Show All Songs"); visible: !!Session.fillingSlot && Session.styleFilter.length > 0; onClicked: Session.styleFilter = [] }
-                Button { flat: true; text: qsTr("Cancel"); onClicked: { Session.fillingSlot = ""; Session.pickingEdit = ""; } }
+                Button { flat: true; text: qsTr("Cancel"); onClicked: { Session.fillingSlot = ""; Session.pickingEdit = ""; Session.chimePick = null; } }
             }
         }
 

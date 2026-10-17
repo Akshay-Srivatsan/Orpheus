@@ -215,7 +215,10 @@ Pane {
                     soundAlways: true
                     value: root.set && root.set.chime ? root.set.chime : ({})
                     inheritedOn: !!chimeDialog.announce && chimeDialog.announce.chime
-                    inheritedSound: chimeDialog.announce ? chimeDialog.announce.chimeSound : ""
+                    inheritedSound: chimeDialog.announce ? chimeDialog.announce.chimeSound || null : null
+                    title: root.set ? qsTr("the set “%1”").arg(root.set.name) : ""
+                    beforePicking: () => chimeDialog.close()
+                    afterPicking: () => chimeDialog.open()
                     onEdited: v => Session.run("setlist_update", { id: root.set.id, patch: { chime: v } })
                 }
             }

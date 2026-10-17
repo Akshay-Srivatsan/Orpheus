@@ -82,16 +82,17 @@ impl SourceRef {
     }
 }
 
-/// Whether a chime plays before an announcement, and which. Each `None`
+/// Whether a chime plays before an announcement, and which (a version of a
+/// song, played as it's set: start, end, fade, gain). Each `None`
 /// inherits (entry → set → version → song → your settings; see `chime.rs`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ChimeChoice {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
-    /// An audio file; empty = the built-in chime.
+    /// The version of a song that plays as the chime.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sound: Option<String>,
+    pub sound: Option<Id>,
 }
 
 impl ChimeChoice {

@@ -827,11 +827,16 @@ pub fn tts_say(app: &Arc<App>, text: String) -> Res<()> {
     Ok(())
 }
 
-/// Plays a chime (a file, or empty for the built-in one) to try it.
-pub fn chime_preview(app: &Arc<App>, sound: String) -> Res<()> {
+/// Plays a chime (a version) to try it.
+pub fn chime_preview(app: &Arc<App>, version_id: Id) -> Res<()> {
     let a = app.clone();
-    std::thread::spawn(move || a.preview_chime(&sound));
+    std::thread::spawn(move || a.preview_chime(&version_id));
     Ok(())
+}
+
+/// Chime versions in words (see `App::chime_label`).
+pub fn chime_labels(app: &Arc<App>, version_ids: Vec<Id>) -> Res<Vec<String>> {
+    Ok(version_ids.iter().map(|v| app.chime_label(v)).collect())
 }
 
 /// The phonemes the announcer would read for `text` (with your pronunciations).
@@ -2944,10 +2949,19 @@ pub fn call(app: &Arc<App>, name: &str, args: serde_json::Value) -> Res<serde_js
             #[derive(Deserialize)]
             #[serde(rename_all = "camelCase")]
             struct A {
-                sound: String,
+                version_id: Id,
             }
             let a: A = parse(args)?;
-            json(chime_preview(app, a.sound))
+            json(chime_preview(app, a.version_id))
+        }
+        "chime_labels" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                version_ids: Vec<Id>,
+            }
+            let a: A = parse(args)?;
+            json(chime_labels(app, a.version_ids))
         }
         "tts_say" => {
             #[derive(Deserialize)]

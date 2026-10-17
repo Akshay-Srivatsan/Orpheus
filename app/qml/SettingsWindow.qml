@@ -54,13 +54,14 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.fillHeight: true
             currentIndex: root.current
-            // Pages load when first shown (and stay loaded).
+            // Pages load when first shown (and stay loaded, also while the
+            // window is closed).
             Repeater {
                 model: ["GeneralPage", "LibraryPage", "AudioPage", "ControllersPage", "StemsPage", "SpotifyPage", "ProjectorPage", "AutoModePage", "StylesPage", "ClubsPage"]
                 delegate: Loader {
                     required property string modelData
                     required property int index
-                    active: root.visible && (index === root.current || item !== null)
+                    active: item !== null || (root.visible && index === root.current)
                     source: modelData + ".qml"
                 }
             }

@@ -1264,8 +1264,8 @@ pub struct Inherited {
     /// Something is said (an entry), or would be (a song: if it were in a set).
     pub speaks: bool,
     pub chime: bool,
-    /// Empty = the built-in chime.
-    pub chime_sound: String,
+    /// The chime's version, and what it is.
+    pub chime_sound: Option<crate::model::Id>,
 }
 
 fn inherited(l: &crate::chime::Layers, a: &crate::settings::AnnounceSettings) -> Inherited {

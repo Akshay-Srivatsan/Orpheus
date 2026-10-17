@@ -48,6 +48,12 @@ Menu {
         onTriggered: Session.fillSlot(root.ids[0])
     }
     MenuItem {
+        visible: !!Session.chimePick
+        height: visible ? implicitHeight : 0
+        text: qsTr("Use as the Chime")
+        onTriggered: Session.chimePicked(root.ids[0])
+    }
+    MenuItem {
         visible: !!root.editFor
         height: visible ? implicitHeight : 0
         text: qsTr("Add Its Audio to “%1”").arg(Session.pickingEditTitle)

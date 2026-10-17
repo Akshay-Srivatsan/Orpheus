@@ -213,7 +213,8 @@ FocusScope {
         const current = selection.currentIndex.valid ? flat[songs.data(selection.currentIndex, Qt.DisplayRole)] : null;
         Session.selected = (rows.length ? rows : current ? [current] : []).map(r => r.versionId);
         const shown = current || rows[rows.length - 1];
-        if (shown) {
+        // While a chime is chosen, Info keeps showing what it's for.
+        if (shown && !Session.chimePick) {
             Session.inspectTrack = shown.trackId;
             Session.inspectEntry = "";
         }
@@ -235,7 +236,8 @@ FocusScope {
     /// chosen, else load onto the free deck (paused).
     function choose(row) {
         if (!row) return;
-        if (Session.fillingSlot) Session.fillSlot(row.versionId);
+        if (Session.chimePick) Session.chimePicked(row.versionId);
+        else if (Session.fillingSlot) Session.fillSlot(row.versionId);
         else if (Session.pickingEdit) Session.addEdit({ recording: row.recordingId });
         else Session.loadDeck(null, row.versionId, null);
     }
@@ -290,6 +292,7 @@ FocusScope {
         } else if (event.key === Qt.Key_Escape) {
             Session.fillingSlot = "";
             Session.pickingEdit = "";
+            Session.chimePick = null;
         }
     }
 

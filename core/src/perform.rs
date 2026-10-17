@@ -754,19 +754,54 @@ impl App {
         (!name.is_empty()).then_some(name)
     }
 
+    /// What the chime version plays: its audio file, from its start to its
+    /// end (or through its fade), at its gain.
+    fn chime_excerpt(&self, version_id: &str) -> Result<crate::chime::Excerpt> {
+        let (v, _) = self.store.version(version_id).map_err(|_| anyhow!("its version was removed"))?;
+        let path = crate::library::resolve_path(&self.store, &v.recording).ok_or_else(|| anyhow!("its audio isn't a file on this computer"))?;
+        let st = Self::resolve_settings(&v, None);
+        let secs = |ms: i64| ms as f64 / 1000.0;
+        // Like a deck: it fades out from its fade point, else stops at its end.
+        let fade = st.fade_out_ms.map(|_| self.fade_secs()).unwrap_or(0.0);
+        Ok(crate::chime::Excerpt {
+            path,
+            start_secs: st.cue_in_ms.map_or(0.0, secs),
+            end_secs: st.fade_out_ms.map(|f| secs(f) + fade).or(st.cue_out_ms.map(secs)),
+            fade_secs: fade,
+            gain: 10f32.powf(st.gain_db.unwrap_or(0.0) as f32 / 20.0),
+        })
+    }
+
+    /// A chime version in words: its song's title, and its name if that tells it apart.
+    pub fn chime_label(&self, version_id: &str) -> String {
+        match self.store.version(version_id).ok().and_then(|(v, tid)| Some((v, self.store.track(&tid).ok()?))) {
+            Some((v, t)) if t.rec.versions.len() > 1 || v.name != "Original" => format!("{} — {}", t.rec.title, v.name),
+            Some((_, t)) => t.rec.title,
+            None => "A removed version".into(),
+        }
+    }
+
+    /// The chime's samples at `rate` (none if it can't be played: then a message).
+    fn chime_samples(handle: &crate::app::Events, excerpt: &Result<crate::chime::Excerpt>, rate: u32) -> Option<Vec<f32>> {
+        match excerpt.as_ref().map_err(|e| anyhow!("{e}")).and_then(|x| crate::chime::render(x, rate)) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                emit(handle, "toast", format!("The chime can't play ({e:#})."));
+                None
+            }
+        }
+    }
+
     /// Synthesizes `text`, with `chime` before it (to run in a background thread).
     fn clip_job(&self, text: String, chime: crate::chime::Chime) -> impl FnOnce() -> Clip + Send + 'static {
         let (tts, cfg) = (self.tts.clone(), self.settings.read().announce.tts_config());
+        let chime = chime.map(|c| self.chime_excerpt(&c));
         let prons = self.style_library().pronunciations;
         let handle = self.handle.clone();
         log::info!("announcement: {text}");
         move || {
             let (speech, rate) = tts.synthesize(&cfg, &text, &prons).map_err(|e| format!("{e:#}"))?;
-            let Some(sound) = chime else { return Ok((speech, rate)) };
-            let (samples, problem) = crate::chime::samples(&sound, rate);
-            if let Some(p) = problem {
-                emit(&handle, "toast", p);
-            }
+            let Some(samples) = chime.and_then(|x| Self::chime_samples(&handle, &x, rate)) else { return Ok((speech, rate)) };
             Ok((Arc::new(crate::chime::before(samples, &speech, rate)), rate))
         }
     }
@@ -786,13 +821,11 @@ impl App {
     }
 
     /// Plays a chime alone (to try it).
-    pub fn preview_chime(&self, sound: &str) {
+    pub fn preview_chime(&self, version_id: &str) {
         let volume = self.settings.read().announce.volume as f32;
-        let (samples, problem) = crate::chime::samples(sound, crate::chime::PREVIEW_RATE);
-        if let Some(p) = problem {
-            emit(&self.handle, "toast", p);
+        if let Some(samples) = Self::chime_samples(&self.handle, &self.chime_excerpt(version_id), crate::chime::PREVIEW_RATE) {
+            self.announcer.play(&samples, crate::chime::PREVIEW_RATE, volume);
         }
-        self.announcer.play(&samples, crate::chime::PREVIEW_RATE, volume);
     }
 
     /// Announces the next entry now (manual button): its announcement, or a pattern.

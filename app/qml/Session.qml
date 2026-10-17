@@ -57,6 +57,14 @@ QtObject {
     property string pickingEdit: ""
     /// That song's title (for the banner).
     property string pickingEditTitle: ""
+    /// Choosing a chime in the library: { title, done(versionId) }.
+    property var chimePick: null
+    function pickChime(title, done) { fillingSlot = ""; pickingEdit = ""; chimePick = { title: title, done: done }; }
+    function chimePicked(versionId) {
+        const p = chimePick;
+        chimePick = null;
+        if (p) p.done(versionId);
+    }
     /// The open set's row of the slot being filled.
     readonly property var fillingRow: fillingSlot && set ? set.rows.find(r => r.entry.id === fillingSlot) || null : null
     // A slot filled or removed elsewhere (another window, a controller) stops being chosen.

@@ -65,7 +65,10 @@ SettingsPage {
                 inherits: false
                 soundAlways: true
                 value: page.a ? { enabled: page.a.chime, sound: page.a.chimeSound } : ({})
-                onEdited: v => page.setAnnounce({ chime: !!v.enabled, chimeSound: v.sound || "" })
+                title: qsTr("your announcements")
+                beforePicking: () => Session.settingsPage = ""
+                afterPicking: () => Session.settingsPage = "auto"
+                onEdited: v => page.setAnnounce({ chime: !!v.enabled, chimeSound: v.sound || null })
             }
             Label {
                 Layout.fillWidth: true

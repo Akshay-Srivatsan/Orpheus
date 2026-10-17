@@ -264,7 +264,9 @@ Frame {
                     Layout.fillWidth: true
                     value: root.v.chime || ({})
                     inheritedOn: root.view.inherited.chime
-                    inheritedSound: root.view.inherited.chimeSound
+                    inheritedSound: root.view.inherited.chimeSound || null
+                    versions: root.song.versions.filter(x => x.version.id !== root.v.id).map(x => ({ id: x.version.id, label: x.version.name }))
+                    title: qsTr("the version “%1”").arg(root.v.name)
                     onEdited: value => root.patch({ chime: value })
                 }
             }

@@ -141,7 +141,9 @@ Pane {
                             Layout.fillWidth: true
                             value: root.t && root.t.chime ? root.t.chime : ({})
                             inheritedOn: !!parent.announce && parent.announce.chime
-                            inheritedSound: parent.announce ? parent.announce.chimeSound : ""
+                            inheritedSound: parent.announce ? parent.announce.chimeSound || null : null
+                            versions: root.view ? root.view.versions.map(x => ({ id: x.version.id, label: x.version.name })) : []
+                            title: root.t ? qsTr("“%1”").arg(root.t.title) : ""
                             onEdited: v => root.patchTrack({ chime: v })
                         }
                     }

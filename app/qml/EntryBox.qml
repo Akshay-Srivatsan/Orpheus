@@ -233,7 +233,9 @@ GroupBox {
                 Layout.fillWidth: true
                 value: root.e.chime || ({})
                 inheritedOn: root.view.inherited.chime
-                inheritedSound: root.view.inherited.chimeSound
+                inheritedSound: root.view.inherited.chimeSound || null
+                versions: root.view.versionChoices
+                title: qsTr("this song in the set")
                 onEdited: v => root.update({ chime: v })
             }
             FormLabel { visible: root.view.speaks; text: qsTr("Then pause") }

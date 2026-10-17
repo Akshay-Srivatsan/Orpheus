@@ -112,8 +112,8 @@ pub struct AnnounceSettings {
     pub volume: f64,
     /// A chime plays before each announcement (songs and sets may say otherwise).
     pub chime: bool,
-    /// The chime: an audio file, or empty for the built-in one.
-    pub chime_sound: String,
+    /// The version of a song that plays as the chime.
+    pub chime_sound: Option<crate::model::Id>,
 }
 
 impl Default for AnnounceSettings {
@@ -128,7 +128,7 @@ impl Default for AnnounceSettings {
             speed: 1.0,
             volume: 0.8,
             chime: false,
-            chime_sound: String::new(),
+            chime_sound: None,
         }
     }
 }
