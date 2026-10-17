@@ -12,6 +12,8 @@ Pane {
     /// Something is audible in the room.
     readonly property bool playing: Session.decks.some(d => d && d.audible)
     readonly property var next: Session.set && p ? Session.set.rows.find(r => r.entry.id === p.nextEntryId) || null : null
+    /// The next entry's custom label (not just its styles' short names).
+    readonly property string nextLabel: next && !next.isPause && next.label && !next.styles.some(s => s.short === next.label) ? next.label : ""
     readonly property var nextDeck: p ? Session.decks.find(d => d && d.entryId && d.entryId === p.nextEntryId) || null : null
     readonly property real crossfader: p ? p.crossfader : 0.5
     readonly property bool inGap: !!p && !!p.gapStartedAt && !playing
@@ -39,9 +41,24 @@ Pane {
         spacing: 6
 
         Button {
+            id: playNext
             Layout.fillWidth: true
             Layout.preferredHeight: 44
-            highlighted: true
+            readonly property bool armed: !!root.p && root.p.armed
+            readonly property bool pending: !!root.p && root.p.pendingNext
+            // The default action when nothing plays; orange and blinking while armed
+            // (press again to fade the song out); plain while a song plays or it waits.
+            highlighted: !root.playing && !pending && !armed
+            palette.button: armed ? Theme.deckColors[1] : undefined
+            palette.buttonText: armed ? "black" : undefined
+            opacity: pending ? Theme.dim : 1
+            SequentialAnimation on opacity {
+                running: playNext.armed
+                loops: Animation.Infinite
+                NumberAnimation { to: 0.6; duration: 300 }
+                NumberAnimation { to: 1; duration: 300 }
+                onStopped: playNext.opacity = Qt.binding(() => playNext.pending ? Theme.dim : 1)
+            }
             font.bold: true
             enabled: !!root.next && (!!root.next.trackId || root.next.isPause || root.playing)
             text: !root.p ? qsTr("Play Next") : root.p.pendingNext ? qsTr("Starting after fade…")
@@ -68,6 +85,7 @@ Pane {
                     Layout.fillWidth: true
                     elide: Text.ElideRight
                     opacity: Theme.dim
+                    color: root.p && root.p.autoPhase === "held" ? Theme.warn : root.autoIn !== null || (root.p && root.p.autoPhase === "announcing") ? Theme.ok : Theme.system.text
                     text: !root.p ? "" : root.p.autoPhase === "announcing" ? qsTr("announcing…")
                         : root.p.autoPhase === "held" ? qsTr("waits for Play Next")
                         : root.autoIn !== null ? qsTr("next song in %1s").arg(Math.ceil(root.autoIn / 1000))
@@ -90,8 +108,14 @@ Pane {
         RowLayout {
             Layout.fillWidth: true
             visible: !!root.next
+            // Its custom label (e.g. "Mixer"), else its styles.
+            StyleBadge {
+                visible: root.nextLabel !== ""
+                style: root.next && root.next.styles.length ? root.next.styles[0] : null
+                label: root.nextLabel
+            }
             Repeater {
-                model: root.next && !root.next.isPause ? root.next.styles.slice(0, 2) : []
+                model: root.next && !root.next.isPause && root.nextLabel === "" ? root.next.styles.slice(0, 2) : []
                 delegate: StyleBadge { required property var modelData; style: modelData }
             }
             Icon { visible: !!root.next && root.next.isPause; glyph: "pause"; sourceSize.width: Theme.smallIconSize; sourceSize.height: Theme.smallIconSize }
@@ -100,6 +124,10 @@ Pane {
                 elide: Text.ElideRight
                 font.bold: true
                 text: !root.next ? "" : root.next.trackId || root.next.isPause ? root.next.title : qsTr("Pick a song for this slot")
+                color: root.next && !root.next.trackId && !root.next.isPause ? Theme.warn : Theme.system.text
+                ToolTip.visible: nextHover.hovered && truncated
+                ToolTip.text: text
+                HoverHandler { id: nextHover }
             }
         }
         Label {
@@ -109,6 +137,7 @@ Pane {
             opacity: Theme.dim
             text: !root.next ? "" : root.next.isPause
                 ? qsTr("%1 s").arg(Math.round(root.next.durationMs / 1000)) + (root.next.entry.announcement ? " · “" + root.next.entry.announcement + "”" : "")
+                    + (root.next.entry.hold ? " · " + qsTr("stops here") : "")
                 : [root.next.artist, root.next.bpm ? Session.fmtBpm(root.next.bpm) + " BPM" : "", root.nextDeck ? qsTr("deck %1").arg(root.nextDeck.deck === 0 ? "A" : "B") : ""].filter(x => x).join(" · ")
         }
         Label {
@@ -121,25 +150,47 @@ Pane {
 
         Item { Layout.fillHeight: true }
 
-        // Crossfader: which deck the room hears. It snaps to the center.
-        RowLayout {
+        // Crossfader: which deck the room hears. It snaps to the center; it flashes
+        // when an action is refused because of where it is.
+        Item {
             Layout.fillWidth: true
-            ToolButton { text: "A"; font.bold: root.crossfader < 0.5; onClicked: root.setCrossfader(0) }
-            Slider {
-                Layout.fillWidth: true
-                from: 0; to: 1; stepSize: 0.01
-                value: root.crossfader
-                onMoved: root.setCrossfader(value)
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Crossfader: which deck the room hears (double-click: center)")
-                TapHandler { onDoubleTapped: root.setCrossfader(0.5) }
+            implicitHeight: fader.implicitHeight
+            Rectangle {
+                id: blockedFlash
+                anchors.fill: parent
+                anchors.margins: -2
+                radius: 4
+                color: Theme.error
+                opacity: 0
+                SequentialAnimation {
+                    id: flashing
+                    loops: 3
+                    NumberAnimation { target: blockedFlash; property: "opacity"; to: 0.45; duration: 120 }
+                    NumberAnimation { target: blockedFlash; property: "opacity"; to: 0; duration: 120 }
+                }
+                Connections { target: Session; function onCrossfaderBlocked() { flashing.restart(); } }
             }
-            ToolButton { text: "B"; font.bold: root.crossfader > 0.5; onClicked: root.setCrossfader(1) }
+            RowLayout {
+                id: fader
+                anchors.fill: parent
+                ToolButton { text: "A"; font.bold: root.crossfader < 0.5; onClicked: root.setCrossfader(0) }
+                Slider {
+                    Layout.fillWidth: true
+                    from: 0; to: 1; stepSize: 0.01
+                    value: root.crossfader
+                    onMoved: root.setCrossfader(value)
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Crossfader: which deck the room hears (double-click: center)")
+                    TapHandler { onDoubleTapped: root.setCrossfader(0.5) }
+                }
+                ToolButton { text: "B"; font.bold: root.crossfader > 0.5; onClicked: root.setCrossfader(1) }
+            }
         }
         Button {
             visible: root.crossfader !== 0.5 && !!root.p && root.p.autoAdvance
             flat: true
             text: qsTr("Center the Crossfader")
+            palette.buttonText: Theme.warn
             ToolTip.visible: hovered
             ToolTip.text: qsTr("Auto mode needs the crossfader centered")
             onClicked: root.setCrossfader(0.5)

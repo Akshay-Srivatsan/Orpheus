@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import Orpheus
 
 // A song's overview waveform (low = red, mid = green, high = blue), with the
@@ -19,6 +20,8 @@ Item {
     property var hotCues: []
     property color accent: Theme.system.highlight
     property bool interactive: true
+    /// Seeking needs Alt (the protected on-air deck).
+    property bool guarded: false
 
     signal seeked(real ms, bool alt)
     signal scrubbed(real ms, bool alt)
@@ -144,12 +147,28 @@ Item {
         color: root.accent
     }
 
+    // Where the mouse would seek to.
+    Rectangle {
+        visible: seekArea.containsMouse
+        x: seekArea.mouseX
+        width: 1
+        height: parent.height
+        color: Qt.alpha(Theme.system.text, 0.5)
+    }
+
     MouseArea {
+        id: seekArea
         anchors.fill: parent
         enabled: root.interactive && root.durationMs > 0
+        hoverEnabled: true
         cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
         property bool alt: false
         onPressed: mouse => { alt = (mouse.modifiers & Qt.AltModifier) !== 0; root.seeked(root.msAt(mouse.x), alt); }
         onPositionChanged: mouse => { if (pressed) root.scrubbed(root.msAt(mouse.x), alt); }
+        // Settle where the drag ended.
+        onReleased: mouse => root.scrubbed(root.msAt(mouse.x), alt)
+        ToolTip.visible: containsMouse && !pressed
+        ToolTip.delay: 800
+        ToolTip.text: root.guarded ? qsTr("On air: Alt-click to seek") : qsTr("Click or drag to seek")
     }
 }

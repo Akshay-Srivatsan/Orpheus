@@ -73,6 +73,8 @@ pub struct DeckState {
     pub near_end: bool,
     /// It holds the set's next entry.
     pub up_next: bool,
+    /// How long Fade (and a fade-out point) takes, in seconds.
+    pub fade_secs: f64,
 }
 
 /// Recent actions that can be undone (older ones are forgotten).
@@ -767,6 +769,7 @@ impl App {
                 protected: audible && protect,
                 near_end: audible && remaining < NEAR_END_MS && !snap.fading,
                 up_next: snap.entry_id.is_some() && snap.entry_id == next,
+                fade_secs: fade_ms / 1000.0,
                 snapshot: snap,
             }
         });

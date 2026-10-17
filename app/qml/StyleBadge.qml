@@ -10,23 +10,25 @@ Rectangle {
     /// A `Shown` style from the engine: name, short, color, problems.
     property var style
     property bool short: true
+    /// Shown instead of the style's name (e.g. a set entry's custom label).
+    property string label: ""
 
-    implicitWidth: label.implicitWidth + 10
-    implicitHeight: label.implicitHeight + 4
+    implicitWidth: badgeText.implicitWidth + 10
+    implicitHeight: badgeText.implicitHeight + 4
     radius: height / 2
     color: Qt.alpha(style ? style.color : Theme.neutral, 0.25)
     border.color: Qt.alpha(style ? style.color : Theme.neutral, style && style.problems.length ? 1 : 0.6)
     border.width: style && style.problems.length ? 2 : 1
 
     Label {
-        id: label
+        id: badgeText
         anchors.centerIn: parent
-        text: root.style ? (root.short ? root.style.short : root.style.name) : ""
+        text: root.label || (root.style ? (root.short ? root.style.short : root.style.name) : "")
         font.pointSize: Theme.smallPointSize
         font.bold: true
     }
 
     HoverHandler { id: hover }
-    ToolTip.visible: hover.hovered && !!root.style
-    ToolTip.text: root.style ? [root.style.name].concat(root.style.problems).join("\n") : ""
+    ToolTip.visible: hover.hovered && (!!root.style || !!root.label)
+    ToolTip.text: root.style ? [root.style.name].concat(root.style.problems).join("\n") : root.label
 }

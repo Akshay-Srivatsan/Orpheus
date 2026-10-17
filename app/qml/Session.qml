@@ -60,6 +60,8 @@ QtObject {
 
     /// Asks the window for a confirmation (callback: confirmed) or a file
     /// (callback: its path). `options`: { title, nameFilters, save, name }.
+    /// An action was refused because of where the crossfader is (it flashes).
+    signal crossfaderBlocked()
     signal confirmRequested(string text, string okLabel, var callback)
     signal fileRequested(var options, var callback)
 
@@ -220,6 +222,7 @@ QtObject {
             case "toast-info": session.toast(String(p), "info"); break;
             case "open-settings": session.settingsPage = String(p); break;
             case "crossfader-blocked":
+                session.crossfaderBlocked();
                 session.toast(qsTr("The crossfader is toward deck %1: center it, or move it to the deck you want on air.").arg(p === 0 ? "A" : "B"), "info");
                 break;
             case "reconnect-found":

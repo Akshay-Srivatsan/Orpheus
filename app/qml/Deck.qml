@@ -15,6 +15,8 @@ Pane {
     readonly property color accent: Theme.deckColors[deck]
     readonly property bool loaded: !!d && d.loaded
     readonly property bool playing: !!d && d.status === "playing"
+    /// A custom label it's shown with (not just its styles' short names).
+    readonly property string customLabel: song && song.label && !song.styles.some(s => s.short === song.label) ? song.label : ""
     readonly property real range: (Session.settings ? Session.settings.tempoRangePct : 10) / 100
     readonly property var stemJob: d && d.recordingId && Session.stems ? Session.stems.jobs[d.recordingId] : undefined
     readonly property var stemNames: [qsTr("Vocals"), qsTr("Drums"), qsTr("Bass"), qsTr("Other (melody, instruments)")]
@@ -40,11 +42,19 @@ Pane {
     background: Rectangle {
         color: Theme.system.base
         radius: 6
-        border.color: root.d && root.d.audible ? Theme.onAir : Qt.alpha(root.accent, 0.5)
-        border.width: root.d && root.d.audible ? 2 : 1
+        // Red on air, amber near its end, highlighted while a song is dragged over it.
+        border.color: drop.containsDrag ? Theme.system.highlight : root.d && root.d.nearEnd ? Theme.warn : root.d && root.d.audible ? Theme.onAir : Qt.alpha(root.accent, 0.5)
+        border.width: drop.containsDrag || (root.d && (root.d.audible || root.d.nearEnd)) ? 2 : 1
+        Rectangle {
+            visible: drop.containsDrag
+            anchors.fill: parent
+            radius: parent.radius
+            color: Qt.alpha(Theme.system.highlight, 0.08)
+        }
     }
 
     DropArea {
+        id: drop
         anchors.fill: parent
         keys: Session.songKeys
         enabled: !(root.d && root.d.audible)
@@ -199,9 +209,35 @@ Pane {
                         text: root.song ? root.song.artist + (root.song.versionLabel ? " · " + root.song.versionLabel : "")
                             : Session.settings && Session.settings.autoLoadNext ? qsTr("Drag a song here — the set's next song loads automatically") : qsTr("Drag a song here")
                     }
+                    // Its custom label (e.g. a line dance's name), else its styles; the
+                    // set entry's tags; and whether it streams (it needs the network).
+                    StyleBadge {
+                        visible: root.customLabel !== ""
+                        style: root.song && root.song.styles.length ? root.song.styles[0] : null
+                        label: root.customLabel
+                    }
                     Repeater {
-                        model: root.song ? root.song.styles : []
+                        model: root.song && root.customLabel === "" ? root.song.styles : []
                         delegate: StyleBadge { required property var modelData; style: modelData }
+                    }
+                    Repeater {
+                        model: root.song ? root.song.tags : []
+                        delegate: Label {
+                            required property var modelData
+                            text: modelData.name
+                            color: modelData.color
+                            font.pointSize: Theme.smallPointSize
+                        }
+                    }
+                    Label {
+                        visible: !!root.song && root.song.spotify
+                        text: qsTr("Spotify")
+                        color: Theme.spotify
+                        font.pointSize: Theme.smallPointSize
+                        font.bold: true
+                        ToolTip.visible: spotifyHover.hovered
+                        ToolTip.text: qsTr("Streams from Spotify: it needs the internet connection")
+                        HoverHandler { id: spotifyHover }
                     }
                 }
                 Label {
@@ -243,6 +279,7 @@ Pane {
             hotCues: root.song ? root.song.hotCues : []
             accent: root.accent
             interactive: root.loaded
+            guarded: !!root.d && root.d.protected
             onSeeked: (ms, alt) => root.seek(ms, alt)
             onScrubbed: (ms, alt) => { if (!root.d.protected || alt) root.call("deck_scrub", { ms: Math.round(ms), force: alt }); }
         }
@@ -278,16 +315,26 @@ Pane {
                     enabled: root.loaded
                     implicitWidth: 32
                     palette.button: isSet ? Theme.cueColors[index] : undefined
+                    down: pad.pressed
                     ToolTip.visible: hovered
-                    ToolTip.text: isSet ? qsTr("Hot cue %1: jump (right-click to clear)").arg(slot) : qsTr("Set hot cue %1 here").arg(slot)
-                    onClicked: {
-                        if (isSet && root.d.protected) {
-                            Session.toast(qsTr("Deck %1 is on air.").arg(root.letter), "info");
-                            return;
+                    ToolTip.text: isSet ? qsTr("Hot cue %1: jump (Alt-click or right-click to clear)").arg(slot) : qsTr("Set hot cue %1 here").arg(slot)
+                    // A mouse area for the modifiers: Alt-click (or right-click) clears.
+                    MouseArea {
+                        id: pad
+                        anchors.fill: parent
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        onClicked: m => {
+                            if (m.button === Qt.RightButton || (m.modifiers & Qt.AltModifier)) {
+                                root.call("deck_hotcue", { slot: slot, action: "clear" });
+                                return;
+                            }
+                            if (isSet && root.d.protected) {
+                                Session.toast(qsTr("Deck %1 is on air: its hot cues don't jump. Turn off protection in Settings → General to use them.").arg(root.letter), "info");
+                                return;
+                            }
+                            root.call("deck_hotcue", { slot: slot, action: "trigger" });
                         }
-                        root.call("deck_hotcue", { slot: slot, action: "trigger" });
                     }
-                    TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.call("deck_hotcue", { slot: slot, action: "clear" }) }
                 }
             }
             Item { Layout.fillWidth: true }
@@ -295,6 +342,8 @@ Pane {
                 visible: !!root.d && root.d.audible && root.playing
                 enabled: !!root.d && !root.d.fading
                 text: qsTr("Fade")
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Fade out (%1 s)").arg(root.d ? root.d.fadeSecs : 0)
                 onClicked: root.call("deck_action", { action: "fadeOut" })
             }
             Button {
@@ -344,11 +393,14 @@ Pane {
                 enabled: root.loaded
                 text: root.stemJob && root.stemJob.state === "failed" ? qsTr("Retry Stems") : qsTr("Prepare Stems")
                 ToolTip.visible: hovered
-                ToolTip.text: root.stemJob && root.stemJob.state === "failed" ? qsTr("Separating the stems failed: try again") : qsTr("Separate vocals, drums, bass and the rest, to mute them live")
+                ToolTip.text: root.stemJob && root.stemJob.state === "failed" ? qsTr("Failed: %1").arg(root.stemJob.message || "") : qsTr("Separate vocals, drums, bass and the rest, to mute them live (takes a minute or two)")
                 onClicked: root.call("deck_stem", { index: 0 })
             }
             Label {
                 visible: root.loaded
+                ToolTip.visible: bpmHover.hovered && !!root.song && !!root.song.style && !!root.song.style.sweet
+                ToolTip.text: root.song && root.song.style && root.song.style.sweet ? qsTr("%1: %2–%3 BPM").arg(root.song.style.name).arg(root.song.style.sweet[0]).arg(root.song.style.sweet[1]) : ""
+                HoverHandler { id: bpmHover }
                 textFormat: Text.StyledText
                 color: !root.d ? Theme.system.text : root.d.tempoFit === "outside" ? Theme.warn : root.d.tempoFit === "sweet" ? Theme.ok : Theme.system.text
                 text: "<b>" + Session.fmtBpm(root.d ? root.d.bpm : null) + "</b> BPM"

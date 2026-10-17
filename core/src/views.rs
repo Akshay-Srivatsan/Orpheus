@@ -1060,18 +1060,7 @@ pub fn set_view(ctx: &ViewContext, set: &Setlist, tracks: &[Track], gap_secs: f6
                 number += 1;
                 number
             });
-            let tags = e
-                .tags
-                .iter()
-                .map(|k| {
-                    let t = club.and_then(|c| c.tags.get(k));
-                    TagShown {
-                        key: k.clone(),
-                        name: t.map_or_else(|| k.clone(), |t| t.name.clone()),
-                        color: t.and_then(|t| t.color.clone()).unwrap_or_else(|| NEUTRAL.into()),
-                    }
-                })
-                .collect();
+            let tags = entry_tags(club, e);
             let on = |k: &str| shown.iter().any(|s| s.key == k);
             let show_as: Vec<ShowAs> = if is_pause {
                 vec![]
@@ -1508,6 +1497,25 @@ pub struct DeckSong {
     pub has_file: bool,
     /// The club's (or your) allowed slowdown (percent).
     pub slower_pct: f64,
+    /// The set entry's club tags.
+    pub tags: Vec<TagShown>,
+    /// It plays from Spotify (it needs the network).
+    pub spotify: bool,
+}
+
+/// A set entry's club tags, named and coloured as the club has them.
+pub fn entry_tags(club: Option<&Club>, e: &SetlistEntry) -> Vec<TagShown> {
+    e.tags
+        .iter()
+        .map(|k| {
+            let t = club.and_then(|c| c.tags.get(k));
+            TagShown {
+                key: k.clone(),
+                name: t.map_or_else(|| k.clone(), |t| t.name.clone()),
+                color: t.and_then(|t| t.color.clone()).unwrap_or_else(|| NEUTRAL.into()),
+            }
+        })
+        .collect()
 }
 
 pub fn deck_song(ctx: &ViewContext, track: &Track, version: &Version, entry: Option<&SetlistEntry>) -> DeckSong {
@@ -1532,6 +1540,11 @@ pub fn deck_song(ctx: &ViewContext, track: &Track, version: &Version, entry: Opt
         hot_cues: rec.map(|r| r.rec.hot_cues.clone()).unwrap_or_default(),
         has_file: rec.is_some_and(|r| !r.files.is_empty()),
         slower_pct: ctx.tempo_change.slower,
+        tags: entry.map(|e| entry_tags(ctx.club.as_deref(), e)).unwrap_or_default(),
+        // As the deck chooses: the preferred source, else a file, else Spotify.
+        spotify: rec.is_some_and(|r| {
+            r.rec.sources.iter().any(|s| s.kind == "spotify") && (r.files.is_empty() || r.rec.preferred_source.as_deref() == Some("spotify"))
+        }),
     }
 }
 
