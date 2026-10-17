@@ -283,6 +283,10 @@ FocusScope {
                 readonly property var r: modelData
                 readonly property bool selected: Session.selected.includes(r.versionId)
                 readonly property bool onDeck: Session.decks.some(d => d && d.versionId === r.versionId)
+                /// The room hears it (else, on a deck, it's previewed).
+                readonly property bool audible: Session.decks.some(d => d && d.versionId === r.versionId && d.audible)
+                /// The first of the songs suggested by tempo (a dashed line above them).
+                readonly property bool firstSuggested: r.suggested && (index === 0 || !root.rows[index - 1].suggested)
                 width: list.width
                 height: Theme.rowHeight
 
@@ -299,13 +303,26 @@ FocusScope {
                 Rectangle {
                     visible: rowItem.onDeck
                     width: 3; height: parent.height
-                    color: Session.decks.some(d => d && d.versionId === rowItem.r.versionId && d.audible) ? Theme.onAir : Theme.deckColors[0]
+                    color: rowItem.audible ? Theme.onAir : Theme.deckColors[0]
                 }
+                Row {
+                    visible: rowItem.firstSuggested
+                    width: parent.width
+                    spacing: 4
+                    Repeater {
+                        model: Math.ceil(rowItem.width / 8)
+                        delegate: Rectangle { width: 4; height: 1; color: Theme.system.mid }
+                    }
+                }
+                HoverHandler { id: suggestedHover; enabled: rowItem.r.suggested }
+                ToolTip.visible: suggestedHover.hovered && rowItem.r.suggested
+                ToolTip.delay: 800
+                ToolTip.text: qsTr("Not labelled %1 yet — its tempo fits").arg(Session.styleFilter.length === 1 ? Session.styleName(Session.styleFilter[0]) : "")
 
                 Row {
                     anchors.fill: parent
                     spacing: 0
-                    opacity: rowItem.r.playedInSet || rowItem.r.suggested ? 0.55 : 1
+                    opacity: rowItem.r.playedInSet || rowItem.r.suggested || rowItem.r.availability === "missing" ? 0.55 : 1
 
                     NumberCell { visible: root.positioned; width: root.colWidth("position"); text: rowItem.r.position || ""; color: rowItem.fg; opacity: Theme.dim }
                     // Title: a tree (a song's other versions indented under it). Every row
@@ -375,7 +392,9 @@ FocusScope {
                                 verticalAlignment: Text.AlignVCenter
                                 text: rowItem.r.title
                                 elide: Text.ElideRight
-                                color: rowItem.fg
+                                // On a deck: in its colour (as the bar).
+                                color: rowItem.onDeck && !rowItem.selected ? (rowItem.audible ? Theme.onAir : Theme.deckColors[0]) : rowItem.fg
+                                font.italic: rowItem.r.suggested
                                 opacity: rowItem.r.child ? Theme.dim : 1
                             }
                         }
@@ -477,17 +496,41 @@ FocusScope {
     }
 
     // When nothing's here, why.
-    Label {
+    ColumnLayout {
         anchors.centerIn: parent
         visible: !!root.view && !root.rows.length
         width: parent.width * 0.6
-        horizontalAlignment: Text.AlignHCenter
-        wrapMode: Text.WordWrap
-        opacity: 0.7
-        text: !root.view ? "" : root.view.librarySongs === 0 ? qsTr("Your library is empty.\nAdd a music folder in Settings → Library, drag files onto this window, or connect Spotify.")
-            : Session.search ? qsTr("No songs match “%1”.").arg(Session.search)
-            : Session.styleFilter.length ? qsTr("No songs here match the style filter. Drag songs onto a style above to label them.")
-            : qsTr("Nothing here yet.")
+        spacing: Theme.spacing
+        readonly property var crate: Session.view.kind === "crate" ? Session.crates.find(c => c.id === Session.view.id) : null
+        Label {
+            Layout.fillWidth: true
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+            font.bold: !!root.view && root.view.librarySongs === 0
+            text: !root.view ? "" : root.view.librarySongs === 0 ? qsTr("Your library is empty.")
+                : Session.search ? qsTr("No songs match “%1”.").arg(Session.search)
+                : Session.styleFilter.length === 1 && Session.styleFilter[0] !== "__none"
+                    ? (Session.suggestByTempo ? qsTr("Nothing here is labelled %1, and no unlabelled songs fit its tempo.") : qsTr("Nothing here is labelled %1.")).arg(Session.styleName(Session.styleFilter[0]))
+                : Session.styleFilter.length ? qsTr("No songs here match the style filter.")
+                : parent.crate && parent.crate.smart ? qsTr("No songs match this smart crate's rules yet.")
+                : qsTr("Nothing here yet.")
+        }
+        Label {
+            visible: !!root.view && (root.view.librarySongs === 0 || Session.styleFilter.length > 0)
+            Layout.fillWidth: true
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+            opacity: Theme.dim
+            text: root.view && root.view.librarySongs === 0 ? qsTr("Add a music folder, drag files onto this window, or connect Spotify.")
+                : qsTr("Drag songs onto a style above to label them.")
+        }
+        Button {
+            visible: !!root.view && root.view.librarySongs === 0
+            Layout.alignment: Qt.AlignHCenter
+            highlighted: true
+            text: qsTr("Add Music Folder…")
+            onClicked: Session.settingsPage = "library"
+        }
     }
 
     SongMenu {

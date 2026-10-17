@@ -81,6 +81,7 @@ GroupBox {
                     icon.source: Theme.icon("plus")
                     icon.width: Theme.smallIconSize; icon.height: Theme.smallIconSize
                     implicitHeight: 24
+                    implicitWidth: 32
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("Any of the club's styles, even one this song doesn't fit")
                     onClicked: otherStyles.popup()
