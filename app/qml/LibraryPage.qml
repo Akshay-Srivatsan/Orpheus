@@ -20,7 +20,7 @@ SettingsPage {
         columnSpacing: Theme.spacing * 2
         rowSpacing: Theme.spacing
 
-        Label { text: qsTr("Library folder"); Layout.alignment: Qt.AlignTop }
+        FormLabel { text: qsTr("Library folder"); Layout.alignment: Qt.AlignTop }
         ColumnLayout {
             Layout.fillWidth: true
             TextField { Layout.fillWidth: true; readOnly: true; text: page.info ? page.info.libraryDir : "" }
@@ -42,7 +42,7 @@ SettingsPage {
             }
         }
 
-        Label { text: qsTr("Music folders"); Layout.alignment: Qt.AlignTop }
+        FormLabel { text: qsTr("Music folders"); Layout.alignment: Qt.AlignTop }
         ColumnLayout {
             Layout.fillWidth: true
             Repeater {
@@ -84,7 +84,7 @@ SettingsPage {
             }
         }
 
-        Label { text: qsTr("This computer"); Layout.alignment: Qt.AlignTop }
+        FormLabel { text: qsTr("This computer"); Layout.alignment: Qt.AlignTop }
         ColumnLayout {
             Layout.fillWidth: true
             TextField { Layout.fillWidth: true; readOnly: true; text: page.info ? page.info.dataDir : "" }
@@ -97,7 +97,7 @@ SettingsPage {
             }
         }
 
-        Label { visible: !!page.info && page.info.loadErrors.length > 0; text: qsTr("Problems"); color: Theme.warn; Layout.alignment: Qt.AlignTop }
+        FormLabel { visible: !!page.info && page.info.loadErrors.length > 0; text: qsTr("Problems"); color: Theme.warn; Layout.alignment: Qt.AlignTop }
         ColumnLayout {
             visible: !!page.info && page.info.loadErrors.length > 0
             Layout.fillWidth: true

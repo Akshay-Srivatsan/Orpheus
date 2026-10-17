@@ -18,7 +18,7 @@ SettingsPage {
         columnSpacing: Theme.spacing * 2
         rowSpacing: Theme.spacing
 
-        Label { text: qsTr("Title") }
+        FormLabel { text: qsTr("Title") }
         TextField {
             Layout.preferredWidth: 320
             placeholderText: qsTr("(setlist name)")
@@ -26,16 +26,15 @@ SettingsPage {
             onEditingFinished: page.setProj({ title: text })
         }
 
-        Label { text: qsTr("Layout") }
-        TabBar {
+        FormLabel { text: qsTr("Layout") }
+        ComboBox {
             readonly property var values: ["auto", "live", "preset"]
+            model: [qsTr("Follow the set's mode"), qsTr("Now playing"), qsTr("Full setlist")]
             currentIndex: page.p ? Math.max(0, values.indexOf(page.p.displayMode)) : 0
-            TabButton { text: qsTr("Follow set mode"); width: implicitWidth; onClicked: page.setProj({ displayMode: "auto" }) }
-            TabButton { text: qsTr("Now playing"); width: implicitWidth; onClicked: page.setProj({ displayMode: "live" }) }
-            TabButton { text: qsTr("Full setlist"); width: implicitWidth; onClicked: page.setProj({ displayMode: "preset" }) }
+            onActivated: index => page.setProj({ displayMode: values[index] })
         }
 
-        Label { text: qsTr("Show"); Layout.alignment: Qt.AlignTop }
+        FormLabel { text: qsTr("Show"); Layout.alignment: Qt.AlignTop }
         ColumnLayout {
             CheckBox { text: qsTr("Next dance during the pause (so dancers can find a partner)"); checked: !!page.p && page.p.revealNextInGap; onToggled: page.setProj({ revealNextInGap: checked }) }
             CheckBox { text: qsTr("“Up next” while a song plays"); checked: !!page.p && page.p.showNext; onToggled: page.setProj({ showNext: checked }) }
@@ -45,17 +44,17 @@ SettingsPage {
             CheckBox { text: qsTr("Cover art"); checked: !!page.p && page.p.showArtwork; onToggled: page.setProj({ showArtwork: checked }) }
         }
 
-        Label { text: qsTr("Recently played") }
+        FormLabel { text: qsTr("Recently played") }
         RowLayout {
             SpinBox { from: 0; to: 12; value: page.p ? page.p.historyCount : 0; onValueModified: page.setProj({ historyCount: value }) }
             Label { text: qsTr("songs") }
         }
-        Label { text: qsTr("Coming up") }
+        FormLabel { text: qsTr("Coming up") }
         RowLayout {
             SpinBox { from: 0; to: 8; value: page.p ? page.p.upcomingCount || 0 : 0; onValueModified: page.setProj({ upcomingCount: value }) }
             Label { text: qsTr("songs or slots (live layout; 0 = just “Up next”)"); opacity: 0.7 }
         }
-        Label { text: qsTr("Text size") }
+        FormLabel { text: qsTr("Text size") }
         RowLayout {
             Slider {
                 id: textScale
@@ -65,11 +64,11 @@ SettingsPage {
             }
             Label { text: Math.round(textScale.value * 100) + "%" }
         }
-        Label { text: qsTr("Theme") }
-        TabBar {
+        FormLabel { text: qsTr("Theme") }
+        ComboBox {
+            model: [qsTr("Dark"), qsTr("Light")]
             currentIndex: page.p && page.p.theme === "light" ? 1 : 0
-            TabButton { text: qsTr("Dark"); width: implicitWidth; onClicked: page.setProj({ theme: "dark" }) }
-            TabButton { text: qsTr("Light"); width: implicitWidth; onClicked: page.setProj({ theme: "light" }) }
+            onActivated: index => page.setProj({ theme: index === 1 ? "light" : "dark" })
         }
     }
 }

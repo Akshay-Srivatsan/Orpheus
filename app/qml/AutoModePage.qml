@@ -39,14 +39,14 @@ SettingsPage {
         columnSpacing: Theme.spacing * 2
         rowSpacing: Theme.spacing
 
-        Label { text: qsTr("Next song"); Layout.alignment: Qt.AlignTop }
+        FormLabel { text: qsTr("Next song"); Layout.alignment: Qt.AlignTop }
         ColumnLayout {
             RadioButton { text: qsTr("Manual: start each song with Play Next"); checked: !!page.s && !page.s.autoAdvance; onToggled: if (checked) Session.saveSettings({ autoAdvance: false }) }
             RadioButton { text: qsTr("Automatic (auto mode)"); checked: !!page.s && !!page.s.autoAdvance; onToggled: if (checked) Session.saveSettings({ autoAdvance: true }) }
             Label { text: qsTr("The Auto button under Play Next switches it for the current session."); font.pixelSize: 11; opacity: 0.7 }
         }
 
-        Label { text: qsTr("Announcements"); Layout.alignment: Qt.AlignTop }
+        FormLabel { text: qsTr("Announcements"); Layout.alignment: Qt.AlignTop }
         ColumnLayout {
             CheckBox { text: qsTr("Announce the next dance before starting it"); checked: !!page.a && page.a.enabled; onToggled: page.setAnnounce({ enabled: checked }) }
             Label {
@@ -57,7 +57,7 @@ SettingsPage {
             }
         }
 
-        Label { text: qsTr("Timing") }
+        FormLabel { text: qsTr("Timing") }
         RowLayout {
             Label { text: qsTr("Pause") }
             TextField {
@@ -76,7 +76,7 @@ SettingsPage {
             Label { text: qsTr("s, next song") }
         }
 
-        Label { text: qsTr("What to say"); Layout.alignment: Qt.AlignTop }
+        FormLabel { text: qsTr("What to say"); Layout.alignment: Qt.AlignTop }
         ColumnLayout {
             Layout.fillWidth: true
             Label {
@@ -107,7 +107,7 @@ SettingsPage {
             Button { icon.source: Theme.icon("plus"); text: qsTr("Add Sentence"); onClicked: page.setAnnounce({ patterns: page.a.patterns.concat([qsTr("Next up: {dance}.")]) }) }
         }
 
-        Label { text: qsTr("Voice"); Layout.alignment: Qt.AlignTop }
+        FormLabel { text: qsTr("Voice"); Layout.alignment: Qt.AlignTop }
         ColumnLayout {
             Layout.fillWidth: true
             RowLayout {
@@ -162,7 +162,7 @@ SettingsPage {
             }
         }
 
-        Label { text: qsTr("Pronunciation"); Layout.alignment: Qt.AlignTop }
+        FormLabel { text: qsTr("Pronunciation"); Layout.alignment: Qt.AlignTop }
         ColumnLayout {
             Layout.fillWidth: true
             Label {
@@ -225,7 +225,7 @@ SettingsPage {
             }
         }
 
-        Label { text: qsTr("Sound"); Layout.alignment: Qt.AlignTop }
+        FormLabel { text: qsTr("Sound"); Layout.alignment: Qt.AlignTop }
         ColumnLayout {
             Layout.fillWidth: true
             RowLayout {

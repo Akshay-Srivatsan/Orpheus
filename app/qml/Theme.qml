@@ -1,5 +1,6 @@
 pragma Singleton
 import QtQuick
+import QtQuick.Controls
 
 // Colours and sizes the interface uses beyond the system palette. Status
 // colours come in a light and a dark variant, following the system's theme.
@@ -24,6 +25,10 @@ QtObject {
     /// Secondary text (artist, version, counts): the text colour, faded.
     readonly property real dim: 0.65
     readonly property real faint: 0.45
+
+    /// A text field's height in the current style (form labels line up with it).
+    readonly property TextField probe: TextField {}
+    readonly property real fieldHeight: probe.implicitHeight
 
     readonly property int spacing: 8
     readonly property int rowHeight: 26

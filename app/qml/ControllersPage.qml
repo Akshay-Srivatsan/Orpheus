@@ -41,10 +41,10 @@ SettingsPage {
         columnSpacing: Theme.spacing * 2
         rowSpacing: Theme.spacing
 
-        Label { text: qsTr("MIDI") }
+        FormLabel { text: qsTr("MIDI") }
         CheckBox { text: qsTr("Use MIDI controllers"); checked: !!page.s && page.s.midi.enabled; onToggled: page.setMidi({ enabled: checked }) }
 
-        Label { text: qsTr("Connected"); Layout.alignment: Qt.AlignTop }
+        FormLabel { text: qsTr("Connected"); Layout.alignment: Qt.AlignTop }
         ColumnLayout {
             Repeater {
                 model: page.midi ? page.midi.ports : []
@@ -53,7 +53,7 @@ SettingsPage {
             Label { visible: !!page.midi && !page.midi.ports.length; text: qsTr("No MIDI devices found. Plug one in; it connects automatically."); opacity: 0.6 }
         }
 
-        Label { text: qsTr("Mapping") }
+        FormLabel { text: qsTr("Mapping") }
         RowLayout {
             ComboBox {
                 Layout.preferredWidth: 300

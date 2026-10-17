@@ -42,7 +42,7 @@ GroupBox {
             columnSpacing: Theme.spacing
             rowSpacing: 4
 
-            Label { visible: !root.pause && root.view.versionChoices.length > 1; text: qsTr("Version") }
+            FormLabel { visible: !root.pause && root.view.versionChoices.length > 1; text: qsTr("Version") }
             ComboBox {
                 visible: !root.pause && root.view.versionChoices.length > 1
                 Layout.fillWidth: true
@@ -51,7 +51,7 @@ GroupBox {
                 onActivated: index => Session.run("entry_switch_version", { entryId: root.e.id, versionId: root.view.versionChoices[index].id })
             }
 
-            Label { visible: root.pause; text: qsTr("Name") }
+            FormLabel { visible: root.pause; text: qsTr("Name") }
             TextField {
                 visible: root.pause
                 Layout.fillWidth: true
@@ -60,7 +60,7 @@ GroupBox {
                 onEditingFinished: root.update({ label: text.trim() || null })
             }
 
-            Label { visible: !root.pause; text: root.e.versionId ? qsTr("Show as") : qsTr("Slot") }
+            FormLabel { visible: !root.pause; text: root.e.versionId ? qsTr("Show as") : qsTr("Slot") }
             Flow {
                 visible: !root.pause
                 Layout.fillWidth: true
@@ -107,7 +107,7 @@ GroupBox {
                 }
             }
 
-            Label { visible: !root.pause; text: qsTr("Label") }
+            FormLabel { visible: !root.pause; text: qsTr("Label") }
             TextField {
                 visible: !root.pause
                 Layout.fillWidth: true
@@ -116,7 +116,7 @@ GroupBox {
                 onEditingFinished: if (text.trim() !== (root.e.label || "")) root.update({ label: text.trim() || null })
             }
 
-            Label { visible: !root.pause; text: qsTr("Tempo") }
+            FormLabel { visible: !root.pause; text: qsTr("Tempo") }
             RowLayout {
                 visible: !root.pause
                 TextField {
@@ -133,15 +133,15 @@ GroupBox {
                     text: root.view.playback && root.view.playback.target ? "→ " + Session.fmtBpm(root.view.playback.target) + " (" + ((root.view.playback.rate - 1) * 100).toFixed(1) + "%)" : ""
                 }
             }
-            Label { visible: !root.pause; text: qsTr("Start / end") }
+            FormLabel { visible: !root.pause; text: qsTr("Start / end") }
             RowLayout {
                 visible: !root.pause
                 TimeField { value: root.e.overrides ? root.e.overrides.cueInMs : null; placeholderText: qsTr("inherit"); onEdited: ms => root.override({ cueInMs: ms }) }
                 TimeField { value: root.e.overrides ? root.e.overrides.cueOutMs : null; placeholderText: qsTr("inherit"); onEdited: ms => root.override({ cueOutMs: ms }) }
             }
-            Label { visible: !root.pause; text: qsTr("Fade at") }
+            FormLabel { visible: !root.pause; text: qsTr("Fade at") }
             TimeField { visible: !root.pause; value: root.e.overrides ? root.e.overrides.fadeOutMs : null; placeholderText: qsTr("inherit"); onEdited: ms => root.override({ fadeOutMs: ms }) }
-            Label { visible: !root.pause; text: qsTr("Gain") }
+            FormLabel { visible: !root.pause; text: qsTr("Gain") }
             RowLayout {
                 visible: !root.pause
                 TextField {
@@ -154,14 +154,14 @@ GroupBox {
                 Label { text: "dB" }
             }
 
-            Label { text: qsTr("Note") }
+            FormLabel { text: qsTr("Note") }
             TextField {
                 Layout.fillWidth: true
                 text: root.e.note || ""
                 placeholderText: qsTr("e.g. announce the jam")
                 onEditingFinished: if (text !== (root.e.note || "")) root.update({ note: text })
             }
-            Label { visible: root.view.tags.length > 0; text: qsTr("Tags") }
+            FormLabel { visible: root.view.tags.length > 0; text: qsTr("Tags") }
             Flow {
                 visible: root.view.tags.length > 0
                 Layout.fillWidth: true
@@ -192,7 +192,7 @@ GroupBox {
             columnSpacing: Theme.spacing
             rowSpacing: 4
 
-            Label { text: root.pause ? qsTr("Length") : qsTr("Pause before") }
+            FormLabel { text: root.pause ? qsTr("Length") : qsTr("Pause before") }
             RowLayout {
                 TextField {
                     implicitWidth: 70
@@ -203,7 +203,7 @@ GroupBox {
                 }
                 Label { text: "s" }
             }
-            Label { text: qsTr("Announce") }
+            FormLabel { text: qsTr("Announce") }
             ColumnLayout {
                 Layout.fillWidth: true
                 ComboBox {
@@ -225,7 +225,7 @@ GroupBox {
                 }
                 Label { visible: !!root.e.announcement; text: qsTr("{dance} is replaced by the dance's name."); font.pixelSize: 11; opacity: 0.6 }
             }
-            Label { visible: root.view.speaks; text: qsTr("Then pause") }
+            FormLabel { visible: root.view.speaks; text: qsTr("Then pause") }
             RowLayout {
                 visible: root.view.speaks
                 TextField {

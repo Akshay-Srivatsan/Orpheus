@@ -28,21 +28,27 @@ ApplicationWindow {
         anchors.fill: parent
         spacing: 0
 
-        ListView {
+        // The pages, in a full-height list.
+        Rectangle {
             Layout.preferredWidth: 180
             Layout.fillHeight: true
-            model: root.pages
-            currentIndex: root.current
-            delegate: ItemDelegate {
-                required property var modelData
-                required property int index
-                width: ListView.view.width
-                text: modelData[1]
-                highlighted: index === root.current
-                onClicked: Session.settingsPage = modelData[0]
+            color: Theme.system.base
+            ListView {
+                anchors.fill: parent
+                anchors.topMargin: Theme.spacing / 2
+                model: root.pages
+                currentIndex: root.current
+                delegate: ItemDelegate {
+                    required property var modelData
+                    required property int index
+                    width: ListView.view.width
+                    text: modelData[1]
+                    highlighted: index === root.current
+                    onClicked: Session.settingsPage = modelData[0]
+                }
             }
         }
-        ToolSeparator { orientation: Qt.Vertical; Layout.fillHeight: true }
+        Rectangle { Layout.fillHeight: true; implicitWidth: 1; color: Theme.system.mid }
 
         StackLayout {
             Layout.fillWidth: true

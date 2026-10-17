@@ -15,7 +15,7 @@ SettingsPage {
         columnSpacing: Theme.spacing * 2
         rowSpacing: Theme.spacing
 
-        Label { text: qsTr("Default club") }
+        FormLabel { text: qsTr("Default club") }
         RowLayout {
             ComboBox {
                 Layout.preferredWidth: 280
@@ -26,7 +26,7 @@ SettingsPage {
             Button { flat: true; text: qsTr("Clubs and their guidelines…"); onClicked: Session.settingsPage = "clubs" }
         }
 
-        Label { text: qsTr("Pause between songs") }
+        FormLabel { text: qsTr("Pause between songs") }
         RowLayout {
             TextField {
                 implicitWidth: 70
@@ -38,13 +38,13 @@ SettingsPage {
             Label { text: qsTr("seconds (empty = the club's)") ; opacity: 0.7 }
         }
 
-        Label { text: qsTr("Next song") }
+        FormLabel { text: qsTr("Next song") }
         RowLayout {
             Label { text: s && s.autoAdvance ? qsTr("Automatic (auto mode)") : qsTr("Manual: start each song with Play Next") }
             Button { flat: true; text: qsTr("Auto mode and announcements…"); onClicked: Session.settingsPage = "auto" }
         }
 
-        Label { text: qsTr("Play Next while playing") }
+        FormLabel { text: qsTr("Play Next while playing") }
         ColumnLayout {
             CheckBox { text: qsTr("Require a second press"); checked: !!s && s.confirmNextWhilePlaying; onToggled: set({ confirmNextWhilePlaying: checked }) }
             RowLayout {
@@ -59,14 +59,14 @@ SettingsPage {
             }
         }
 
-        Label { text: qsTr("Decks") }
+        FormLabel { text: qsTr("Decks") }
         ColumnLayout {
             CheckBox { text: qsTr("Load the next song in the set onto the free deck automatically"); checked: !!s && s.autoLoadNext; onToggled: set({ autoLoadNext: checked }) }
             CheckBox { text: qsTr("Protect the on-air deck: ignore jog wheels, CUE and cue jumps while the room hears it"); checked: !!s && s.protectOnAir; onToggled: set({ protectOnAir: checked }) }
             CheckBox { text: qsTr("Switch headphones to the free deck when a deck goes on air"); checked: !!s && s.headphonesFollowFreeDeck; onToggled: set({ headphonesFollowFreeDeck: checked }) }
         }
 
-        Label { text: qsTr("Crossfader") }
+        FormLabel { text: qsTr("Crossfader") }
         ColumnLayout {
             RowLayout {
                 Label { text: qsTr("Snaps to the center within ±") }
@@ -82,7 +82,7 @@ SettingsPage {
             }
         }
 
-        Label { text: qsTr("Fade-out length") }
+        FormLabel { text: qsTr("Fade-out length") }
         RowLayout {
             TextField {
                 implicitWidth: 60
@@ -94,7 +94,7 @@ SettingsPage {
             Label { text: qsTr("seconds") }
         }
 
-        Label { text: qsTr("Tempo") }
+        FormLabel { text: qsTr("Tempo") }
         ColumnLayout {
             CheckBox { text: qsTr("Keep pitch when changing tempo (key lock)"); checked: !!s && s.keylock; onToggled: set({ keylock: checked }) }
             RowLayout {
@@ -120,7 +120,7 @@ SettingsPage {
             }
         }
 
-        Label { text: qsTr("Levels") }
+        FormLabel { text: qsTr("Levels") }
         ColumnLayout {
             RowLayout {
                 CheckBox { text: qsTr("Level songs automatically to"); checked: !!s && s.autoGain; onToggled: set({ autoGain: checked }) }

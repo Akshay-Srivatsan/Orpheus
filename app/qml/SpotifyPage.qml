@@ -21,7 +21,7 @@ SettingsPage {
         columnSpacing: Theme.spacing * 2
         rowSpacing: Theme.spacing
 
-        Label { text: qsTr("Account"); Layout.alignment: Qt.AlignTop }
+        FormLabel { text: qsTr("Account"); Layout.alignment: Qt.AlignTop }
         ColumnLayout {
             Label { visible: !!page.sp && page.sp.connected; textFormat: Text.StyledText; text: page.sp ? qsTr("Connected as <b>%1</b>").arg(page.sp.username || "") : "" }
             Label {
@@ -59,7 +59,7 @@ SettingsPage {
             Label { visible: !!page.sp && !!page.sp.error; text: page.sp && page.sp.error ? page.sp.error : ""; color: Theme.error }
         }
 
-        Label { text: qsTr("Downloaded audio") }
+        FormLabel { text: qsTr("Downloaded audio") }
         RowLayout {
             Label { text: page.cache === null ? "…" : qsTr("%1 MB").arg((page.cache / 1e6).toFixed(0)) }
             Button {
@@ -70,10 +70,10 @@ SettingsPage {
             }
         }
 
-        Label { text: qsTr("Startup") }
+        FormLabel { text: qsTr("Startup") }
         CheckBox { text: qsTr("Reconnect automatically"); checked: !!page.s && page.s.spotify.autoConnect; onToggled: page.setSpotify({ autoConnect: checked }) }
 
-        Label { text: qsTr("Search app"); Layout.alignment: Qt.AlignTop }
+        FormLabel { text: qsTr("Search app"); Layout.alignment: Qt.AlignTop }
         ColumnLayout {
             Layout.fillWidth: true
             TextField {

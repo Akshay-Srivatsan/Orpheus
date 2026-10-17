@@ -29,7 +29,7 @@ SettingsPage {
         columnSpacing: Theme.spacing * 2
         rowSpacing: Theme.spacing
 
-        Label { text: qsTr("Room (master)") }
+        FormLabel { text: qsTr("Room (master)") }
         RowLayout {
             ComboBox {
                 Layout.preferredWidth: 300
@@ -50,7 +50,7 @@ SettingsPage {
             }
         }
 
-        Label { text: qsTr("Headphones (cue)") }
+        FormLabel { text: qsTr("Headphones (cue)") }
         RowLayout {
             ComboBox {
                 Layout.preferredWidth: 300
@@ -79,13 +79,13 @@ SettingsPage {
             text: qsTr("⚠ Headphones use the same channels as the room: previews will be heard by the dancers.")
         }
 
-        Label { text: qsTr("Buffer") }
+        FormLabel { text: qsTr("Buffer") }
         RowLayout {
             SpinBox { from: 20; to: 500; stepSize: 10; value: page.s ? page.s.audio.bufferMs : 100; onValueModified: page.setAudio({ bufferMs: value }) }
             Label { text: qsTr("ms (raise if you hear dropouts)"); opacity: 0.7 }
         }
 
-        Label { text: qsTr("Status"); Layout.alignment: Qt.AlignTop }
+        FormLabel { text: qsTr("Status"); Layout.alignment: Qt.AlignTop }
         ColumnLayout {
             Label {
                 visible: !!Session.outputs && !!Session.outputs.master

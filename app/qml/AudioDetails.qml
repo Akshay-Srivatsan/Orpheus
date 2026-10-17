@@ -43,7 +43,7 @@ ColumnLayout {
         columnSpacing: Theme.spacing
         rowSpacing: 4
 
-        Label { text: qsTr("BPM") }
+        FormLabel { text: qsTr("BPM") }
         RowLayout {
             SpinBox {
                 id: bpm
@@ -95,7 +95,7 @@ ColumnLayout {
             font.pixelSize: 11
             text: root.audio.bpmFrom + (root.r.loudnessDb != null ? " · " + root.r.loudnessDb.toFixed(1) + " LUFS" : "") + " · " + Session.fmtTime(root.r.durationMs)
         }
-        Label { text: qsTr("Meter") }
+        FormLabel { text: qsTr("Meter") }
         ComboBox {
             readonly property var values: ["auto", 3, 4]
             model: [qsTr("Detected") + (root.r.detectedMeter ? ": " + Session.meterName(root.r.detectedMeter) : root.r.analyzed ? qsTr(": unclear") : ""),
@@ -103,7 +103,7 @@ ColumnLayout {
             currentIndex: root.r.meterSource === "user" ? (root.r.beatsPerBar === 3 ? 1 : 2) : 0
             onActivated: index => root.patch({ beatsPerBar: index === 0 ? null : values[index] })
         }
-        Label { text: qsTr("Gain") }
+        FormLabel { text: qsTr("Gain") }
         RowLayout {
             SpinBox {
                 from: -240; to: 240; stepSize: 5
@@ -193,10 +193,10 @@ ColumnLayout {
     RowLayout {
         visible: root.r.sources.some(s => s.kind === "spotify") && root.r.sources.some(s => s.kind === "file")
         Label { text: qsTr("Play from") }
-        TabBar {
+        ComboBox {
+            model: [qsTr("The file"), qsTr("Spotify")]
             currentIndex: root.r.preferredSource === "spotify" ? 1 : 0
-            TabButton { text: qsTr("File"); width: implicitWidth; onClicked: root.patch({ preferredSource: null }) }
-            TabButton { text: qsTr("Spotify"); width: implicitWidth; onClicked: root.patch({ preferredSource: "spotify" }) }
+            onActivated: index => root.patch({ preferredSource: index === 1 ? "spotify" : null })
         }
     }
     RowLayout {

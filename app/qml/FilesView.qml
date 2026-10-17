@@ -53,11 +53,12 @@ Pane {
         RowLayout {
             Layout.fillWidth: true
             Layout.margins: Theme.spacing
-            TabBar {
-                currentIndex: ["all", "in", "out"].indexOf(root.show)
-                TabButton { text: qsTr("All"); width: implicitWidth; onClicked: root.show = "all" }
-                TabButton { text: qsTr("In the library"); width: implicitWidth; onClicked: root.show = "in" }
-                TabButton { text: qsTr("Not in the library (%1)").arg(root.outCount); width: implicitWidth; onClicked: root.show = "out" }
+            Label { text: qsTr("Show") }
+            ComboBox {
+                readonly property var values: ["all", "in", "out"]
+                model: [qsTr("All files"), qsTr("In the library"), qsTr("Not in the library (%1)").arg(root.outCount)]
+                currentIndex: values.indexOf(root.show)
+                onActivated: index => root.show = values[index]
             }
             Button {
                 visible: root.show === "out" && root.outCount > 0
@@ -99,16 +100,27 @@ Pane {
         }
 
         ListView {
+            id: fileList
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
             model: root.shown
             ScrollBar.vertical: ScrollBar {}
-            header: RowLayout {
+            readonly property real wFile: width * 0.32
+            readonly property real wFolder: width * 0.25
+            headerPositioning: ListView.OverlayHeader
+            header: Rectangle {
+                z: 2
                 width: ListView.view.width
-                Label { Layout.preferredWidth: parent.width * 0.32; Layout.leftMargin: Theme.spacing; text: qsTr("FILE"); font.pixelSize: 11; font.bold: true; opacity: 0.6 }
-                Label { Layout.preferredWidth: parent.width * 0.25; text: qsTr("FOLDER"); font.pixelSize: 11; font.bold: true; opacity: 0.6 }
-                Label { Layout.fillWidth: true; text: qsTr("IN THE LIBRARY AS"); font.pixelSize: 11; font.bold: true; opacity: 0.6 }
+                implicitHeight: Theme.rowHeight
+                color: Theme.system.button
+                Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.system.mid }
+                Row {
+                    anchors.fill: parent
+                    HeaderCell { width: fileList.wFile; text: qsTr("File"); hoverEnabled: false }
+                    HeaderCell { width: fileList.wFolder; text: qsTr("Folder"); hoverEnabled: false }
+                    HeaderCell { width: parent.width - fileList.wFile - fileList.wFolder; text: qsTr("In the Library As"); hoverEnabled: false }
+                }
             }
             delegate: Rectangle {
                 id: fileRow
@@ -116,34 +128,53 @@ Pane {
                 required property int index
                 width: ListView.view.width
                 height: Theme.rowHeight + 4
-                color: index % 2 ? palette.alternateBase : palette.base
-                RowLayout {
+                color: hover.hovered ? Qt.alpha(Theme.system.highlight, 0.12) : index % 2 ? Theme.system.alternateBase : Theme.system.base
+                HoverHandler { id: hover }
+                Row {
                     anchors.fill: parent
-                    opacity: fileRow.modelData.out ? 0.6 : 1
-                    Label { Layout.preferredWidth: parent.width * 0.32; Layout.leftMargin: Theme.spacing; text: fileRow.modelData.name; elide: Text.ElideMiddle }
+                    opacity: fileRow.modelData.out ? Theme.dim : 1
                     Label {
-                        Layout.preferredWidth: parent.width * 0.25
+                        width: fileList.wFile
+                        height: parent.height
+                        leftPadding: 6; rightPadding: 6
+                        verticalAlignment: Text.AlignVCenter
+                        text: fileRow.modelData.name
                         elide: Text.ElideMiddle
-                        opacity: 0.7
+                    }
+                    Label {
+                        width: fileList.wFolder
+                        height: parent.height
+                        leftPadding: 6; rightPadding: 6
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideMiddle
+                        opacity: Theme.dim
                         text: fileRow.modelData.folder === null || fileRow.modelData.folder === undefined ? qsTr("(added from elsewhere)") : fileRow.modelData.folder
                     }
-                    Label {
-                        Layout.fillWidth: true
-                        elide: Text.ElideRight
-                        text: fileRow.modelData.removed
-                            ? qsTr("removed") + (fileRow.modelData.songTitles.length ? " · " + qsTr("still in %1").arg(fileRow.modelData.songTitles.map(s => s.label).join(", ")) : "")
-                            : !fileRow.modelData.recording ? qsTr("not added") : fileRow.modelData.songTitles.map(s => s.label).join(", ")
-                    }
-                    Button {
-                        visible: fileRow.modelData.out
-                        text: qsTr("Add to Library")
-                        onClicked: root.add([fileRow.modelData.path])
-                    }
-                    Button {
-                        visible: !fileRow.modelData.out && !!fileRow.modelData.recording
-                        flat: true
-                        text: qsTr("Remove")
-                        onClicked: root.remove(fileRow.modelData)
+                    RowLayout {
+                        width: parent.width - fileList.wFile - fileList.wFolder
+                        height: parent.height
+                        Label {
+                            Layout.fillWidth: true
+                            leftPadding: 6
+                            elide: Text.ElideRight
+                            opacity: fileRow.modelData.removed || !fileRow.modelData.recording ? Theme.dim : 1
+                            text: fileRow.modelData.removed
+                                ? qsTr("Removed") + (fileRow.modelData.songTitles.length ? " · " + qsTr("still in %1").arg(fileRow.modelData.songTitles.map(s => s.label).join(", ")) : "")
+                                : !fileRow.modelData.recording ? qsTr("Not added") : fileRow.modelData.songTitles.map(s => s.label).join(", ")
+                        }
+                        Button {
+                            visible: fileRow.modelData.out
+                            flat: true
+                            icon.source: Theme.icon("plus")
+                            text: qsTr("Add to Library")
+                            onClicked: root.add([fileRow.modelData.path])
+                        }
+                        Button {
+                            visible: !fileRow.modelData.out && !!fileRow.modelData.recording
+                            flat: true
+                            text: qsTr("Remove…")
+                            onClicked: root.remove(fileRow.modelData)
+                        }
                     }
                 }
             }

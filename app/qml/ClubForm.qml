@@ -22,13 +22,13 @@ ColumnLayout {
         columns: 2
         columnSpacing: Theme.spacing * 2
         rowSpacing: 4
-        Label { text: qsTr("Name") }
+        FormLabel { text: qsTr("Name") }
         TextField { Layout.fillWidth: true; text: root.c ? root.c.name : ""; onEditingFinished: if (text !== root.c.name) root.edit(d => d.name = text) }
-        Label { text: qsTr("Description") }
+        FormLabel { text: qsTr("Description") }
         TextArea { Layout.fillWidth: true; wrapMode: TextEdit.Wrap; text: root.c ? root.c.description : ""; onEditingFinished: if (text !== root.c.description) root.edit(d => d.description = text) }
-        Label { text: qsTr("Guidelines page") }
+        FormLabel { text: qsTr("Guidelines page") }
         TextField { Layout.fillWidth: true; placeholderText: qsTr("https://… (for people)"); text: root.c && root.c.website ? root.c.website : ""; onEditingFinished: root.edit(d => d.website = text || null) }
-        Label { text: qsTr("File's web address"); ToolTip.visible: urlHover.hovered; ToolTip.text: qsTr("Where this file is published; Check for Updates fetches it"); HoverHandler { id: urlHover } }
+        FormLabel { text: qsTr("File's web address"); ToolTip.visible: urlHover.hovered; ToolTip.text: qsTr("Where this file is published; Check for Updates fetches it"); HoverHandler { id: urlHover } }
         TextField { Layout.fillWidth: true; placeholderText: "https://…/club.toml"; text: root.c && root.c.url ? root.c.url : ""; onEditingFinished: root.edit(d => d.url = text || null) }
     }
 
@@ -40,11 +40,11 @@ ColumnLayout {
         columns: 2
         columnSpacing: Theme.spacing * 2
         rowSpacing: 4
-        Label { text: qsTr("Minutes") }
+        FormLabel { text: qsTr("Minutes") }
         RangeInput { value: root.c ? root.c.set.minutes : null; onEdited: r => root.edit(d => d.set.minutes = r) }
-        Label { text: qsTr("Songs") }
+        FormLabel { text: qsTr("Songs") }
         RangeInput { value: root.c ? root.c.set.songs : null; onEdited: r => root.edit(d => d.set.songs = r) }
-        Label { text: qsTr("Pause (seconds)") }
+        FormLabel { text: qsTr("Pause (seconds)") }
         RowLayout {
             TextField { implicitWidth: 60; placeholderText: qsTr("target"); text: root.c && root.c.set.pause.target != null ? String(root.c.set.pause.target) : ""; onEditingFinished: root.edit(d => d.set.pause.target = root.editor.num(text)) }
             Label { text: qsTr("between"); opacity: 0.6 }
@@ -53,9 +53,9 @@ ColumnLayout {
                 onEdited: r => root.edit(d => { d.set.pause.min = r ? r.min : null; d.set.pause.max = r ? r.max : null; })
             }
         }
-        Label { text: qsTr("Fade-out (seconds)") }
+        FormLabel { text: qsTr("Fade-out (seconds)") }
         TextField { implicitWidth: 60; text: root.c && root.c.set.fade_out != null ? String(root.c.set.fade_out) : ""; onEditingFinished: root.edit(d => d.set.fade_out = root.editor.num(text)) }
-        Label { text: qsTr("Tempo change allowed") }
+        FormLabel { text: qsTr("Tempo change allowed") }
         RowLayout {
             Label { text: qsTr("faster") }
             TextField {
@@ -79,12 +79,12 @@ ColumnLayout {
             }
             Label { text: qsTr("% (empty: your tempo slider range)"); opacity: 0.6 }
         }
-        Label { text: qsTr("Same style in a row") }
+        FormLabel { text: qsTr("Same style in a row") }
         RowLayout {
             Label { text: qsTr("at most") }
             TextField { implicitWidth: 50; text: root.c && root.c.set.max_in_a_row != null ? String(root.c.set.max_in_a_row) : ""; onEditingFinished: root.edit(d => d.set.max_in_a_row = root.editor.num(text)) }
         }
-        Label { text: qsTr("Auto mode") }
+        FormLabel { text: qsTr("Auto mode") }
         ComboBox {
             model: [qsTr("Not specified"), qsTr("Manual (Play Next)"), qsTr("Automatic")]
             currentIndex: !root.c || root.c.set.auto_advance === null || root.c.set.auto_advance === undefined ? 0 : root.c.set.auto_advance ? 2 : 1

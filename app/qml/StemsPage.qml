@@ -21,7 +21,7 @@ SettingsPage {
         columnSpacing: Theme.spacing * 2
         rowSpacing: Theme.spacing
 
-        Label { text: qsTr("Separation model"); Layout.alignment: Qt.AlignTop }
+        FormLabel { text: qsTr("Separation model"); Layout.alignment: Qt.AlignTop }
         ColumnLayout {
             RowLayout {
                 visible: !!page.st && page.st.model.state === "ready"
@@ -47,7 +47,7 @@ SettingsPage {
             Label { visible: !!page.st && page.st.model.state === "error"; text: page.st && page.st.model.message ? page.st.model.message : ""; color: Theme.error }
         }
 
-        Label { text: qsTr("Prepare"); Layout.alignment: Qt.AlignTop }
+        FormLabel { text: qsTr("Prepare"); Layout.alignment: Qt.AlignTop }
         ColumnLayout {
             Button {
                 text: qsTr("Prepare Stems for the Current Set")
@@ -73,7 +73,7 @@ SettingsPage {
             }
         }
 
-        Label { text: qsTr("Storage"); Layout.alignment: Qt.AlignTop }
+        FormLabel { text: qsTr("Storage"); Layout.alignment: Qt.AlignTop }
         ColumnLayout {
             Label { text: qsTr("%1 GB for %2 song(s) (about 85 MB per 3-minute song)").arg(((page.st ? page.st.cacheBytes : 0) / 1e9).toFixed(2)).arg(page.ready.length) }
             TextField { Layout.fillWidth: true; readOnly: true; text: page.st ? page.st.cacheDir : "" }

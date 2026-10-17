@@ -39,11 +39,11 @@ AppDialog {
         columnSpacing: Theme.spacing * 2
         rowSpacing: Theme.spacing
 
-        Label { text: qsTr("Name") }
+        FormLabel { text: qsTr("Name") }
         TextField { id: name; Layout.preferredWidth: 320; placeholderText: root.defaultName; onAccepted: root.accept() }
-        Label { text: qsTr("Date") }
+        FormLabel { text: qsTr("Date") }
         TextField { id: date; Layout.preferredWidth: 160; inputMask: "9999-99-99"; placeholderText: "YYYY-MM-DD" }
-        Label { text: qsTr("Club") }
+        FormLabel { text: qsTr("Club") }
         ColumnLayout {
             ComboBox {
                 id: club
@@ -59,7 +59,7 @@ AppDialog {
                     + (Session.clubs.length ? "" : " " + qsTr("Add clubs in Settings → Clubs."))
             }
         }
-        Label { text: qsTr("Kind") }
+        FormLabel { text: qsTr("Kind") }
         ColumnLayout {
             RadioButton { id: preset; text: qsTr("Preset: planned ahead") }
             RadioButton { text: qsTr("Live: built as you go") }

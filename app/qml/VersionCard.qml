@@ -143,18 +143,18 @@ Frame {
             columnSpacing: Theme.spacing
             rowSpacing: 4
 
-            Label { text: qsTr("Styles") }
+            FormLabel { text: qsTr("Styles") }
             ChipEditor { Layout.fillWidth: true; value: root.v.styles || []; onEdited: keys => root.patch({ styles: keys }) }
-            Label { text: qsTr("Shown as"); ToolTip.visible: shownHover.hovered; ToolTip.text: qsTr("Shown to dancers instead of the style names, e.g. the name of a line dance"); HoverHandler { id: shownHover } }
+            FormLabel { text: qsTr("Shown as"); ToolTip.visible: shownHover.hovered; ToolTip.text: qsTr("Shown to dancers instead of the style names, e.g. the name of a line dance"); HoverHandler { id: shownHover } }
             TextField {
                 Layout.fillWidth: true
                 text: root.v.displayName || ""
                 placeholderText: root.view.shownNames || qsTr("style names")
                 onEditingFinished: if (text.trim() !== (root.v.displayName || "")) root.patch({ displayName: text.trim() || null })
             }
-            Label { text: qsTr("Tags") }
+            FormLabel { text: qsTr("Tags") }
             ChipEditor { Layout.fillWidth: true; tags: true; value: root.v.tags || []; onEdited: keys => root.patch({ tags: keys }) }
-            Label { text: qsTr("Tempo") }
+            FormLabel { text: qsTr("Tempo") }
             RowLayout {
                 TextField {
                     implicitWidth: 80
@@ -178,19 +178,19 @@ Frame {
                     onClicked: Session.run("version_fit_tempo", { id: root.v.id })
                 }
             }
-            Label { text: qsTr("Start / end") }
+            FormLabel { text: qsTr("Start / end") }
             RowLayout {
                 TimeField { value: root.v.cueInMs; placeholderText: qsTr("auto"); onEdited: ms => root.patch({ cueInMs: ms }) }
                 TimeField { value: root.v.cueOutMs; placeholderText: qsTr("auto"); onEdited: ms => root.patch({ cueOutMs: ms }) }
                 ToolButton { visible: !!root.deck; icon.source: Theme.icon("to-start"); ToolTip.visible: hovered; ToolTip.text: qsTr("Set start to the deck position"); onClicked: root.patch({ cueInMs: Math.round(root.deck.positionMs) }) }
                 ToolButton { visible: !!root.deck; icon.source: Theme.icon("to-end"); ToolTip.visible: hovered; ToolTip.text: qsTr("Set end to the deck position"); onClicked: root.patch({ cueOutMs: Math.round(root.deck.positionMs) }) }
             }
-            Label { text: qsTr("Fade at") }
+            FormLabel { text: qsTr("Fade at") }
             RowLayout {
                 TimeField { value: root.v.fadeOutMs; placeholderText: qsTr("none"); onEdited: ms => root.patch({ fadeOutMs: ms }) }
                 Button { visible: !!root.deck; flat: true; text: qsTr("here"); onClicked: root.patch({ fadeOutMs: Math.round(root.deck.positionMs) }) }
             }
-            Label { text: qsTr("Gain") }
+            FormLabel { text: qsTr("Gain") }
             RowLayout {
                 TextField {
                     implicitWidth: 80
