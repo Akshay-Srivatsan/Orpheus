@@ -1120,9 +1120,13 @@ pub fn deck_states(app: &Arc<App>) -> Res<[crate::app::DeckState; 2]> {
 
 /// Loads a version onto a deck (paused unless `play`). Refused for the deck
 /// the room is hearing.
-pub fn deck_load(app: &Arc<App>, deck: usize, version_id: Id, entry_id: Option<Id>, play: bool) -> Res<()> {
+/// Loads a version onto `deck` (none: the free deck, as the engine decides then).
+pub fn deck_load(app: &Arc<App>, deck: Option<usize>, version_id: Id, entry_id: Option<Id>, play: bool) -> Res<()> {
     let a = app.clone();
-    blocking(move || a.deck_load(deck.min(1), &version_id, entry_id.as_deref(), play))
+    blocking(move || {
+        let deck = deck.map_or_else(|| a.free_deck(), |d| d.min(1));
+        a.deck_load(deck, &version_id, entry_id.as_deref(), play)
+    })
 }
 
 /// Transport actions: `toggle`, `play`, `pause`, `fadeOut`, `cancelFade`, `stop`, `unload`.
@@ -3137,7 +3141,7 @@ pub fn call(app: &Arc<App>, name: &str, args: serde_json::Value) -> Res<serde_js
             #[derive(Deserialize)]
             #[serde(rename_all = "camelCase")]
             struct A {
-                deck: usize,
+                deck: Option<usize>,
                 version_id: Id,
                 entry_id: Option<Id>,
                 play: bool,

@@ -24,7 +24,7 @@ ColumnLayout {
     /// The tracks as versions to play (`library`: they join the library too).
     function versions(list, library) { return Session.run("spotify_versions", { tracks: list, inLibrary: library }); }
     function preview(t) { versions([t], false).then(v => { if (v && v[0]) Session.preview(v[0], null); }); }
-    function load(t) { versions([t], false).then(v => { if (v && v[0]) Session.loadDeck(Session.freeDeck, v[0], null); }); }
+    function load(t) { versions([t], false).then(v => { if (v && v[0]) Session.loadDeck(null, v[0], null); }); }
     function toSet(t, where) { versions([t], false).then(v => { if (v && v.length) Session.addToSet(v, where); }); }
     function toLibrary(t) { versions([t], true).then(v => { if (v) Session.toast(qsTr("Added “%1” to your library").arg(t.title), "info"); }); }
     function tagStyle(t, style) { versions([t], true).then(v => { if (v && v.length) Session.run("style_add", { style: style, versionIds: v }); }); }

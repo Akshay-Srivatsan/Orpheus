@@ -32,7 +32,8 @@ QtObject {
     readonly property var myStyles: styles ? styles.styles : []
     readonly property var myTags: styles && styles.tags ? styles.tags : []
     readonly property int liveDeck: perform ? perform.liveDeck : 0
-    readonly property int freeDeck: liveDeck === 0 ? 1 : 0
+    /// Where songs load: the engine's choice (deck A at the start).
+    readonly property int freeDeck: perform ? perform.freeDeck : 0
 
     // ------------------------------------------------------------ what's shown
     property var view: ({ kind: "all" })
@@ -268,13 +269,14 @@ QtObject {
     }
 
     /// Loads a song onto a deck (paused).
+    /// Loads a song (paused) onto `deck`, or (null) the free deck as the engine decides.
     function loadDeck(deck, versionId, entryId) {
         return run("deck_load", { deck: deck, versionId: versionId, entryId: entryId || null, play: false });
     }
 
     /// Plays a song in the headphones on the free deck.
     function preview(versionId, entryId) {
-        return run("deck_load", { deck: freeDeck, versionId: versionId, entryId: entryId || null, play: true });
+        return run("deck_load", { deck: null, versionId: versionId, entryId: entryId || null, play: true });
     }
 
     function fillSlot(versionId, slotId) {

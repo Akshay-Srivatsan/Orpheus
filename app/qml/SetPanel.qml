@@ -38,7 +38,7 @@ Pane {
     /// Double-click: load onto the free deck (paused); on a slot, choose its song.
     function choose(entry) {
         if (!entry.versionId) { Session.startFillingSlot(entry); return; }
-        Session.run("deck_load", { deck: Session.freeDeck, versionId: entry.versionId, entryId: entry.id, play: false });
+        Session.run("deck_load", { deck: null, versionId: entry.versionId, entryId: entry.id, play: false });
     }
 
     function remove(ids) {

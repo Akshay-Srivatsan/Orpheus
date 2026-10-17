@@ -232,7 +232,7 @@ FocusScope {
         if (!row) return;
         if (Session.fillingSlot) Session.fillSlot(row.versionId);
         else if (Session.pickingEdit) Session.addEdit({ recording: row.recordingId });
-        else Session.loadDeck(Session.freeDeck, row.versionId, null);
+        else Session.loadDeck(null, row.versionId, null);
     }
 
     function sortBy(key) {

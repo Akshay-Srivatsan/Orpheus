@@ -80,8 +80,10 @@ pub struct Perform {
     pub crossfader: f64,
     /// Controller LEDs flash until then: an action was refused (see `check_crossfader`).
     pub error_flash_until: Option<Instant>,
-    /// The deck the room heard last (the "current" song's deck).
+    /// The deck the room heard last (the "current" song's deck), and whether
+    /// it has heard either yet.
     pub live_deck: usize,
+    pub heard_any: bool,
     /// Load generation of each deck's track once it has been counted as played.
     pub registered: [Option<u64>; 2],
     pub auto: AutoPhase,
@@ -109,6 +111,8 @@ pub struct PerformState {
     pub started_at: Option<i64>,
     pub crossfader: f64,
     pub live_deck: usize,
+    /// Where songs load (see `App::free_deck`).
+    pub free_deck: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -255,8 +259,17 @@ impl App {
         self.perform.lock().live_deck
     }
 
+    /// The deck songs load onto: the one the room heard less recently. Until
+    /// the room has heard either, deck A if it's free, else deck B.
     pub fn free_deck(&self) -> usize {
-        1 - self.live_deck()
+        let (heard_any, live) = {
+            let p = self.perform.lock();
+            (p.heard_any, p.live_deck)
+        };
+        if heard_any {
+            return 1 - live;
+        }
+        if matches!(self.decks[0].status().as_str(), "empty" | "ended" | "error") { 0 } else { 1 }
     }
 
     /// The on-air deck is protected from scrubbing / cue jumps while playing.
@@ -560,6 +573,7 @@ impl App {
         {
             let mut p = self.perform.lock();
             p.live_deck = deck;
+            p.heard_any = true;
             p.gap_started = None;
             p.auto = AutoPhase::Idle;
         }
@@ -923,6 +937,7 @@ impl App {
             started_at,
             crossfader,
             live_deck,
+            free_deck: self.free_deck(),
         }
     }
 
