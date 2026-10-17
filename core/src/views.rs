@@ -1451,9 +1451,47 @@ pub fn song_view(ctx: &ViewContext, track: &Track, entry: Option<&SetlistEntry>,
     SongView {
         track: track.clone(),
         versions,
-        recordings: track.recordings.iter().map(|r| Choice { id: r.rec.id.clone(), label: r.rec.title.clone() }).collect(),
+        recordings: recording_choices(track),
         entry,
     }
+}
+
+/// A song's recordings told apart: where each plays from (its file's name, or
+/// Spotify), its length and tempo, and its own title when it isn't the song's.
+/// Labels still alike get a number.
+fn recording_choices(track: &Track) -> Vec<Choice> {
+    let labels: Vec<String> = track
+        .recordings
+        .iter()
+        .map(|r| {
+            let source = match r.files.first() {
+                Some(f) => std::path::Path::new(f).file_name().map_or_else(|| f.clone(), |n| n.to_string_lossy().to_string()),
+                None if r.rec.sources.iter().any(|s| s.kind == "spotify") => "Spotify".to_string(),
+                None => "missing file".to_string(),
+            };
+            let secs = (r.rec.duration_ms as f64 / 1000.0).round() as i64;
+            let mut parts = vec![source, format!("{}:{:02}", secs / 60, secs % 60)];
+            if let Some(b) = r.rec.bpm {
+                parts.push(format!("{} BPM", crate::matching::num(b)));
+            }
+            // Its own title, unless the song's or already in the file's name.
+            if !r.rec.title.is_empty() && r.rec.title != track.rec.title && !parts[0].contains(&r.rec.title) {
+                parts.insert(0, r.rec.title.clone());
+            }
+            parts.join(" · ")
+        })
+        .collect();
+    track
+        .recordings
+        .iter()
+        .zip(&labels)
+        .enumerate()
+        .map(|(i, (r, l))| {
+            let alike = labels.iter().filter(|x| *x == l).count() > 1;
+            let n = labels[..i].iter().filter(|x| *x == l).count() + 1;
+            Choice { id: r.rec.id.clone(), label: if alike { format!("{l} ({n})") } else { l.clone() } }
+        })
+        .collect()
 }
 
 /// The tempo that brings a version into its style's sweet range (none: it's

@@ -45,11 +45,11 @@ SettingsPage {
             required property var modelData
             required property int index
             Layout.fillWidth: true
-            Rectangle {
-                implicitWidth: 22; implicitHeight: 22; radius: 4
-                color: modelData.color || Theme.neutral
-                border.color: palette.mid
-                MouseArea { anchors.fill: parent; onClicked: page.pickColor(modelData.color, c => page.update(l => l.styles[index].color = c)) }
+            ToolButton {
+                icon.source: Theme.icon("dot")
+                icon.color: modelData.color || Theme.neutral
+                ToolTip.visible: hovered; ToolTip.text: qsTr("Colour…")
+                onClicked: page.pickColor(modelData.color, c => page.update(l => l.styles[index].color = c))
             }
             TextField {
                 Layout.preferredWidth: 180
@@ -128,11 +128,11 @@ SettingsPage {
         delegate: RowLayout {
             required property var modelData
             required property int index
-            Rectangle {
-                implicitWidth: 22; implicitHeight: 22; radius: 4
-                color: modelData.color || Theme.neutral
-                border.color: palette.mid
-                MouseArea { anchors.fill: parent; onClicked: page.pickColor(modelData.color, c => page.update(l => l.tags[index].color = c)) }
+            ToolButton {
+                icon.source: Theme.icon("dot")
+                icon.color: modelData.color || Theme.neutral
+                ToolTip.visible: hovered; ToolTip.text: qsTr("Colour…")
+                onClicked: page.pickColor(modelData.color, c => page.update(l => l.tags[index].color = c))
             }
             TextField {
                 Layout.preferredWidth: 180

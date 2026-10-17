@@ -49,8 +49,13 @@ GroupBox {
             ComboBox {
                 visible: !root.pause && root.view.versionChoices.length > 1
                 Layout.fillWidth: true
+                id: versionBox
                 model: root.view.versionChoices.map(c => c.label)
-                currentIndex: root.view.versionChoices.findIndex(c => c.id === root.e.versionId)
+                // The entry's version (a new list would otherwise reset it to the first).
+                readonly property int chosen: root.view.versionChoices.findIndex(c => c.id === root.e.versionId)
+                currentIndex: chosen
+                onModelChanged: currentIndex = Qt.binding(() => versionBox.chosen)
+                displayText: chosen >= 0 ? root.view.versionChoices[chosen].label : ""
                 onActivated: index => Session.run("entry_switch_version", { entryId: root.e.id, versionId: root.view.versionChoices[index].id })
             }
 

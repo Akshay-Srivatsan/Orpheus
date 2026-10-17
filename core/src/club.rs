@@ -511,8 +511,9 @@ fn raw_to_range<T>(r: RawRange<T>, conv: impl Fn(T) -> Result<f64, String>) -> R
     })
 }
 
+// (null, as the editor sends an unset range, is none.)
 fn range_opt<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Range>, D::Error> {
-    let r = RawRange::<f64>::deserialize(d)?;
+    let Some(r) = Option::<RawRange<f64>>::deserialize(d)? else { return Ok(None) };
     raw_to_range(r, Ok).map(Some).map_err(serde::de::Error::custom)
 }
 
@@ -535,7 +536,7 @@ pub fn parse_duration(v: NumOrTextPub) -> Result<f64, String> {
 pub struct NumOrTextPub(NumOrText);
 
 fn duration_range_opt<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Range>, D::Error> {
-    let r = RawRange::<NumOrText>::deserialize(d)?;
+    let Some(r) = Option::<RawRange<NumOrText>>::deserialize(d)? else { return Ok(None) };
     raw_to_range(r, |v| parse_duration(NumOrTextPub(v))).map(Some).map_err(serde::de::Error::custom)
 }
 
@@ -595,7 +596,7 @@ fn strings<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
 }
 
 fn percent_range_opt<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Range>, D::Error> {
-    let r = RawRange::<NumOrText>::deserialize(d)?;
+    let Some(r) = Option::<RawRange<NumOrText>>::deserialize(d)? else { return Ok(None) };
     raw_to_range(r, parse_percent).map(Some).map_err(serde::de::Error::custom)
 }
 
@@ -1492,6 +1493,12 @@ pub async fn fetch(url: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn null_ranges_are_none() {
+        let s: Style = serde_json::from_value(serde_json::json!({ "name": "Polka", "tempo": null, "length": null, "share": null })).unwrap();
+        assert!(s.tempo.is_none() && s.length.is_none() && s.share.is_none());
+    }
+
     #[test]
     fn a_club_exports_as_one_self_contained_file() {
         let text = r#"

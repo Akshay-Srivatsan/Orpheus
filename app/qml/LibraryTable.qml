@@ -173,7 +173,10 @@ FocusScope {
     // gives as its edit role), never through model indexes, which a reload
     // invalidates.
     property var flat: []
+    // A reload keeps the selection (and doesn't change what Info shows).
+    property bool restoring: false
     onViewChanged: {
+        restoring = true;
         const all = [];
         const keyed = rows => rows.map(r => {
             const o = Object.assign({}, r, { k: all.length });
@@ -191,6 +194,7 @@ FocusScope {
             }
         }
         restoreSelection();
+        restoring = false;
     }
 
     function rowAt(r) { return r >= 0 && r < tree.rows ? flat[songs.data(tree.index(r, 0), Qt.DisplayRole)] : null; }
@@ -204,6 +208,7 @@ FocusScope {
     /// The selected songs (else the current row) are Session's; Info shows the
     /// current row (the one clicked), else the last selected.
     function syncSelection() {
+        if (restoring) return;
         const rows = selectedRows();
         const current = selection.currentIndex.valid ? flat[songs.data(selection.currentIndex, Qt.DisplayRole)] : null;
         Session.selected = (rows.length ? rows : current ? [current] : []).map(r => r.versionId);

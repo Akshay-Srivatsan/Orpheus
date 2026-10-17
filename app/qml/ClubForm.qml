@@ -320,32 +320,47 @@ ColumnLayout {
     Label { text: qsTr("Styles counted together (e.g. all waltzes)."); opacity: Theme.dim }
     Repeater {
         model: root.c ? root.editor.entries(root.c.group) : []
-        delegate: RowLayout {
+        // Each group: its name, its styles (ticked), and how many it wants.
+        delegate: GroupBox {
             id: groupRow
             required property var modelData
+            readonly property string gid: modelData.id
+            readonly property var g: modelData.v
             Layout.fillWidth: true
-            TextField { Layout.preferredWidth: 150; text: groupRow.modelData.v.name; onEditingFinished: root.edit(d => d.group[groupRow.modelData.id].name = text) }
-            Flow {
-                Layout.fillWidth: true
-                spacing: 3
-                Repeater {
-                    model: root.editor.entries(root.c.style)
-                    delegate: Button {
-                        required property var modelData
-                        readonly property bool on: groupRow.modelData.v.styles.includes(modelData.id)
-                        text: modelData.v.short || modelData.v.name
-                        checkable: true
-                        checked: on
-                        implicitHeight: 24
-                        onClicked: root.edit(d => d.group[groupRow.modelData.id].styles = on ? d.group[groupRow.modelData.id].styles.filter(x => x !== modelData.id) : d.group[groupRow.modelData.id].styles.concat([modelData.id]))
+            title: g.name || qsTr("Group")
+            GridLayout {
+                anchors.fill: parent
+                columns: 2
+                columnSpacing: Theme.spacing * 2
+                FormLabel { text: qsTr("Name") }
+                TextField {
+                    Layout.fillWidth: true
+                    text: groupRow.g.name
+                    onEditingFinished: root.edit(d => d.group[groupRow.gid].name = text)
+                }
+                FormLabel { text: qsTr("Styles") }
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing
+                    Repeater {
+                        model: root.editor.entries(root.c.style)
+                        delegate: CheckBox {
+                            required property var modelData
+                            text: modelData.v.name
+                            checked: groupRow.g.styles.includes(modelData.id)
+                            onToggled: root.edit(d => d.group[groupRow.gid].styles = checked
+                                ? d.group[groupRow.gid].styles.concat([modelData.id])
+                                : d.group[groupRow.gid].styles.filter(x => x !== modelData.id))
+                        }
                     }
                 }
+                FormLabel { text: qsTr("Songs per set") }
+                RangeInput { value: groupRow.g.count; onEdited: r => root.edit(d => d.group[groupRow.gid].count = r) }
+                FormLabel { text: qsTr("Share of the set") }
+                RangeInput { kind: "pct"; value: groupRow.g.share; onEdited: r => root.edit(d => d.group[groupRow.gid].share = r) }
+                Item { implicitWidth: 1 }
+                Button { text: qsTr("Remove Group"); onClicked: root.edit(d => delete d.group[groupRow.gid]) }
             }
-            Label { text: qsTr("per set") }
-            RangeInput { value: groupRow.modelData.v.count; onEdited: r => root.edit(d => d.group[groupRow.modelData.id].count = r) }
-            Label { text: qsTr("share") }
-            RangeInput { kind: "pct"; value: groupRow.modelData.v.share; onEdited: r => root.edit(d => d.group[groupRow.modelData.id].share = r) }
-            ToolButton { icon.source: Theme.icon("x"); onClicked: root.edit(d => delete d.group[groupRow.modelData.id]) }
         }
     }
     Button { icon.source: Theme.icon("plus"); text: qsTr("Add Group"); enabled: !!root.c && Object.keys(root.c.style).length > 0; onClicked: root.editor.addItem("group") }
@@ -354,16 +369,27 @@ ColumnLayout {
     Heading { text: qsTr("Rules for Part of the Set") }
     Repeater {
         model: root.c ? root.editor.entries(root.c.rule) : []
-        delegate: RowLayout {
+        // Each rule: songs of a length, how many per set.
+        delegate: GroupBox {
             id: ruleRow
             required property var modelData
-            TextField { Layout.preferredWidth: 150; text: ruleRow.modelData.v.name; onEditingFinished: root.edit(d => d.rule[ruleRow.modelData.id].name = text) }
-            Label { text: qsTr("songs") }
-            RangeInput { value: ruleRow.modelData.v.songs; onEdited: r => root.edit(d => d.rule[ruleRow.modelData.id].songs = r) }
-            Label { text: qsTr("each") }
-            RangeInput { kind: "time"; value: ruleRow.modelData.v.length; onEdited: r => root.edit(d => d.rule[ruleRow.modelData.id].length = r) }
-            Label { text: qsTr("long") }
-            ToolButton { icon.source: Theme.icon("x"); onClicked: root.edit(d => delete d.rule[ruleRow.modelData.id]) }
+            readonly property string rid: modelData.id
+            readonly property var r: modelData.v
+            Layout.fillWidth: true
+            title: r.name || qsTr("Rule")
+            GridLayout {
+                anchors.fill: parent
+                columns: 2
+                columnSpacing: Theme.spacing * 2
+                FormLabel { text: qsTr("Name") }
+                TextField { Layout.fillWidth: true; text: ruleRow.r.name; onEditingFinished: root.edit(d => d.rule[ruleRow.rid].name = text) }
+                FormLabel { text: qsTr("Songs per set") }
+                RangeInput { value: ruleRow.r.songs; onEdited: v => root.edit(d => d.rule[ruleRow.rid].songs = v) }
+                FormLabel { text: qsTr("Each this long") }
+                RangeInput { kind: "time"; value: ruleRow.r.length; onEdited: v => root.edit(d => d.rule[ruleRow.rid].length = v) }
+                Item { implicitWidth: 1 }
+                Button { text: qsTr("Remove Rule"); onClicked: root.edit(d => delete d.rule[ruleRow.rid]) }
+            }
         }
     }
     RowLayout {
@@ -375,19 +401,33 @@ ColumnLayout {
     Heading { text: qsTr("Tags") }
     Repeater {
         model: root.c ? root.editor.entries(root.c.tag) : []
-        delegate: RowLayout {
+        delegate: GroupBox {
             id: tagRow
             required property var modelData
-            Rectangle {
-                Layout.preferredWidth: 22; Layout.preferredHeight: 22; radius: 4
-                color: tagRow.modelData.v.color || Theme.neutral
-                border.color: palette.mid
-                MouseArea { anchors.fill: parent; onClicked: root.editor.pickColor(tagRow.modelData.v.color, col => root.edit(d => d.tag[tagRow.modelData.id].color = col)) }
+            readonly property string tid: modelData.id
+            readonly property var t: modelData.v
+            Layout.fillWidth: true
+            title: t.name || qsTr("Tag")
+            GridLayout {
+                anchors.fill: parent
+                columns: 2
+                columnSpacing: Theme.spacing * 2
+                FormLabel { text: qsTr("Name") }
+                TextField { Layout.fillWidth: true; text: tagRow.t.name; onEditingFinished: root.edit(d => d.tag[tagRow.tid].name = text) }
+                FormLabel { text: qsTr("Colour") }
+                Button {
+                    text: qsTr("Choose…")
+                    icon.source: Theme.icon("dot")
+                    icon.color: tagRow.t.color || Theme.neutral
+                    onClicked: root.editor.pickColor(tagRow.t.color, col => root.edit(d => d.tag[tagRow.tid].color = col))
+                }
+                FormLabel { text: qsTr("Note") }
+                TextField { Layout.fillWidth: true; text: tagRow.t.note || ""; onEditingFinished: root.edit(d => d.tag[tagRow.tid].note = text || null) }
+                Item { implicitWidth: 1 }
+                CheckBox { text: qsTr("Show on the projector"); checked: !!tagRow.t.announce; onToggled: root.edit(d => d.tag[tagRow.tid].announce = checked) }
+                Item { implicitWidth: 1 }
+                Button { text: qsTr("Remove Tag"); onClicked: root.edit(d => delete d.tag[tagRow.tid]) }
             }
-            TextField { Layout.preferredWidth: 150; text: tagRow.modelData.v.name; onEditingFinished: root.edit(d => d.tag[tagRow.modelData.id].name = text) }
-            CheckBox { text: qsTr("on the projector"); checked: !!tagRow.modelData.v.announce; onToggled: root.edit(d => d.tag[tagRow.modelData.id].announce = checked) }
-            TextField { Layout.fillWidth: true; placeholderText: qsTr("Note"); text: tagRow.modelData.v.note || ""; onEditingFinished: root.edit(d => d.tag[tagRow.modelData.id].note = text || null) }
-            ToolButton { icon.source: Theme.icon("x"); onClicked: root.edit(d => delete d.tag[tagRow.modelData.id]) }
         }
     }
     Button { icon.source: Theme.icon("plus"); text: qsTr("Add Tag"); onClicked: root.editor.addItem("tag") }

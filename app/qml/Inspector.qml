@@ -11,6 +11,8 @@ Pane {
 
     property var view: null
     property bool editLinkShown: false
+    /// Versions whose cards are folded (ids).
+    property var folded: []
 
     function reload() {
         if (!Session.inspectTrack && !Session.inspectEntry) { view = null; return; }
@@ -171,9 +173,22 @@ Pane {
                 model: root.t ? root.view.versions : []
                 delegate: VersionCard {
                     required property var modelData
+                    required property int index
                     Layout.fillWidth: true
                     view: modelData
                     song: root.view
+                    position: index
+                    folded: root.folded.includes(modelData.version.id)
+                    onToggleFold: {
+                        const id = modelData.version.id;
+                        root.folded = folded ? root.folded.filter(x => x !== id) : root.folded.concat([id]);
+                    }
+                    onMoveBy: by => {
+                        const ids = root.view.versions.map(x => x.version.id);
+                        const [id] = ids.splice(index, 1);
+                        ids.splice(index + by, 0, id);
+                        Session.run("versions_reorder", { trackId: root.t.id, ids: ids });
+                    }
                     highlighted: Session.selected.includes(modelData.version.id) || (!!root.view.entry && root.view.entry.entry.versionId === modelData.version.id)
                 }
             }

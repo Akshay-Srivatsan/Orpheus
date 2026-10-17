@@ -1798,6 +1798,16 @@ impl Store {
         })
     }
 
+    /// Puts a song's versions in this order (versions not named keep their
+    /// order, after those named).
+    pub fn versions_reorder(&self, track_id: &str, ordered: &[Id]) -> Result<()> {
+        self.with_track(track_id, |t| {
+            let rank = |id: &str| ordered.iter().position(|o| o == id).unwrap_or(usize::MAX);
+            t.versions.sort_by_key(|v| rank(&v.id));
+            Ok(())
+        })
+    }
+
     pub fn version_delete(&self, id: &str) -> Result<()> {
         let (version, tid) = self.version(id)?;
         let used: usize = self

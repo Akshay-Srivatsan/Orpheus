@@ -497,6 +497,13 @@ pub fn version_update(app: &Arc<App>, id: Id, patch: serde_json::Value) -> Res<V
 }
 
 /// Takes a version out of the library (hidden while a set plays it).
+/// Puts a song's versions in this order (the Info panel's order).
+pub fn versions_reorder(app: &Arc<App>, track_id: Id, ids: Vec<Id>) -> Res<()> {
+    app.store.versions_reorder(&track_id, &ids).map_err(ae)?;
+    crate::app::emit(&app.handle, "library-changed", vec![track_id]);
+    Ok(())
+}
+
 pub fn version_delete(app: &Arc<App>, id: Id) -> Res<()> {
     let (_, tid) = app.store.version(&id).map_err(ae)?;
     let keep: Vec<Id> = app.decks.iter().filter_map(|d| d.track_id()).collect();
@@ -2836,6 +2843,16 @@ pub fn call(app: &Arc<App>, name: &str, args: serde_json::Value) -> Res<serde_js
             }
             let a: A = parse(args)?;
             json(entries_delete(app, a.setlist_id, a.ids))
+        }
+        "versions_reorder" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                track_id: Id,
+                ids: Vec<Id>,
+            }
+            let a: A = parse(args)?;
+            json(versions_reorder(app, a.track_id, a.ids))
         }
         "entries_reorder" => {
             #[derive(Deserialize)]
