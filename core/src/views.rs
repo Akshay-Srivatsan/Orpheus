@@ -467,6 +467,8 @@ pub struct LibraryRow {
     pub comment: String,
     /// Your styles on it.
     pub styles: Vec<Shown>,
+    /// Your tags on it (keys).
+    pub tags: Vec<String>,
     /// Not labelled with the filtered style, but its tempo fits.
     pub suggested: bool,
     /// Tempo it plays at (in its club style's counting), and the rate that takes.
@@ -815,6 +817,7 @@ pub fn library_view(ctx: &ViewContext, data: &LibraryData, q: &LibraryQuery) -> 
         version_label: version_label(it.version, it.track),
         comment: it.version.comment.clone(),
         styles: it.version.styles.iter().map(|k| mine_shown(&ctx.styles, k)).collect(),
+        tags: it.version.tags.clone(),
         suggested: it.suggested,
         bpm: pb.target.or(it.rec.and_then(|r| r.rec.bpm)),
         rate: pb.rate,

@@ -22,7 +22,7 @@ ApplicationWindow {
     menuBar: MenuBar {
         Menu {
             title: qsTr("&File")
-            Action { text: qsTr("&New Setlist…"); shortcut: StandardKey.New; onTriggered: newSetlist.open() }
+            Action { text: qsTr("&New Setlist…"); shortcut: StandardKey.New; onTriggered: newSetlistDialog.open() }
             Action { text: qsTr("&Import Music…"); onTriggered: importMusic.open() }
             MenuSeparator {}
             Action { text: qsTr("&Settings…"); shortcut: "Ctrl+,"; onTriggered: Session.settingsPage = "general" }
@@ -102,14 +102,14 @@ ApplicationWindow {
             Sidebar {
                 SplitView.preferredWidth: Theme.sidebarWidth
                 SplitView.minimumWidth: 160
-                onNewSetlist: newSetlist.open()
+                onNewSetlist: newSetlistDialog.open()
                 onEditSmartCrate: id => smartCrate.edit(id)
             }
             LibraryPane {
                 id: library
                 SplitView.fillWidth: true
                 SplitView.minimumWidth: 400
-                onCombine: (songs, recordings) => combine.show(songs, recordings)
+                onCombine: (songs, recordings) => combineDialog.show(songs, recordings)
                 onEditSmartCrate: id => smartCrate.edit(id)
             }
             Pane {
@@ -129,7 +129,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         currentIndex: Session.rightTab === "info" ? 1 : 0
-                        SetPanel { onNewSetlist: newSetlist.open() }
+                        SetPanel { onNewSetlist: newSetlistDialog.open() }
                         Inspector {}
                     }
                 }
@@ -139,8 +139,25 @@ ApplicationWindow {
 
     // Music dropped on the window joins the library.
     DropArea {
+        id: fileDrop
         anchors.fill: parent
         keys: ["text/uri-list"]
+        // While files are dragged over the window: what dropping does.
+        Rectangle {
+            visible: fileDrop.containsDrag
+            anchors.fill: parent
+            anchors.margins: Theme.spacing
+            radius: 6
+            color: Qt.alpha(Theme.system.highlight, 0.12)
+            border.color: Theme.system.highlight
+            border.width: 2
+            Label {
+                anchors.centerIn: parent
+                text: qsTr("Drop music files or folders to add them to your library")
+                font.pointSize: Theme.titlePointSize
+                font.bold: true
+            }
+        }
         onDropped: d => {
             const paths = d.urls.map(u => decodeURIComponent(String(u).replace(/^file:\/\//, "")));
             if (!paths.length) return;
@@ -157,8 +174,8 @@ ApplicationWindow {
 
     // ------------------------------------------------------------ dialogs
 
-    NewSetlistDialog { id: newSetlist }
-    CombineDialog { id: combine }
+    NewSetlistDialog { id: newSetlistDialog }
+    CombineDialog { id: combineDialog }
     SmartCrateDialog { id: smartCrate }
     ProjectorWindow { id: projector }
     SettingsWindow {}

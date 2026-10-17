@@ -10,8 +10,11 @@ GroupBox {
     title: pause ? qsTr("Pause in This Set") : qsTr("In This Set")
 
     property var view
+    /// The version's own target tempo (what the entry inherits).
+    property var versionTargetBpm: null
     readonly property var e: view.entry
     readonly property bool pause: view.isPause
+    readonly property bool anyStyle: !(Session.set && Session.set.club) && view.showAs.length === 0
 
     function update(p) { return Session.run("entry_update", { id: e.id, patch: p }); }
     function override(p) {
@@ -61,8 +64,15 @@ GroupBox {
             }
 
             FormLabel { visible: !root.pause; text: root.e.versionId ? qsTr("Show as") : qsTr("Slot") }
+            // Without a club, a slot (or a version without styles) takes any of your styles.
+            ChipEditor {
+                visible: !root.pause && root.anyStyle
+                Layout.fillWidth: true
+                value: root.e.styles || []
+                onEdited: keys => root.update({ styles: keys.length ? keys : null })
+            }
             Flow {
-                visible: !root.pause
+                visible: !root.pause && !root.anyStyle
                 Layout.fillWidth: true
                 spacing: 4
                 Repeater {
@@ -123,7 +133,7 @@ GroupBox {
                 TextField {
                     implicitWidth: 80
                     text: root.e.overrides && root.e.overrides.targetBpm ? String(root.e.overrides.targetBpm) : ""
-                    placeholderText: qsTr("orig.")
+                    placeholderText: root.versionTargetBpm ? Session.fmtBpm(root.versionTargetBpm) : qsTr("orig.")
                     validator: DoubleValidator { bottom: 0 }
                     onEditingFinished: root.override({ targetBpm: text ? Number(text) : null })
                 }

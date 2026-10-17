@@ -14,6 +14,8 @@ ColumnLayout {
     /// Shortest search sent to Spotify, and how long typing must pause first (ms).
     readonly property int minLength: 3
     readonly property int pauseMs: 800
+    /// Results shown here (the rest are in Spotify search).
+    readonly property int shownMax: 20
 
     visible: query.trim().length >= minLength
     spacing: 0
@@ -47,6 +49,12 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.preferredHeight: Math.min(260, list.implicitHeight)
         contentWidth: availableWidth
-        SpotifyTrackList { id: list; width: parent.width; tracks: root.results; compact: true }
+        SpotifyTrackList { id: list; width: parent.width; tracks: root.results.slice(0, root.shownMax); compact: true }
+    }
+    Button {
+        visible: root.open && root.results.length > root.shownMax
+        flat: true
+        text: qsTr("Show All %1 in Spotify Search…").arg(root.results.length)
+        onClicked: Session.show({ kind: "spotify-search" })
     }
 }

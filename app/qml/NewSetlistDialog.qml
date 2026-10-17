@@ -61,8 +61,13 @@ AppDialog {
         }
         FormLabel { text: qsTr("Kind") }
         ColumnLayout {
-            RadioButton { id: preset; text: qsTr("Preset: planned ahead") }
-            RadioButton { text: qsTr("Live: built as you go") }
+            RadioButton { id: preset; text: qsTr("Preset: plan the songs ahead; the projector shows the whole setlist") }
+            RadioButton { text: qsTr("Live: pick as you go; the projector shows what's playing and recent songs") }
+            Label {
+                opacity: Theme.dim
+                font.pointSize: Theme.smallPointSize
+                text: qsTr("You can mix both: add style slots now and choose songs during the event.")
+            }
         }
     }
 }

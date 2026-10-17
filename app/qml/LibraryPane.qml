@@ -46,7 +46,25 @@ Pane {
             suggestByTempo: Session.suggestByTempo,
         };
     }
+    /// Club songs: how many of the club's suggested songs are here.
+    property var clubSongCount: null
+    /// A smart crate's rules, described.
+    property string rulesText: ""
+    function reloadHeader() {
+        clubSongCount = null;
+        rulesText = "";
+        if (Session.view.kind === "club-songs" && Session.activeClub)
+            Backend.call("club_song_status", { clubId: Session.activeClub.id, versionId: Session.activeClub.version }).then(m => {
+                const all = Object.values(m);
+                root.clubSongCount = { have: all.filter(x => x.length).length, total: all.length };
+            }, () => {});
+        if (crate && crate.smart)
+            Backend.call("smart_describe", { rules: crate.smart }).then(d => root.rulesText = d.join(crate.smart.match === "any" ? "\n" + qsTr("or") + " " : "\n" + qsTr("and") + " "));
+    }
+    onCrateChanged: reloadHeader()
+
     function reload() {
+        reloadHeader();
         if (spotifyView || filesView) return;
         const q = query();
         Backend.call("library_view", { query: q }).then(v => root.view = v, e => Session.toast(String(e)));
@@ -86,11 +104,20 @@ Pane {
             Layout.fillWidth: true
             Layout.margins: Theme.spacing
             Layout.bottomMargin: 0
+            Icon { visible: !!root.crate && !!root.crate.smart; glyph: "auto" }
             Label { text: root.title; font.bold: true; font.pointSize: Theme.titlePointSize }
             Label {
                 visible: !!root.crate && !!root.crate.smart
                 text: qsTr("smart crate")
-                opacity: 0.6
+                opacity: Theme.dim
+                ToolTip.visible: rulesHover.hovered && !!root.rulesText
+                ToolTip.text: root.rulesText
+                HoverHandler { id: rulesHover }
+            }
+            Label {
+                visible: Session.view.kind === "club-songs" && !!root.clubSongCount
+                text: root.clubSongCount ? qsTr("%1 of %2 suggested songs here").arg(root.clubSongCount.have).arg(root.clubSongCount.total) : ""
+                opacity: Theme.dim
             }
             Button {
                 visible: !!root.crate && !!root.crate.smart
@@ -141,8 +168,11 @@ Pane {
                 Label {
                     Layout.fillWidth: true
                     wrapMode: Text.WordWrap
-                    text: Session.fillingSlot ? qsTr("Choosing a song for the slot: double-click a song, press ✓, or drag it onto the slot.")
-                        : qsTr("Choosing audio for a new version: double-click a song to add its audio.")
+                    text: Session.fillingSlot
+                        ? (Session.fillingRow ? qsTr("Choosing a song for slot %1 (%2): double-click a song, press its check button, or drag it onto the slot.")
+                            .arg(Session.fillingRow.number || "").arg(Session.fillingRow.styles.map(s => s.name).join(" / ") || Session.fillingRow.title)
+                            : qsTr("Choosing a song for the slot: double-click a song, press its check button, or drag it onto the slot."))
+                        : qsTr("Choosing audio for a new version of “%1”: double-click a song to add its audio.").arg(Session.pickingEditTitle)
                 }
                 Button { flat: true; text: qsTr("Show All Songs"); visible: !!Session.fillingSlot && Session.styleFilter.length > 0; onClicked: Session.styleFilter = [] }
                 Button { flat: true; text: qsTr("Cancel"); onClicked: { Session.fillingSlot = ""; Session.pickingEdit = ""; } }

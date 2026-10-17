@@ -37,7 +37,7 @@ Menu {
     MenuItem {
         visible: !!root.editFor
         height: visible ? implicitHeight : 0
-        text: qsTr("Add Its Audio as a Version")
+        text: qsTr("Add Its Audio to “%1”").arg(Session.pickingEditTitle)
         onTriggered: Session.addEdit({ recording: root.rows[0].recordingId })
     }
     MenuItem { text: qsTr("Play Next"); onTriggered: Session.addToSet(root.ids, "next") }
@@ -113,7 +113,9 @@ Menu {
                 required property var modelData
                 text: modelData.name
                 checkable: true
-                onTriggered: Session.run("tag_set", { tag: modelData.key, versionIds: root.ids, on: checked })
+                // Ticked when every chosen song has it; choosing it then removes it.
+                checked: root.rows.length > 0 && root.rows.every(r => r.tags.includes(modelData.key))
+                onTriggered: Session.run("tag_set", { tag: modelData.key, versionIds: root.ids, on: !root.rows.every(r => r.tags.includes(modelData.key)) })
             }
             onObjectAdded: (i, o) => tagMenu.insertItem(i, o)
             onObjectRemoved: (i, o) => tagMenu.removeItem(o)

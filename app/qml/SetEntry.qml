@@ -147,7 +147,8 @@ Item {
                 Label {
                     Layout.fillWidth: true
                     elide: Text.ElideRight
-                    color: root.fg
+                    // An empty slot stands out until a song is chosen.
+                    color: root.isSlot && !root.selected ? Theme.warn : root.fg
                     text: root.row.title
                     font.italic: root.isSlot
                     font.strikeout: root.e.status === "skipped"
@@ -167,6 +168,9 @@ Item {
                 Label {
                     visible: root.e.announcement !== undefined && root.e.announcement !== null
                     text: root.e.announcement ? root.e.announcement : qsTr("no announcement")
+                    ToolTip.visible: announceHover.hovered && !!root.e.announcement
+                    ToolTip.text: qsTr("Announced before it: “%1”").arg(root.e.announcement || "")
+                    HoverHandler { id: announceHover }
                     font.pointSize: Theme.smallPointSize
                     color: root.fg
                     opacity: Theme.dim
@@ -177,6 +181,8 @@ Item {
                     visible: root.isSlot
                     flat: true
                     text: Session.fillingSlot === root.e.id ? qsTr("Choosing… (Cancel)") : qsTr("Choose Song…")
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Pick its song in the library, or drag a song here")
                     font.pointSize: Theme.smallPointSize
                     onClicked: Session.fillingSlot === root.e.id ? Session.fillingSlot = "" : Session.startFillingSlot(root.e)
                 }
@@ -208,6 +214,9 @@ Item {
                 Label {
                     visible: !!root.e.note
                     text: root.e.note || ""
+                    ToolTip.visible: noteHover.hovered
+                    ToolTip.text: root.e.note || ""
+                    HoverHandler { id: noteHover }
                     font.pointSize: Theme.smallPointSize
                     color: root.fg
                     opacity: Theme.dim
@@ -237,15 +246,27 @@ Item {
         anchors.topMargin: holdBar.height
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         drag.target: dragProxy
+        // Pressing a selected entry keeps the selection (to drag it all); a click
+        // without dragging then selects just that entry.
+        property bool reselect: false
         onPressed: m => {
+            reselect = false;
             if (m.button === Qt.RightButton) {
                 if (!root.selected) root.picked(0);
                 menu.popup();
             } else if (!root.selected || m.modifiers) {
                 root.picked(m.modifiers);
+            } else {
+                reselect = true;
             }
         }
-        onReleased: { dragProxy.Drag.drop(); dragProxy.x = 0; dragProxy.y = 0; }
+        onReleased: m => {
+            const dragged = drag.active;
+            dragProxy.Drag.drop();
+            dragProxy.x = 0; dragProxy.y = 0;
+            if (reselect && !dragged) root.picked(0);
+            reselect = false;
+        }
         onDoubleClicked: root.chosen()
     }
     Item {

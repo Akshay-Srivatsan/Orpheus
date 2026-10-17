@@ -54,6 +54,12 @@ QtObject {
     property string fillingSlot: ""
     /// A song an edit's audio is being chosen for.
     property string pickingEdit: ""
+    /// That song's title (for the banner).
+    property string pickingEditTitle: ""
+    /// The open set's row of the slot being filled.
+    readonly property var fillingRow: fillingSlot && set ? set.rows.find(r => r.entry.id === fillingSlot) || null : null
+    // A slot filled or removed elsewhere (another window, a controller) stops being chosen.
+    onSetChanged: if (fillingSlot && (!fillingRow || fillingRow.trackId)) fillingSlot = ""
     property string settingsPage: ""
     /// A crate whose name is being edited in the sidebar.
     property string renamingCrate: ""

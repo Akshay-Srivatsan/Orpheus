@@ -240,11 +240,39 @@ Window {
                         minimumPixelSize: 12
                     }
                     Text {
-                        text: !preset.banner ? "" : root.revealNext ? qsTr("Find a partner!") : preset.banner.title
+                        text: !preset.banner ? "" : root.revealNext ? qsTr("Find a partner!")
+                            : preset.banner.title + (root.s && root.s.showArtist && preset.banner.artist ? " · " + preset.banner.artist : "")
                         color: root.text2
                         font.pixelSize: 2.6 * root.u
                         elide: Text.ElideRight
                         Layout.maximumWidth: 40 * root.u
+                    }
+                    Repeater {
+                        model: preset.banner ? preset.banner.tags : []
+                        delegate: Text {
+                            required property var modelData
+                            text: modelData.name
+                            color: modelData.color
+                            font.pixelSize: 2 * root.u
+                            font.bold: true
+                        }
+                    }
+                    // The song's artwork (not while the next dance is revealed).
+                    Image {
+                        id: bannerArt
+                        visible: status === Image.Ready
+                        Layout.preferredHeight: 6.8 * root.u
+                        Layout.preferredWidth: height
+                        fillMode: Image.PreserveAspectCrop
+                        property string forRecording: ""
+                        readonly property var wanted: preset.banner && !root.revealNext && root.s && root.s.showArtwork ? preset.banner.recordingId : null
+                        onWantedChanged: {
+                            const id = wanted;
+                            if (id === forRecording) return;
+                            forRecording = id || "";
+                            source = "";
+                            if (id) Backend.call("recording_artwork", { id: id }).then(a => { if (bannerArt.forRecording === id && a) bannerArt.source = a; });
+                        }
                     }
                 }
                 Rectangle {
@@ -284,7 +312,11 @@ Window {
                             id: row
                             required property var modelData
                             readonly property bool current: !root.gap && !!root.payload.current && modelData.e.id === root.payload.current.id
+                            /// During the pause, the next dance is outlined.
+                            readonly property bool next: root.gap && !!root.payload.next && modelData.e.id === root.payload.next.id
                             width: parent.width
+                            border.color: next ? modelData.e.color : "transparent"
+                            border.width: 0.25 * root.u
                             height: (cols.height - (cols.view.rows - 1) * 0.4 * root.u) / cols.view.rows
                             radius: 0.8 * root.u
                             color: current ? Qt.alpha(modelData.e.color, 0.25) : "transparent"
@@ -300,6 +332,7 @@ Window {
                                     Layout.fillHeight: true
                                     verticalAlignment: Text.AlignVCenter
                                     text: (row.modelData.e.dance || "—") + (row.modelData.e.title ? "  " + row.modelData.e.title : "")
+                                        + (row.modelData.e.title && root.s && root.s.showArtist && row.modelData.e.artist ? " · " + row.modelData.e.artist : "")
                                     color: root.text1
                                     font.pixelSize: 2.2 * root.u
                                     font.bold: row.current
@@ -307,6 +340,16 @@ Window {
                                     fontSizeMode: Text.Fit
                                     minimumPixelSize: 9
                                     elide: Text.ElideRight
+                                }
+                                Repeater {
+                                    model: row.modelData.e.tags
+                                    delegate: Text {
+                                        required property var modelData
+                                        text: modelData.name
+                                        color: modelData.color
+                                        font.pixelSize: 1.6 * root.u
+                                        font.bold: true
+                                    }
                                 }
                             }
                         }

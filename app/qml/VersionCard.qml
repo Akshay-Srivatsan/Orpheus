@@ -128,7 +128,13 @@ Frame {
             wrapMode: Text.WordWrap
             color: Theme.warn
             font.pointSize: Theme.smallPointSize
-            text: qsTr("Shared: changes here also apply to %1.").arg(root.view.sharedWith.map(n => "“" + n + "”").concat(root.view.otherSongs.map(s => s.label)).join(", "))
+            // The other songs are links: they open in Info.
+            textFormat: Text.StyledText
+            linkColor: palette.link
+            text: qsTr("Shared: changes here also apply to %1.").arg(root.view.sharedWith.map(n => "“" + n + "”")
+                .concat(root.view.otherSongs.map(s => "<a href=\"" + s.id + "\">" + s.label.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</a>")).join(", "))
+            onLinkActivated: id => Session.inspectTrack = id
+            HoverHandler { cursorShape: parent.hoveredLink ? Qt.PointingHandCursor : Qt.ArrowCursor }
         }
         AudioDetails {
             visible: root.audioOpen && !!root.a

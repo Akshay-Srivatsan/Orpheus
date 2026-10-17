@@ -1658,6 +1658,47 @@ pub fn setlist_export_csv(app: &Arc<App>, id: Id, path: String) -> Res<()> {
     crate::store::write_atomic(std::path::Path::new(&path), out.as_bytes()).map_err(ae)
 }
 
+/// A setlist as a printable page (this computer's `print/` folder); returns
+/// its path. It opens the print dialog when shown in a browser.
+pub fn setlist_print(app: &Arc<App>, id: Id) -> Res<String> {
+    let view = set_view(app, id)?;
+    let h = |v: &str| v.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
+    let name = view.setlist.name.clone();
+    let mut rows = String::new();
+    for r in &view.rows {
+        let style = if r.label.is_empty() { r.styles.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(" / ") } else { r.label.clone() };
+        let secs = (r.duration_ms / 1000.0).round() as i64;
+        let title = if r.track_id.is_some() || r.is_pause { r.title.clone() } else { "(slot)".into() };
+        let cells = [
+            r.number.map(|n| n.to_string()).unwrap_or_default(),
+            style,
+            title,
+            r.artist.clone(),
+            r.bpm.map(crate::matching::num).unwrap_or_default(),
+            if secs > 0 { format!("{}:{:02}", secs / 60, secs % 60) } else { String::new() },
+            r.entry.note.clone(),
+        ];
+        let class = if r.entry.status == "skipped" { " class=\"skipped\"" } else { "" };
+        rows.push_str(&format!("<tr{class}>{}</tr>\n", cells.iter().map(|c| format!("<td>{}</td>", h(c))).collect::<String>()));
+    }
+    let club = view.club.as_ref().map(|c| format!("<p>{}</p>", h(&c.name))).unwrap_or_default();
+    let page = format!(
+        "<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>{t}</title><style>\
+         body {{ font: 11pt sans-serif; margin: 1.5cm; }} h1 {{ font-size: 16pt; margin: 0; }} p {{ margin: 0 0 1em; color: #555; }}\
+         table {{ border-collapse: collapse; width: 100%; }} th, td {{ text-align: left; padding: 3px 6px; border-bottom: 1px solid #ccc; }}\
+         th {{ font-size: 9pt; color: #555; }} tr.skipped td {{ text-decoration: line-through; color: #888; }}\
+         </style></head><body onload=\"window.print()\"><h1>{t}</h1>{club}<table>\
+         <tr><th>#</th><th>Style</th><th>Title</th><th>Artist</th><th>BPM</th><th>Length</th><th>Note</th></tr>\n{rows}</table></body></html>\n",
+        t = h(&name)
+    );
+    let dir = app.local_dir.join("print");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let file: String = name.chars().map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' }).collect();
+    let path = dir.join(format!("{}.html", file.trim()));
+    crate::store::write_atomic(&path, page.as_bytes()).map_err(ae)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 // ---------------------------------------------------------------- views
 
 /// History rows a library view lists at most.
@@ -3383,6 +3424,14 @@ pub fn call(app: &Arc<App>, name: &str, args: serde_json::Value) -> Res<serde_js
             }
             let a: A = parse(args)?;
             json(setlist_export_csv(app, a.id, a.path))
+        }
+        "setlist_print" => {
+            #[derive(Deserialize)]
+            struct A {
+                id: Id,
+            }
+            let a: A = parse(args)?;
+            json(setlist_print(app, a.id))
         }
         "library_view" => {
             #[derive(Deserialize)]

@@ -87,8 +87,21 @@ Pane {
         });
     }
 
-    Keys.onDeletePressed: if (Session.selectedEntries.length) remove(Session.selectedEntries)
-    Keys.onBackPressed: if (Session.selectedEntries.length) remove(Session.selectedEntries)
+    function printSet() {
+        Session.run("setlist_print", { id: set.id }).then(path => {
+            if (!path) return;
+            Qt.openUrlExternally("file://" + path);
+            Session.toast(qsTr("Opened “%1” in your browser to print.").arg(set.name), "info");
+        });
+    }
+
+    // Delete, or Backspace (the Mac's Delete key), removes the selected entries.
+    Keys.onPressed: event => {
+        if ((event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace) && Session.selectedEntries.length) {
+            remove(Session.selectedEntries);
+            event.accepted = true;
+        }
+    }
 
     // No set open.
     ColumnLayout {
@@ -170,6 +183,7 @@ Pane {
                         title: qsTr("Export")
                         MenuItem { text: qsTr("Set File…"); onTriggered: root.exportSet() }
                         MenuItem { text: qsTr("CSV…"); onTriggered: root.exportCsv() }
+                        MenuItem { text: qsTr("Print…"); onTriggered: root.printSet() }
                     }
                     MenuSeparator {}
                     MenuItem { text: qsTr("Close Set"); onTriggered: Session.run("perform_open", { setlistId: null }) }
@@ -314,6 +328,9 @@ Pane {
                                 textFormat: Text.StyledText
                                 color: modelData.ok ? Theme.system.text : Theme.warn
                                 text: modelData.name + " <b>" + modelData.have + "</b> / " + modelData.want
+                                ToolTip.visible: tallyHover.hovered
+                                ToolTip.text: qsTr("%1 expects %2").arg(root.v && root.v.club ? root.v.club.name : qsTr("The club")).arg(modelData.want)
+                                HoverHandler { id: tallyHover }
                             }
                         }
                     }

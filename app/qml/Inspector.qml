@@ -66,6 +66,11 @@ Pane {
             EntryBox {
                 visible: !!root.view && !!root.view.entry
                 Layout.fillWidth: true
+                versionTargetBpm: {
+                    if (!root.view || !root.view.entry) return null;
+                    const v = root.view.versions.find(x => x.version.id === root.view.entry.entry.versionId);
+                    return v ? v.version.targetBpm || null : null;
+                }
                 view: root.view && root.view.entry ? root.view.entry : { entry: {}, showAs: [], versionChoices: [], tags: [], isPause: false, shownNames: "", playback: null, defaultPauseBefore: 0, defaultPauseAfter: 0, speaks: false }
             }
 
@@ -145,7 +150,7 @@ Pane {
                             onTriggered: Session.chooseFile({ title: qsTr("Audio for the new version") }, path => Session.addEdit({ path: path }, root.t.id))
                         }
                         MenuItem { text: qsTr("From Spotify…"); enabled: !!Session.spotify && Session.spotify.connected; onTriggered: root.editLinkShown = true }
-                        MenuItem { text: qsTr("From the Library…"); onTriggered: Session.pickingEdit = root.t.id }
+                        MenuItem { text: qsTr("From the Library…"); onTriggered: { Session.pickingEditTitle = root.t.title; Session.pickingEdit = root.t.id; } }
                     }
                 }
             }

@@ -7,7 +7,10 @@ import Orpheus
 // (`dropKeys`, `dropped(versionIds)`).
 ItemDelegate {
     id: root
-    property int count: 0
+    /// Shown after the name (none: -1).
+    property int count: -1
+    /// Needs attention (e.g. missing files): in the warning colour.
+    property bool warning: false
     property bool selected: false
     /// A dot after the name (e.g. the set open in the set panel).
     property bool marked: false
@@ -19,6 +22,8 @@ ItemDelegate {
 
     Layout.fillWidth: true
     highlighted: selected || drop.containsDrag
+    palette.text: warning && !highlighted ? Theme.warn : Theme.system.text
+    icon.color: warning && !highlighted ? Theme.warn : highlighted ? Theme.system.highlightedText : Theme.system.text
     icon.width: 16
     icon.height: 16
     rightPadding: badges.width + Theme.spacing * 2
@@ -30,7 +35,7 @@ ItemDelegate {
         anchors.verticalCenter: parent.verticalCenter
         spacing: 4
         Rectangle { visible: root.marked; implicitWidth: 7; implicitHeight: 7; radius: 4; color: Theme.ok }
-        Label { visible: root.count > 0; text: root.count; opacity: Theme.dim; font.features: { "tnum": 1 }; color: root.highlighted ? Theme.system.highlightedText : Theme.system.text }
+        Label { visible: root.count >= 0; text: root.count; opacity: Theme.dim; font.features: { "tnum": 1 }; color: root.highlighted ? Theme.system.highlightedText : Theme.system.text }
     }
 
     TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.contextMenu() }

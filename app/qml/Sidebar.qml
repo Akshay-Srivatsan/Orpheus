@@ -11,6 +11,7 @@ Pane {
     background: Rectangle { color: Theme.system.base }
 
     property var playlists: null
+    property bool loadingPlaylists: false
     property string renamingSet: ""
 
     signal newSetlist()
@@ -53,7 +54,8 @@ Pane {
         function onSpotifyChanged() {
             if (Session.spotify && Session.spotify.connected && root.playlists === null) {
                 root.playlists = [];
-                Backend.call("spotify_playlists").then(p => root.playlists = p, () => {});
+                root.loadingPlaylists = true;
+                Backend.call("spotify_playlists").then(p => { root.playlists = p; root.loadingPlaylists = false; }, () => root.loadingPlaylists = false);
             }
         }
     }
@@ -87,6 +89,7 @@ Pane {
             NavItem {
                 visible: !!Session.summary && Session.summary.missing > 0
                 text: qsTr("Missing Files"); icon.source: Theme.icon("warning")
+                warning: true
                 count: Session.summary ? Session.summary.missing : 0
                 selected: root.isView({ kind: "missing" })
                 onClicked: Session.show({ kind: "missing" })
@@ -260,6 +263,12 @@ Pane {
                     selected: root.isView({ kind: "spotify-playlist", uri: modelData.uri })
                     onClicked: Session.show({ kind: "spotify-playlist", uri: modelData.uri, name: modelData.name })
                 }
+            }
+            Label {
+                visible: root.loadingPlaylists
+                Layout.leftMargin: Theme.spacing * 2
+                text: qsTr("Loading playlists…")
+                opacity: Theme.dim
             }
             NavItem {
                 visible: !(Session.spotify && Session.spotify.connected)

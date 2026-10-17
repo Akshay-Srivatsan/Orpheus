@@ -159,13 +159,21 @@ FocusScope {
         }
     }
 
-    Keys.onDeletePressed: {
-        const c = Session.view.kind === "crate" ? Session.crates.find(x => x.id === Session.view.id) : null;
-        if (c && !c.smart && Session.selected.length) Session.run("crate_remove", { id: c.id, versionIds: Session.selected });
+    // Delete or Backspace (the Mac's Delete key) removes songs from a crate;
+    // Return or Enter loads (or fills the slot).
+    Keys.onPressed: event => {
+        if (event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace) {
+            const c = Session.view.kind === "crate" ? Session.crates.find(x => x.id === Session.view.id) : null;
+            if (c && !c.smart && Session.selected.length) Session.run("crate_remove", { id: c.id, versionIds: Session.selected });
+            event.accepted = true;
+        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            const i = list.currentIndex;
+            if (i >= 0) choose(rows[i]);
+            event.accepted = true;
+        }
     }
     Keys.onUpPressed: move(-1)
     Keys.onDownPressed: move(1)
-    Keys.onReturnPressed: { const i = list.currentIndex; if (i >= 0) choose(rows[i]); }
     Keys.onEscapePressed: { Session.fillingSlot = ""; Session.pickingEdit = ""; }
     function move(delta) {
         if (!rows.length) return;
@@ -400,7 +408,13 @@ FocusScope {
                         }
                     }
                     Cell { visible: root.shows("artist"); width: root.colWidth("artist"); text: rowItem.r.artist; color: rowItem.fg }
-                    Cell { visible: root.shows("version"); width: root.colWidth("version"); text: rowItem.r.versionLabel; color: rowItem.fg; opacity: Theme.dim }
+                    Cell {
+                        visible: root.shows("version"); width: root.colWidth("version"); text: rowItem.r.versionLabel; color: rowItem.fg; opacity: Theme.dim
+                        ToolTip.visible: versionHover.hovered && !!rowItem.r.comment
+                        ToolTip.text: rowItem.r.comment || ""
+                        ToolTip.delay: 600
+                        HoverHandler { id: versionHover }
+                    }
                     Item {
                         visible: root.shows("style")
                         width: root.colWidth("style")
@@ -424,7 +438,13 @@ FocusScope {
                         text: (rowItem.r.analyzing ? "… " : "") + Session.fmtBpm(rowItem.r.bpm) + (Math.abs(rowItem.r.rate - 1) > 0.001 ? "  " + Session.fmtPct(rowItem.r.rate) : "")
                     }
                     NumberCell { visible: root.shows("time"); width: root.colWidth("time"); text: Session.fmtTime(rowItem.r.durationMs); color: rowItem.r.long && !rowItem.selected ? Theme.warn : rowItem.fg }
-                    Cell { visible: root.shows("meter"); width: root.colWidth("meter"); text: Session.meterName(rowItem.r.meter); color: rowItem.fg; opacity: Theme.dim }
+                    Cell {
+                        visible: root.shows("meter"); width: root.colWidth("meter"); text: Session.meterName(rowItem.r.meter); color: rowItem.fg; opacity: Theme.dim
+                        ToolTip.visible: meterHover.hovered && !!rowItem.r.meter
+                        ToolTip.text: rowItem.r.meterByYou ? qsTr("Set by you") : qsTr("Detected")
+                        ToolTip.delay: 600
+                        HoverHandler { id: meterHover }
+                    }
                     NumberCell {
                         visible: root.shows("plays")
                         width: root.colWidth(root.playsKey)
@@ -465,7 +485,11 @@ FocusScope {
                     anchors.rightMargin: root.wActions
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     drag.target: dragProxy
+                    // Pressing a selected row keeps the selection (to drag it all); a
+                    // click without dragging then selects just that row.
+                    property bool reselect: false
                     onPressed: m => {
+                        reselect = false;
                         root.forceActiveFocus();
                         list.currentIndex = rowItem.index;
                         if (m.button === Qt.RightButton) {
@@ -475,11 +499,16 @@ FocusScope {
                             menu.popup();
                         } else if (!rowItem.selected || m.modifiers) {
                             root.select(rowItem.index, m.modifiers);
+                        } else {
+                            reselect = true;
                         }
                     }
                     onReleased: m => {
+                        const dragged = drag.active;
                         dragProxy.Drag.drop();
                         dragProxy.x = 0; dragProxy.y = 0;
+                        if (reselect && !dragged) root.select(rowItem.index, 0);
+                        reselect = false;
                     }
                     onDoubleClicked: root.choose(rowItem.r)
                 }

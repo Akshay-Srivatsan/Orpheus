@@ -140,6 +140,10 @@ Pane {
                         verticalAlignment: Text.AlignVCenter
                         text: fileRow.modelData.name
                         elide: Text.ElideMiddle
+                        ToolTip.visible: nameHover.hovered
+                        ToolTip.text: fileRow.modelData.path
+                        ToolTip.delay: 600
+                        HoverHandler { id: nameHover }
                     }
                     Label {
                         width: fileList.wFolder
@@ -149,18 +153,31 @@ Pane {
                         elide: Text.ElideMiddle
                         opacity: Theme.dim
                         text: fileRow.modelData.folder === null || fileRow.modelData.folder === undefined ? qsTr("(added from elsewhere)") : fileRow.modelData.folder
+                        ToolTip.visible: folderHover.hovered && !!fileRow.modelData.root
+                        ToolTip.text: qsTr("In the library folder %1").arg(fileRow.modelData.root || "")
+                        ToolTip.delay: 600
+                        HoverHandler { id: folderHover }
                     }
                     RowLayout {
                         width: parent.width - fileList.wFile - fileList.wFolder
                         height: parent.height
+                        // Its songs are links (they open in Info); a removed file songs
+                        // still play is a warning.
                         Label {
+                            readonly property var f: fileRow.modelData
+                            readonly property string songs: f.songTitles.map(s => "<a href=\"" + s.id + "\">" + s.label.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</a>").join(", ")
                             Layout.fillWidth: true
                             leftPadding: 6
                             elide: Text.ElideRight
-                            opacity: fileRow.modelData.removed || !fileRow.modelData.recording ? Theme.dim : 1
-                            text: fileRow.modelData.removed
-                                ? qsTr("Removed") + (fileRow.modelData.songTitles.length ? " · " + qsTr("still in %1").arg(fileRow.modelData.songTitles.map(s => s.label).join(", ")) : "")
-                                : !fileRow.modelData.recording ? qsTr("Not added") : fileRow.modelData.songTitles.map(s => s.label).join(", ")
+                            textFormat: Text.StyledText
+                            linkColor: f.removed ? Theme.warn : palette.link
+                            color: f.removed && f.songTitles.length ? Theme.warn : Theme.system.text
+                            opacity: (f.removed && !f.songTitles.length) || !f.recording ? Theme.dim : 1
+                            text: f.removed
+                                ? qsTr("Removed") + (f.songTitles.length ? " · " + qsTr("still in %1").arg(songs) : "")
+                                : !f.recording ? qsTr("Not added") : songs
+                            onLinkActivated: id => { Session.inspectTrack = id; Session.rightTab = "info"; }
+                            HoverHandler { cursorShape: parent.hoveredLink ? Qt.PointingHandCursor : Qt.ArrowCursor }
                         }
                         Button {
                             visible: fileRow.modelData.out
