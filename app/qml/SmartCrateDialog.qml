@@ -140,6 +140,10 @@ Dialog {
                         : [{ id: "file", label: qsTr("Local file") }, { id: "spotify", label: qsTr("Spotify") }]
                     model: choices.map(c => c.label)
                     currentIndex: choices.findIndex(c => c.id === cond.modelData.value)
+                    displayText: choices.length ? currentText
+                        : cond.op && cond.op.input === "style" ? qsTr("No styles yet (Settings → Styles)")
+                        : cond.op && cond.op.input === "tag" ? qsTr("No tags yet")
+                        : qsTr("No other crates")
                     onActivated: i => root.setRules(r => r.conditions[cond.index].value = choices[i].id)
                 }
                 TextField {

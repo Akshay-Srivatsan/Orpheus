@@ -30,6 +30,15 @@ ApplicationWindow {
             Action { text: qsTr("&Quit"); shortcut: StandardKey.Quit; onTriggered: Qt.quit() }
         }
         Menu {
+            title: qsTr("&Edit")
+            Action {
+                text: Session.undos.length ? qsTr("&Undo: %1").arg(Session.undos[Session.undos.length - 1].text) : qsTr("&Undo")
+                enabled: Session.undos.length > 0
+                shortcut: StandardKey.Undo
+                onTriggered: Session.undo()
+            }
+        }
+        Menu {
             title: qsTr("&Play")
             Action { text: qsTr("Play &Next"); shortcut: "Ctrl+Return"; onTriggered: Session.run("perform_play_next") }
             Action { text: qsTr("&Skip Next"); onTriggered: Session.run("perform_skip_next") }

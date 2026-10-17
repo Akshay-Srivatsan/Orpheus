@@ -117,15 +117,29 @@ QtObject {
         return Backend.call(name, args).catch(e => { toast(String(e)); return undefined; });
     }
 
+    /// What can be undone, latest last: { id, text }.
+    property var undos: []
+
     /// Runs an action (one or more calls), then offers to undo all it changed.
     function undoable(text, action) {
         return Backend.call("undo_begin").then(id => {
             const finish = r => Backend.call("undo_end", { id: id }).then(changed => {
-                if (changed) toast(text, "info", { label: qsTr("Undo"), run: () => run("undo", { id: id }) });
+                if (changed) {
+                    undos = undos.concat([{ id: id, text: text }]);
+                    toast(text, "info", { label: qsTr("Undo"), run: () => undo(id) });
+                }
                 return r;
             });
             return Promise.resolve(action()).then(finish, e => finish(undefined).then(() => { throw e; }));
         }).catch(e => { toast(String(e)); return undefined; });
+    }
+
+    /// Undoes one action (the latest: `id` undefined).
+    function undo(id) {
+        const u = id === undefined ? undos[undos.length - 1] : undos.find(x => x.id === id);
+        if (!u) return;
+        undos = undos.filter(x => x.id !== u.id);
+        run("undo", { id: u.id });
     }
 
     /// Changes some settings (the rest stay as they are).

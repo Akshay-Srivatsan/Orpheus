@@ -49,7 +49,10 @@ Dialog {
         const chosen = {};
         for (const f of fields) chosen[f.key] = pick(f);
         const what = sameAudio ? qsTr("Combined as the same audio") : qsTr("Combined %1 songs").arg(songs.length);
-        Session.undoable(what, () => Session.run("combine", { songs: songs, recordings: recordings, sameAudio: sameAudio, picks: chosen }));
+        const kept = songs[0];
+        const inspecting = songs.includes(Session.inspectTrack);
+        Session.undoable(what, () => Session.run("combine", { songs: songs, recordings: recordings, sameAudio: sameAudio, picks: chosen }))
+            .then(() => { if (inspecting && kept) Session.inspectTrack = kept; });
     }
 
     ColumnLayout {
