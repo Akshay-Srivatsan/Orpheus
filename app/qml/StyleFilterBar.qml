@@ -85,7 +85,7 @@ ColumnLayout {
             delegate: Label {
                 required property var modelData
                 textFormat: Text.StyledText
-                text: "<font color='" + modelData.color + "'>" + modelData.name + "</font>"
+                text: "<font color='" + Theme.readable(modelData.color) + "'>" + modelData.name + "</font>"
                     + (modelData.sweet ? " " + modelData.sweet[0] + "–" + modelData.sweet[1] + " BPM" : "")
                     + (modelData.extended ? " <font color='" + Theme.system.placeholderText + "'>(" + qsTr("ok %1–%2").arg(modelData.extended[0]).arg(modelData.extended[1]) + ")</font>" : "")
             }

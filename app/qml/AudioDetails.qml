@@ -125,7 +125,7 @@ ColumnLayout {
             required property var modelData
             Layout.fillWidth: true
             readonly property var paths: modelData.kind === "file" ? (root.r.filePaths[modelData.key] || []) : []
-            Label { text: modelData.kind === "spotify" ? "Spotify" : "♪" }
+            Label { text: modelData.kind === "spotify" ? qsTr("Spotify") : qsTr("File") }
             Label {
                 Layout.fillWidth: true
                 elide: Text.ElideMiddle

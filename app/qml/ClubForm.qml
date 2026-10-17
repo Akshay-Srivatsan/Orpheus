@@ -94,165 +94,230 @@ ColumnLayout {
     }
 
     // ------------------------------------------------------------ styles
+    // The club's styles in a list; the selected one's details in a form below.
     Heading { text: qsTr("Styles") }
-    RowLayout {
-        spacing: 4
-        Item { Layout.preferredWidth: 26 }
-        Label { Layout.preferredWidth: 160; text: qsTr("Name"); opacity: 0.6 }
-        Label { Layout.preferredWidth: 70; text: qsTr("Short"); opacity: 0.6 }
-        Label { Layout.preferredWidth: 60; text: qsTr("Meter"); opacity: 0.6; ToolTip.visible: meterHover.hovered; ToolTip.text: qsTr("Beats per bar, e.g. 3 or 2, 4"); HoverHandler { id: meterHover } }
-        Label { Layout.preferredWidth: 130; text: qsTr("Tempo (BPM)"); opacity: 0.6 }
-        Label { Layout.preferredWidth: 130; text: qsTr("Preferred"); opacity: 0.6 }
-        Label { Layout.preferredWidth: 130; text: qsTr("Per set"); opacity: 0.6 }
-    }
-    Repeater {
-        model: root.c ? root.editor.entries(root.c.style) : []
-        delegate: ColumnLayout {
-            id: styleRow
-            required property var modelData
-            readonly property string sid: modelData.id
-            readonly property var st: modelData.v
-            readonly property var songs: root.editor.songsOf(st)
-            Layout.fillWidth: true
-            spacing: 2
-            RowLayout {
-                spacing: 4
-                Rectangle {
-                    Layout.preferredWidth: 22; Layout.preferredHeight: 22; radius: 4
-                    color: styleRow.st.color || Theme.neutral
-                    border.color: palette.mid
-                    MouseArea { anchors.fill: parent; onClicked: root.editor.pickColor(styleRow.st.color, col => root.edit(d => d.style[styleRow.sid].color = col)) }
-                }
-                TextField { Layout.preferredWidth: 160; text: styleRow.st.name; ToolTip.visible: hovered; ToolTip.text: qsTr("id: %1").arg(styleRow.sid); onEditingFinished: if (text !== styleRow.st.name) root.edit(d => d.style[styleRow.sid].name = text) }
-                TextField { Layout.preferredWidth: 70; text: styleRow.st.short || ""; onEditingFinished: root.edit(d => d.style[styleRow.sid].short = text || null) }
-                TextField { Layout.preferredWidth: 60; placeholderText: qsTr("any"); text: (styleRow.st.meter || []).join(", "); onEditingFinished: root.edit(d => d.style[styleRow.sid].meter = root.editor.meters(text)) }
-                RangeInput { value: styleRow.st.tempo; onEdited: r => root.edit(d => d.style[styleRow.sid].tempo = r) }
-                RangeInput { value: styleRow.st.preferred; onEdited: r => root.edit(d => d.style[styleRow.sid].preferred = r) }
-                RangeInput { value: styleRow.st.count; onEdited: r => root.edit(d => d.style[styleRow.sid].count = r) }
-                ToolButton {
-                    text: styleRow.songs.length ? "♪" + styleRow.songs.length : "⋯"
-                    checked: root.editor.openStyle === styleRow.sid
-                    ToolTip.visible: hovered; ToolTip.text: qsTr("More: length, share, where in the set, notes, suggested songs")
-                    onClicked: root.editor.openStyle = root.editor.openStyle === styleRow.sid ? "" : styleRow.sid
-                }
-                ToolButton { icon.source: Theme.icon("x"); onClicked: root.edit(d => delete d.style[styleRow.sid]) }
-            }
-            // More about the style, and its suggested songs.
-            ColumnLayout {
-                visible: root.editor.openStyle === styleRow.sid
-                Layout.fillWidth: true
-                Layout.leftMargin: 30
-                RowLayout {
-                    Label { text: qsTr("Length") }
-                    RangeInput { kind: "time"; value: styleRow.st.length; onEdited: r => root.edit(d => d.style[styleRow.sid].length = r) }
-                    Label { text: qsTr("Share") }
-                    RangeInput { kind: "pct"; value: styleRow.st.share; onEdited: r => root.edit(d => d.style[styleRow.sid].share = r) }
-                    Label { text: qsTr("In a row, at most") }
-                    TextField { implicitWidth: 44; text: styleRow.st.max_in_a_row != null ? String(styleRow.st.max_in_a_row) : ""; onEditingFinished: root.edit(d => d.style[styleRow.sid].max_in_a_row = root.editor.num(text)) }
-                }
-                RowLayout {
-                    Label { text: qsTr("Where in the set") }
-                    TextField { Layout.preferredWidth: 200; placeholderText: qsTr("e.g. 0–40, 90–100 (%)"); text: root.editor.whenText(styleRow.st.when); onEditingFinished: root.edit(d => d.style[styleRow.sid].when = root.editor.whenParse(text)) }
-                    CheckBox { text: qsTr("first song"); checked: !!styleRow.st.first; onToggled: root.edit(d => d.style[styleRow.sid].first = checked) }
-                    CheckBox { text: qsTr("last song"); checked: !!styleRow.st.last; onToggled: root.edit(d => d.style[styleRow.sid].last = checked) }
-                }
-                TextField { Layout.fillWidth: true; placeholderText: qsTr("Note"); text: styleRow.st.note || ""; onEditingFinished: root.edit(d => d.style[styleRow.sid].note = text || null) }
-                Label {
-                    text: qsTr("Suggested songs") + (root.editor.hasCriteria(styleRow.st) ? "" : qsTr(" (this style has no meter, tempo or length: only these songs fit it)"))
-                    opacity: 0.7
-                }
-                Repeater {
-                    model: styleRow.songs
-                    delegate: ColumnLayout {
-                        id: songRow
-                        required property var modelData
-                        required property int index
-                        readonly property bool own: index < (styleRow.st.song || []).length
-                        readonly property var here: (root.editor.songStatus[styleRow.sid] || [])[index]
-                        Layout.fillWidth: true
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Label {
-                                Layout.fillWidth: true
-                                elide: Text.ElideRight
-                                text: (songRow.modelData.title || qsTr("Untitled")) + (songRow.modelData.artist ? " — " + songRow.modelData.artist : "")
-                                    + (songRow.modelData.length ? " · " + root.editor.secs(songRow.modelData.length) : "") + (songRow.modelData.note ? " · " + songRow.modelData.note : "")
-                            }
-                            Label {
-                                opacity: 0.6
-                                text: [songRow.modelData.fingerprint ? "fingerprint" : "", songRow.modelData.spotify ? "Spotify" : "", songRow.modelData.hash ? "hash" : ""].filter(x => x).join(" · ")
-                            }
-                            Label {
-                                text: songRow.here && songRow.here.have ? qsTr("✓ in your library") : qsTr("not in your library")
-                                color: songRow.here && songRow.here.have ? Theme.ok : palette.text
-                                opacity: songRow.here && songRow.here.have ? 1 : 0.6
-                                ToolTip.visible: haveHover.hovered && !!songRow.here && songRow.here.have
-                                ToolTip.text: songRow.here ? songRow.here.songs : ""
-                                HoverHandler { id: haveHover }
-                            }
-                            Button {
-                                visible: !(songRow.here && songRow.here.have) && !!songRow.modelData.spotify
-                                flat: true
-                                text: qsTr("Add from Spotify")
-                                onClicked: Session.run("spotify_resolve", { input: songRow.modelData.spotify }).then(found => {
-                                    if (found && found.length) Session.run("spotify_import", { tracks: found, inLibrary: true }).then(() => Session.toast(qsTr("Added to your library from Spotify."), "info"));
-                                })
-                            }
-                            Repeater {
-                                model: songRow.here && songRow.here.have ? [] : (songRow.modelData.download || [])
-                                delegate: Button {
-                                    required property string modelData
-                                    required property int index
-                                    flat: true
-                                    enabled: !root.editor.busy && !!songRow.modelData.hash
-                                    text: qsTr("Download") + ((songRow.modelData.download || []).length > 1 ? " (" + (index + 1) + ")" : "")
-                                    ToolTip.visible: hovered; ToolTip.text: modelData
-                                    onClicked: {
-                                        root.editor.busy = true;
-                                        Session.run("club_song_download", { url: modelData, hash: songRow.modelData.hash }).then(p => {
-                                            root.editor.busy = false;
-                                            if (p) Session.toast(qsTr("Downloaded and added to your library (%1).").arg(p), "info");
-                                        });
-                                    }
-                                }
-                            }
-                            Label { visible: !songRow.own; text: qsTr("song library: %1").arg(songRow.modelData.id || ""); opacity: 0.6 }
-                            ToolButton {
-                                icon.source: Theme.icon("x")
-                                ToolTip.visible: hovered
-                                ToolTip.text: songRow.own ? qsTr("Remove") : qsTr("Don't suggest it for this style")
-                                onClicked: songRow.own ? root.edit(d => d.style[styleRow.sid].song.splice(songRow.index, 1))
-                                    : root.edit(d => d.style[styleRow.sid].suggested = (d.style[styleRow.sid].suggested || []).filter(x => x !== songRow.modelData.id))
-                            }
-                        }
-                        TextArea {
-                            visible: songRow.own
-                            Layout.fillWidth: true
-                            placeholderText: qsTr("Download links, one per line (need the file's hash)")
-                            text: (songRow.modelData.download || []).join("\n")
-                            onEditingFinished: root.edit(d => d.style[styleRow.sid].song[songRow.index].download = text.split("\n").map(l => l.trim()).filter(l => l))
-                        }
-                    }
-                }
-                Button {
-                    icon.source: Theme.icon("plus"); text: qsTr("Add the Selected Song")
-                    ToolTip.visible: hovered
-                    ToolTip.text: qsTr("The song selected in the library (its fingerprint, file hash and Spotify link)")
-                    onClicked: {
-                        const vid = Session.selected[Session.selected.length - 1];
-                        if (!vid) { Session.toast(qsTr("Select a song in the library first."), "info"); return; }
-                        Session.run("club_song_for_version", { versionId: vid }).then(song => {
-                            if (song) root.edit(d => d.style[styleRow.sid].song = (d.style[styleRow.sid].song || []).concat([song]));
-                        });
+    ViewFrame {
+        Layout.fillWidth: true
+        Layout.preferredHeight: Math.min(styleList.contentHeight + 2, 8 * Theme.rowHeight + 2)
+        visible: styleList.count > 0
+        ListView {
+            id: styleList
+            anchors.fill: parent
+            clip: true
+            model: root.c ? root.editor.entries(root.c.style) : []
+            ScrollBar.vertical: ScrollBar {}
+            delegate: ItemDelegate {
+                id: styleItem
+                required property var modelData
+                readonly property var st: modelData.v
+                width: ListView.view.width
+                highlighted: styleDetails.sid === modelData.id
+                onClicked: root.editor.openStyle = modelData.id
+                contentItem: RowLayout {
+                    spacing: Theme.spacing
+                    Rectangle { implicitWidth: 12; implicitHeight: 12; radius: 6; color: styleItem.st.color || Theme.neutral; border.color: Theme.system.mid }
+                    Label { Layout.fillWidth: true; text: styleItem.st.name; elide: Text.ElideRight; color: styleItem.highlighted ? palette.highlightedText : palette.text }
+                    Label {
+                        opacity: Theme.dim
+                        color: styleItem.highlighted ? palette.highlightedText : palette.text
+                        text: [(styleItem.st.meter || []).length ? qsTr("meter %1").arg(styleItem.st.meter.join(", ")) : "",
+                            styleItem.st.tempo && (styleItem.st.tempo.min != null || styleItem.st.tempo.max != null) ? (styleItem.st.tempo.min ?? "") + "–" + (styleItem.st.tempo.max ?? "") + " BPM" : "",
+                            root.editor.songsOf(styleItem.st).length ? qsTr("%n song(s)", "", root.editor.songsOf(styleItem.st).length) : ""].filter(x => x).join(" · ")
                     }
                 }
             }
         }
     }
-    Button { icon.source: Theme.icon("plus"); text: qsTr("Add Style"); onClicked: root.editor.addItem("style") }
+    RowLayout {
+        Button { icon.source: Theme.icon("plus"); text: qsTr("Add Style"); onClicked: root.editor.addItem("style") }
+        Button {
+            text: qsTr("Remove Style")
+            enabled: !!styleDetails.st
+            onClicked: { const sid = styleDetails.sid; root.edit(d => delete d.style[sid]); root.editor.openStyle = ""; }
+        }
+    }
+    GroupBox {
+        id: styleBox
+        visible: !!styleDetails.st
+        Layout.fillWidth: true
+        title: styleDetails.st ? styleDetails.st.name : ""
+        ColumnLayout {
+            // The selected style (the first, until you choose one).
+            id: styleDetails
+            readonly property var all: root.c ? root.editor.entries(root.c.style) : []
+            readonly property string sid: all.some(e => e.id === root.editor.openStyle) ? root.editor.openStyle : all.length ? all[0].id : ""
+            readonly property var st: sid && root.c ? root.c.style[sid] : null
+            readonly property var songs: st ? root.editor.songsOf(st) : []
+            anchors.fill: parent
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 2
+                columnSpacing: Theme.spacing * 2
+                FormLabel { text: qsTr("Name") }
+                TextField {
+                    Layout.fillWidth: true
+                    text: styleDetails.st ? styleDetails.st.name : ""
+                    ToolTip.visible: hovered; ToolTip.text: qsTr("id: %1").arg(styleDetails.sid)
+                    onEditingFinished: if (text !== styleDetails.st.name) { const sid = styleDetails.sid; root.edit(d => d.style[sid].name = text); }
+                }
+                FormLabel { text: qsTr("Short name") }
+                TextField {
+                    implicitWidth: 120
+                    text: styleDetails.st ? styleDetails.st.short || "" : ""
+                    onEditingFinished: { const sid = styleDetails.sid; root.edit(d => d.style[sid].short = text || null); }
+                }
+                FormLabel { text: qsTr("Colour") }
+                Button {
+                    text: qsTr("Choose…")
+                    icon.source: Theme.icon("dot")
+                    icon.color: styleDetails.st && styleDetails.st.color ? styleDetails.st.color : Theme.neutral
+                    onClicked: { const sid = styleDetails.sid; root.editor.pickColor(styleDetails.st.color, col => root.edit(d => d.style[sid].color = col)); }
+                }
+                FormLabel { text: qsTr("Meter"); ToolTip.visible: meterHover.hovered; ToolTip.text: qsTr("Beats per bar, e.g. 3 or 2, 4"); HoverHandler { id: meterHover } }
+                TextField {
+                    implicitWidth: 120
+                    placeholderText: qsTr("any")
+                    text: styleDetails.st ? (styleDetails.st.meter || []).join(", ") : ""
+                    onEditingFinished: { const sid = styleDetails.sid; root.edit(d => d.style[sid].meter = root.editor.meters(text)); }
+                }
+                FormLabel { text: qsTr("Tempo (BPM)") }
+                RangeInput { value: styleDetails.st ? styleDetails.st.tempo : null; onEdited: r => { const sid = styleDetails.sid; root.edit(d => d.style[sid].tempo = r); } }
+                FormLabel { text: qsTr("Preferred tempo") }
+                RangeInput { value: styleDetails.st ? styleDetails.st.preferred : null; onEdited: r => { const sid = styleDetails.sid; root.edit(d => d.style[sid].preferred = r); } }
+                FormLabel { text: qsTr("Songs per set") }
+                RangeInput { value: styleDetails.st ? styleDetails.st.count : null; onEdited: r => { const sid = styleDetails.sid; root.edit(d => d.style[sid].count = r); } }
+                FormLabel { text: qsTr("Length") }
+                RangeInput { kind: "time"; value: styleDetails.st ? styleDetails.st.length : null; onEdited: r => { const sid = styleDetails.sid; root.edit(d => d.style[sid].length = r); } }
+                FormLabel { text: qsTr("Share of the set") }
+                RangeInput { kind: "pct"; value: styleDetails.st ? styleDetails.st.share : null; onEdited: r => { const sid = styleDetails.sid; root.edit(d => d.style[sid].share = r); } }
+                FormLabel { text: qsTr("In a row, at most") }
+                TextField {
+                    implicitWidth: 60
+                    text: styleDetails.st && styleDetails.st.max_in_a_row != null ? String(styleDetails.st.max_in_a_row) : ""
+                    onEditingFinished: { const sid = styleDetails.sid; root.edit(d => d.style[sid].max_in_a_row = root.editor.num(text)); }
+                }
+                FormLabel { text: qsTr("Where in the set") }
+                RowLayout {
+                    TextField {
+                        Layout.fillWidth: true
+                        Layout.maximumWidth: 220
+                        placeholderText: qsTr("e.g. 0–40, 90–100 (%)")
+                        text: styleDetails.st ? root.editor.whenText(styleDetails.st.when) : ""
+                        onEditingFinished: { const sid = styleDetails.sid; root.edit(d => d.style[sid].when = root.editor.whenParse(text)); }
+                    }
+                    CheckBox { text: qsTr("First song"); checked: !!styleDetails.st && !!styleDetails.st.first; onToggled: { const sid = styleDetails.sid; root.edit(d => d.style[sid].first = checked); } }
+                    CheckBox { text: qsTr("Last song"); checked: !!styleDetails.st && !!styleDetails.st.last; onToggled: { const sid = styleDetails.sid; root.edit(d => d.style[sid].last = checked); } }
+                }
+                FormLabel { text: qsTr("Note") }
+                TextField {
+                    Layout.fillWidth: true
+                    text: styleDetails.st ? styleDetails.st.note || "" : ""
+                    onEditingFinished: { const sid = styleDetails.sid; root.edit(d => d.style[sid].note = text || null); }
+                }
+            }
+            // The songs the club suggests for it.
+            Item {
+                id: styleRow
+                visible: false
+                readonly property string sid: styleDetails.sid
+                readonly property var st: styleDetails.st || ({})
+                readonly property var songs: styleDetails.songs
+            }
+            Label {
+                text: qsTr("Suggested songs") + (root.editor.hasCriteria(styleRow.st) ? "" : qsTr(" (this style has no meter, tempo or length: only these songs fit it)"))
+                opacity: 0.7
+            }
+            Repeater {
+                model: styleRow.songs
+                delegate: ColumnLayout {
+                    id: songRow
+                    required property var modelData
+                    required property int index
+                    readonly property bool own: index < (styleRow.st.song || []).length
+                    readonly property var here: (root.editor.songStatus[styleRow.sid] || [])[index]
+                    Layout.fillWidth: true
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label {
+                            Layout.fillWidth: true
+                            elide: Text.ElideRight
+                            text: (songRow.modelData.title || qsTr("Untitled")) + (songRow.modelData.artist ? " — " + songRow.modelData.artist : "")
+                                + (songRow.modelData.length ? " · " + root.editor.secs(songRow.modelData.length) : "") + (songRow.modelData.note ? " · " + songRow.modelData.note : "")
+                        }
+                        Label {
+                            opacity: 0.6
+                            text: [songRow.modelData.fingerprint ? "fingerprint" : "", songRow.modelData.spotify ? "Spotify" : "", songRow.modelData.hash ? "hash" : ""].filter(x => x).join(" · ")
+                        }
+                        Label {
+                            text: songRow.here && songRow.here.have ? qsTr("In your library") : qsTr("Not in your library")
+                            color: songRow.here && songRow.here.have ? Theme.ok : palette.text
+                            opacity: songRow.here && songRow.here.have ? 1 : 0.6
+                            ToolTip.visible: haveHover.hovered && !!songRow.here && songRow.here.have
+                            ToolTip.text: songRow.here ? songRow.here.songs : ""
+                            HoverHandler { id: haveHover }
+                        }
+                        Button {
+                            visible: !(songRow.here && songRow.here.have) && !!songRow.modelData.spotify
+                            flat: true
+                            text: qsTr("Add from Spotify")
+                            onClicked: Session.run("spotify_resolve", { input: songRow.modelData.spotify }).then(found => {
+                                if (found && found.length) Session.run("spotify_import", { tracks: found, inLibrary: true }).then(() => Session.toast(qsTr("Added to your library from Spotify."), "info"));
+                            })
+                        }
+                        Repeater {
+                            model: songRow.here && songRow.here.have ? [] : (songRow.modelData.download || [])
+                            delegate: Button {
+                                required property string modelData
+                                required property int index
+                                flat: true
+                                enabled: !root.editor.busy && !!songRow.modelData.hash
+                                text: qsTr("Download") + ((songRow.modelData.download || []).length > 1 ? " (" + (index + 1) + ")" : "")
+                                ToolTip.visible: hovered; ToolTip.text: modelData
+                                onClicked: {
+                                    root.editor.busy = true;
+                                    Session.run("club_song_download", { url: modelData, hash: songRow.modelData.hash }).then(p => {
+                                        root.editor.busy = false;
+                                        if (p) Session.toast(qsTr("Downloaded and added to your library (%1).").arg(p), "info");
+                                    });
+                                }
+                            }
+                        }
+                        Label { visible: !songRow.own; text: qsTr("song library: %1").arg(songRow.modelData.id || ""); opacity: 0.6 }
+                        ToolButton {
+                            icon.source: Theme.icon("x")
+                            ToolTip.visible: hovered
+                            ToolTip.text: songRow.own ? qsTr("Remove") : qsTr("Don't suggest it for this style")
+                            onClicked: songRow.own ? root.edit(d => d.style[styleRow.sid].song.splice(songRow.index, 1))
+                                : root.edit(d => d.style[styleRow.sid].suggested = (d.style[styleRow.sid].suggested || []).filter(x => x !== songRow.modelData.id))
+                        }
+                    }
+                    TextArea {
+                        visible: songRow.own
+                        Layout.fillWidth: true
+                        placeholderText: qsTr("Download links, one per line (need the file's hash)")
+                        text: (songRow.modelData.download || []).join("\n")
+                        onEditingFinished: root.edit(d => d.style[styleRow.sid].song[songRow.index].download = text.split("\n").map(l => l.trim()).filter(l => l))
+                    }
+                }
+            }
+            Button {
+                icon.source: Theme.icon("plus"); text: qsTr("Add the Selected Song")
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("The song selected in the library (its fingerprint, file hash and Spotify link)")
+                onClicked: {
+                    const vid = Session.selected[Session.selected.length - 1];
+                    if (!vid) { Session.toast(qsTr("Select a song in the library first."), "info"); return; }
+                    Session.run("club_song_for_version", { versionId: vid }).then(song => {
+                        if (song) root.edit(d => d.style[styleRow.sid].song = (d.style[styleRow.sid].song || []).concat([song]));
+                    });
+                }
+            }
+        }
+    }
 
     // ------------------------------------------------------------ groups
-    Label { text: qsTr("GROUPS (styles counted together)"); font.pointSize: Theme.smallPointSize; font.bold: true; opacity: 0.6; Layout.topMargin: Theme.spacing }
+    Heading { text: qsTr("Groups") }
+    Label { text: qsTr("Styles counted together (e.g. all waltzes)."); opacity: Theme.dim }
     Repeater {
         model: root.c ? root.editor.entries(root.c.group) : []
         delegate: RowLayout {

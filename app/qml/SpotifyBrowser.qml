@@ -71,22 +71,27 @@ Pane {
             Button { visible: !root.playlist; text: qsTr("Search"); onClicked: root.search(query.text) }
         }
         Label { visible: !!root.error; Layout.leftMargin: Theme.spacing; text: root.error; color: Theme.error; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-        ScrollView {
+        ViewFrame {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            contentWidth: availableWidth
-            ColumnLayout {
-                width: parent.width
-                Label { visible: root.loading; text: qsTr("Loading…"); opacity: 0.6; Layout.margins: Theme.spacing }
-                SpotifyTrackList { Layout.fillWidth: true; tracks: root.results }
-                Label {
-                    visible: !root.loading && !root.results.length && !root.playlist
-                    Layout.fillWidth: true
-                    Layout.margins: Theme.spacing * 2
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.WordWrap
-                    opacity: 0.7
-                    text: qsTr("Search Spotify by song or artist, or paste an open.spotify.com link.\nPreviewing or adding a song to your set doesn't add it to your library.")
+            Layout.leftMargin: Theme.spacing
+            Layout.rightMargin: Theme.spacing
+            Layout.bottomMargin: Theme.spacing
+            ScrollView {
+                anchors.fill: parent
+                contentWidth: availableWidth
+                ColumnLayout {
+                    width: parent.width
+                    Label { visible: root.loading; text: qsTr("Loading…"); opacity: 0.6; Layout.margins: Theme.spacing }
+                    SpotifyTrackList { Layout.fillWidth: true; tracks: root.results }
+                    Label {
+                        visible: !root.loading && !root.results.length && !root.playlist
+                        Layout.margins: Theme.spacing * 2
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.WordWrap
+                        opacity: 0.7
+                        text: qsTr("Search Spotify by song or artist, or paste an open.spotify.com link.\nPreviewing or adding a song to your set doesn't add it to your library.")
+                    }
                 }
             }
         }

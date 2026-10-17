@@ -113,7 +113,7 @@ ItemDelegate {
                         font.bold: true
                         font.italic: root.row.noStyle
                         font.pointSize: Theme.smallPointSize
-                        color: root.selected || !root.row.styles.length ? root.fg : root.row.styles[0].color
+                        color: root.selected || !root.row.styles.length ? root.fg : Theme.readable(root.row.styles[0].color)
                         ToolTip.visible: labelHover.hovered
                         ToolTip.text: root.row.noStyle && root.club ? qsTr("Not one of %1's styles (right-click: Show As)").arg(root.club.name) : root.row.styles.map(s => s.name).join("\n")
                         HoverHandler { id: labelHover }
@@ -200,7 +200,7 @@ ItemDelegate {
                             required property var modelData
                             text: modelData.name
                             font.pointSize: Theme.smallPointSize
-                            color: modelData.color
+                            color: root.selected ? root.fg : Theme.readable(modelData.color)
                         }
                     }
                     Icon {

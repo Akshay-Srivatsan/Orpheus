@@ -43,7 +43,7 @@ Rectangle {
                     Text {
                         Layout.fillWidth: true
                         text: modelData.dance || "—"
-                        color: modelData.color
+                        color: Theme.readable(modelData.color, !root.projector.light)
                         font.pixelSize: (root.big ? 4.2 : 2.6) * root.u
                         font.bold: true
                         fontSizeMode: Text.HorizontalFit

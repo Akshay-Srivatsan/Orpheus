@@ -14,11 +14,29 @@ ApplicationWindow {
     title: Session.set ? qsTr("%1 — Orpheus").arg(Session.set.setlist.name) : "Orpheus"
 
     Component.onCompleted: Session.start()
+
+    // --audit-layout: after each resize (and every few seconds), list items
+    // spilling out of their containers, in every open window.
+    LayoutAudit { id: layoutAudit }
+    Timer {
+        running: Qt.application.arguments.includes("--audit-layout")
+        interval: 3000
+        repeat: true
+        onTriggered: {
+            layoutAudit.run(window.contentItem, "main " + window.width + "×" + window.height);
+            if (settingsWindow.visible) layoutAudit.run(settingsWindow.contentItem, "settings " + Session.settingsPage + " " + settingsWindow.width + "×" + settingsWindow.height);
+            if (projector.visible) layoutAudit.run(projector.contentItem, "projector");
+            for (const d of [newSetlistDialog, combineDialog, smartCrate])
+                if (d.visible) layoutAudit.run(d.contentItem, "dialog " + d.title);
+        }
+    }
     // Closing the main window quits (the projector and settings with it).
     onClosing: Qt.quit()
 
     /// Wide enough for both decks with the transport between them (else it goes below).
     readonly property bool wide: width >= 1150
+    /// Too narrow for the decks side by side: one above the other.
+    readonly property bool single: width < 760
     /// The side panels: shown unless you hide them (the sidebar starts hidden when narrow).
     property var sidebarChoice: null
     property bool setPanelShown: true
@@ -160,7 +178,8 @@ ApplicationWindow {
             // As tall as the decks need (the library gets the rest).
             Layout.fillHeight: false
             Layout.margins: Theme.spacing
-            columns: window.wide ? 3 : 2
+            Layout.bottomMargin: 0
+            columns: window.wide ? 3 : window.single ? 1 : 2
             columnSpacing: Theme.spacing
             rowSpacing: Theme.spacing
             Deck {
@@ -172,16 +191,17 @@ ApplicationWindow {
             }
             Transport {
                 compact: !window.wide
-                Layout.row: window.wide ? 0 : 1
+                Layout.row: window.wide ? 0 : window.single ? 2 : 1
                 Layout.column: window.wide ? 1 : 0
-                Layout.columnSpan: window.wide ? 1 : 2
-                Layout.preferredWidth: window.wide ? 250 : -1
+                Layout.columnSpan: window.wide || window.single ? 1 : 2
+                Layout.preferredWidth: window.wide ? Math.max(250, implicitWidth) : -1
+                Layout.minimumWidth: window.wide ? implicitWidth : -1
                 Layout.fillWidth: !window.wide
                 Layout.fillHeight: true
             }
             Deck {
                 deck: 1
-                Layout.row: 0; Layout.column: window.wide ? 2 : 1
+                Layout.row: window.single ? 1 : 0; Layout.column: window.wide ? 2 : window.single ? 0 : 1
                 Layout.minimumWidth: 300
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -209,20 +229,32 @@ ApplicationWindow {
                 onCombine: (songs, recordings) => combineDialog.show(songs, recordings)
                 onEditSmartCrate: id => smartCrate.edit(id)
             }
-            Page {
+            // The set and Info: tabs over a framed page, as a tab widget.
+            Pane {
                 visible: window.setPanelShown
                 SplitView.preferredWidth: Theme.rightPanelWidth
                 SplitView.minimumWidth: 260
-                header: TabBar {
-                    currentIndex: Session.rightTab === "info" ? 1 : 0
-                    TabButton { text: qsTr("Set"); onClicked: Session.rightTab = "set" }
-                    TabButton { text: qsTr("Info"); onClicked: Session.rightTab = "info" }
-                }
-                StackLayout {
+                padding: Theme.spacing
+                ColumnLayout {
                     anchors.fill: parent
-                    currentIndex: Session.rightTab === "info" ? 1 : 0
-                    SetPanel { id: setPanel; onNewSetlist: newSetlistDialog.open() }
-                    Inspector {}
+                    spacing: 0
+                    TabBar {
+                        Layout.fillWidth: true
+                        currentIndex: Session.rightTab === "info" ? 1 : 0
+                        TabButton { text: qsTr("Set"); onClicked: Session.rightTab = "set" }
+                        TabButton { text: qsTr("Info"); onClicked: Session.rightTab = "info" }
+                    }
+                    Frame {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        padding: 0
+                        StackLayout {
+                            anchors.fill: parent
+                            currentIndex: Session.rightTab === "info" ? 1 : 0
+                            SetPanel { id: setPanel; onNewSetlist: newSetlistDialog.open() }
+                            Inspector {}
+                        }
+                    }
                 }
             }
         }
@@ -257,7 +289,7 @@ ApplicationWindow {
     CombineDialog { id: combineDialog }
     SmartCrateDialog { id: smartCrate }
     ProjectorWindow { id: projector }
-    SettingsWindow {}
+    SettingsWindow { id: settingsWindow }
 
     MessageDialog {
         id: about

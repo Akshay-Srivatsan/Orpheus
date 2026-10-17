@@ -51,7 +51,7 @@ Rectangle {
 
         Text {
             text: (root.projector.gap ? "" : "● ") + root.label
-            color: root.entry ? root.entry.color : root.projector.text3
+            color: root.entry ? Theme.readable(root.entry.color, !root.projector.light) : root.projector.text3
             font.pixelSize: 2 * root.u
             font.bold: true
             font.capitalization: Font.AllUppercase
@@ -62,7 +62,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 18 * root.u
             text: root.entry ? root.entry.dance : ""
-            color: root.entry ? root.entry.color : root.projector.text1
+            color: root.entry ? Theme.readable(root.entry.color, !root.projector.light) : root.projector.text1
             font.pixelSize: 9 * root.u
             font.bold: true
             fontSizeMode: Text.Fit

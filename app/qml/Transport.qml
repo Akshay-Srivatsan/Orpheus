@@ -136,8 +136,8 @@ Frame {
                     textFormat: Text.StyledText
                     font.bold: true
                     text: !root.next || root.next.isPause ? "" : root.nextLabel
-                        ? "<font color='" + (root.next.styles.length ? root.next.styles[0].color : Theme.system.text) + "'>" + root.nextLabel + "</font>"
-                        : root.next.styles.slice(0, 2).map(s => "<font color='" + s.color + "'>" + s.short + "</font>").join(" ")
+                        ? "<font color='" + (root.next.styles.length ? Theme.readable(root.next.styles[0].color) : Theme.system.text) + "'>" + root.nextLabel + "</font>"
+                        : root.next.styles.slice(0, 2).map(s => "<font color='" + Theme.readable(s.color) + "'>" + s.short + "</font>").join(" ")
                 }
                 Icon { visible: !!root.next && root.next.isPause; glyph: "pause"; sourceSize.width: Theme.smallIconSize; sourceSize.height: Theme.smallIconSize }
                 Label {

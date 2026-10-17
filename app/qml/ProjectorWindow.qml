@@ -233,7 +233,7 @@ Window {
                         Layout.fillHeight: true
                         verticalAlignment: Text.AlignVCenter
                         text: preset.banner ? preset.banner.dance : ""
-                        color: preset.banner ? preset.banner.color : root.text1
+                        color: preset.banner ? Theme.readable(preset.banner.color, !root.light) : root.text1
                         font.pixelSize: 5 * root.u
                         font.bold: true
                         fontSizeMode: Text.Fit
@@ -252,7 +252,7 @@ Window {
                         delegate: Text {
                             required property var modelData
                             text: modelData.name
-                            color: modelData.color
+                            color: Theme.readable(modelData.color, !root.light)
                             font.pixelSize: 2 * root.u
                             font.bold: true
                         }
@@ -346,7 +346,7 @@ Window {
                                     delegate: Text {
                                         required property var modelData
                                         text: modelData.name
-                                        color: modelData.color
+                                        color: Theme.readable(modelData.color, !root.light)
                                         font.pixelSize: 1.6 * root.u
                                         font.bold: true
                                     }

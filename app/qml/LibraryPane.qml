@@ -103,7 +103,7 @@ Pane {
             Layout.margins: Theme.spacing
             Layout.bottomMargin: 0
             Icon { visible: !!root.crate && !!root.crate.smart; glyph: "auto" }
-            Label { text: root.title; font.bold: true; font.pointSize: Theme.titlePointSize }
+            Label { Layout.fillWidth: true; Layout.minimumWidth: 60; elide: Text.ElideRight; text: root.title; font.bold: true; font.pointSize: Theme.titlePointSize }
             Label {
                 visible: !!root.crate && !!root.crate.smart
                 text: qsTr("smart crate")
@@ -129,10 +129,11 @@ Pane {
                 text: qsTr("Get the club's other songs…")
                 onClicked: Session.settingsPage = "clubs"
             }
-            Item { Layout.fillWidth: true }
             SearchField {
                 id: search
-                Layout.preferredWidth: 260
+                Layout.fillWidth: true
+                Layout.minimumWidth: 120
+                Layout.maximumWidth: 280
                 placeholderText: qsTr("Search title, artist, style…")
                 text: Session.search
                 onTextEdited: Session.search = text
@@ -192,6 +193,9 @@ Pane {
         SpotifySearchSection {
             visible: !root.filesView && !!Session.spotify && Session.spotify.connected && query.trim().length >= minLength
             Layout.fillWidth: true
+            Layout.leftMargin: Theme.spacing
+            Layout.rightMargin: Theme.spacing
+            Layout.bottomMargin: Theme.spacing
             query: Session.search
         }
     }

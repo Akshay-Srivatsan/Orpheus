@@ -221,8 +221,8 @@ Frame {
                         textFormat: Text.StyledText
                         font.bold: true
                         text: !root.song ? "" : root.customLabel
-                            ? "<font color='" + (root.song.styles.length ? root.song.styles[0].color : Theme.system.text) + "'>" + root.customLabel + "</font>"
-                            : root.song.styles.map(s => "<font color='" + s.color + "'>" + s.short + "</font>").join(" ")
+                            ? "<font color='" + (root.song.styles.length ? Theme.readable(root.song.styles[0].color) : Theme.system.text) + "'>" + root.customLabel + "</font>"
+                            : root.song.styles.map(s => "<font color='" + Theme.readable(s.color) + "'>" + s.short + "</font>").join(" ")
                         ToolTip.visible: danceHover.hovered
                         ToolTip.text: root.song ? root.song.styles.map(s => [s.name].concat(s.problems).join(": ")).join("\n") : ""
                         HoverHandler { id: danceHover }
@@ -232,7 +232,7 @@ Frame {
                         delegate: Label {
                             required property var modelData
                             text: modelData.name
-                            color: modelData.color
+                            color: Theme.readable(modelData.color)
                             font.pointSize: Theme.smallPointSize
                         }
                     }

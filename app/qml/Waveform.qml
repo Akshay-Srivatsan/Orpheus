@@ -89,21 +89,22 @@ Item {
         }
     }
 
-    // Trimmed parts (before the start, after the end) are shaded; what's played is dimmed.
-    Rectangle { visible: root.startMs > 0; x: 0; width: root.px(root.startMs); height: parent.height; color: Qt.rgba(0, 0, 0, 0.55) }
+    // Trimmed parts (before the start, after the end) are shaded; what's played is
+    // dimmed: covered with the window's colour (darker in a dark theme, lighter in a light one).
+    Rectangle { visible: root.startMs > 0; x: 0; width: root.px(root.startMs); height: parent.height; color: Qt.alpha(Theme.system.window, 0.75) }
     Rectangle {
         visible: root.endMs !== null && root.endMs < root.durationMs
         x: root.endMs !== null ? root.px(root.endMs) : 0
         width: parent.width - x
         height: parent.height
-        color: Qt.rgba(0, 0, 0, 0.55)
+        color: Qt.alpha(Theme.system.window, 0.75)
     }
     Rectangle {
         visible: root.positionMs > root.startMs
         x: root.px(root.startMs)
         width: Math.max(0, root.px(root.positionMs) - x)
         height: parent.height
-        color: Qt.rgba(0.05, 0.05, 0.06, 0.5)
+        color: Qt.alpha(Theme.system.window, 0.55)
     }
     // Fade-out point.
     Rectangle {
@@ -132,8 +133,8 @@ Item {
     // Main cue point.
     Icon {
         visible: root.cueMs !== null
-        x: root.cueMs !== null ? root.px(root.cueMs) - width / 2 : 0
-        y: -4
+        x: root.cueMs !== null ? Math.max(0, Math.min(root.width - width, root.px(root.cueMs) - width / 2)) : 0
+        y: 0
         glyph: "sort-down"
         sourceSize.width: 14; sourceSize.height: 14
         color: Theme.deckColors[1]

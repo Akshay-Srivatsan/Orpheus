@@ -120,7 +120,7 @@ SettingsPage {
                 }
                 ComboBox {
                     Layout.preferredWidth: 260
-                    model: page.shownVoices.map(v => v.name + " (" + v.gender + ")" + (page.tts && page.tts.installedVoices.includes(v.key) ? " ✓" : ""))
+                    model: page.shownVoices.map(v => v.name + " (" + v.gender + ")" + (page.tts && page.tts.installedVoices.includes(v.key) ? qsTr(" (downloaded)") : ""))
                     currentIndex: page.shownVoices.findIndex(v => v.key === page.voice)
                     onActivated: index => page.setAnnounce({ voice: page.shownVoices[index].key })
                 }
@@ -132,7 +132,8 @@ SettingsPage {
                     visible: !!page.tts && page.tts.state === "installing"
                     text: page.tts && page.tts.state === "installing" ? qsTr("Downloading %1… %2").arg(page.tts.what || "").arg(page.tts.total ? Math.round(page.tts.done / page.tts.total * 100) + "%" : (page.tts.done / 1e6).toFixed(0) + " MB") : ""
                 }
-                Label { visible: !!page.tts && page.tts.state === "ready"; text: qsTr("✓ Ready"); color: Theme.ok }
+                Icon { visible: !!page.tts && page.tts.state === "ready"; glyph: "check"; color: Theme.ok }
+                Label { visible: !!page.tts && page.tts.state === "ready"; text: qsTr("Ready"); color: Theme.ok }
                 Button {
                     visible: !!page.tts && page.tts.state === "ready"
                     text: qsTr("Remove…")

@@ -75,10 +75,16 @@ SettingsPage {
             }
         }
         Item { visible: !!Session.outputs && Session.outputs.cueOnMasterChannels; width: 1 }
-        Label {
+        RowLayout {
             visible: !!Session.outputs && Session.outputs.cueOnMasterChannels
-            color: Theme.warn
-            text: qsTr("⚠ Headphones use the same channels as the room: previews will be heard by the dancers.")
+            Layout.fillWidth: true
+            Icon { glyph: "warning"; color: Theme.warn }
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Theme.warn
+                text: qsTr("Headphones use the same channels as the room: previews will be heard by the dancers.")
+            }
         }
 
         FormLabel { text: qsTr("Buffer") }

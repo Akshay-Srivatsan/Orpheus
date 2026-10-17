@@ -44,12 +44,15 @@ ColumnLayout {
         }
     }
     Label { visible: !!root.error; text: root.error; color: Theme.error; Layout.leftMargin: Theme.spacing }
-    ScrollView {
+    ViewFrame {
         visible: root.open
         Layout.fillWidth: true
-        Layout.preferredHeight: Math.min(260, list.implicitHeight)
-        contentWidth: availableWidth
-        SpotifyTrackList { id: list; width: parent.width; tracks: root.results.slice(0, root.shownMax); compact: true }
+        Layout.preferredHeight: Math.min(260, list.implicitHeight + 2)
+        ScrollView {
+            anchors.fill: parent
+            contentWidth: availableWidth
+            SpotifyTrackList { id: list; width: parent.width; tracks: root.results.slice(0, root.shownMax); compact: true }
+        }
     }
     Button {
         visible: root.open && root.results.length > root.shownMax

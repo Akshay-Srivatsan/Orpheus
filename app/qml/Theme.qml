@@ -45,6 +45,16 @@ QtObject {
     readonly property int decksHeight: 262
     readonly property int sidebarWidth: 220
     readonly property int rightPanelWidth: 380
+    /// A colour (e.g. a dance style's) made readable as text: the same hue, lighter
+    /// on a dark background, darker on a light one (`onDark`: the window's theme).
+    function readable(c, onDark) {
+        const col = Qt.color(c || neutral);
+        const darkBg = onDark === undefined ? dark : onDark;
+        let l = col.hslLightness;
+        if (darkBg && l < 0.62) l = 0.62;
+        if (!darkBg && l > 0.42) l = 0.42;
+        return Qt.hsla(Math.max(0, col.hslHue), col.hslSaturation, l, 1);
+    }
     /// A bundled icon (used when the system's icon theme lacks one).
     function icon(name) { return "qrc:/icons/" + name + ".svg"; }
 

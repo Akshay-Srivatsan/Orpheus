@@ -62,12 +62,27 @@ ColumnLayout {
                 ToolButton { icon.source: Theme.icon("headphones"); ToolTip.visible: hovered; ToolTip.text: qsTr("Preview in headphones"); onClicked: root.preview(item.modelData) }
                 Button { text: qsTr("Next"); ToolTip.visible: hovered; ToolTip.text: qsTr("Play next (not added to your library)"); onClicked: root.toSet(item.modelData, "next") }
                 Button { text: qsTr("End"); ToolTip.visible: hovered; ToolTip.text: qsTr("Add to the end of the set (not added to your library)"); onClicked: root.toSet(item.modelData, "end") }
-                Label { visible: !!root.inLibrary[item.index]; text: "✓"; color: Theme.ok; ToolTip.visible: inLibHover.hovered; ToolTip.text: qsTr("In your library"); HoverHandler { id: inLibHover } }
-                ToolButton {
-                    visible: !root.inLibrary[item.index]
-                    icon.source: Theme.icon("plus")
-                    ToolTip.visible: hovered; ToolTip.text: qsTr("Add to library")
-                    onClicked: root.toLibrary(item.modelData)
+                // In the library (a check), or a button to add it: one slot, so rows line up.
+                Item {
+                    implicitWidth: addButton.implicitWidth
+                    implicitHeight: addButton.implicitHeight
+                    Icon {
+                        anchors.centerIn: parent
+                        visible: !!root.inLibrary[item.index]
+                        glyph: "check"
+                        color: Theme.ok
+                        ToolTip.visible: inLibHover.hovered
+                        ToolTip.text: qsTr("In your library")
+                        HoverHandler { id: inLibHover }
+                    }
+                    ToolButton {
+                        id: addButton
+                        anchors.fill: parent
+                        visible: !root.inLibrary[item.index]
+                        icon.source: Theme.icon("plus")
+                        ToolTip.visible: hovered; ToolTip.text: qsTr("Add to library")
+                        onClicked: root.toLibrary(item.modelData)
+                    }
                 }
             }
 

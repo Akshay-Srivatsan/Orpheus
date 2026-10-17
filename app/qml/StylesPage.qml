@@ -76,7 +76,7 @@ SettingsPage {
                         ok => { if (ok) Session.run("styles_rekey", { from: modelData.key, to: into.key }); });
                 }
             }
-            ToolButton { text: "↑"; enabled: index > 0; onClicked: page.update(l => l.styles.splice(index - 1, 0, ...l.styles.splice(index, 1))) }
+            ToolButton { icon.source: Theme.icon("up"); ToolTip.visible: hovered; ToolTip.text: qsTr("Move up"); enabled: index > 0; onClicked: page.update(l => l.styles.splice(index - 1, 0, ...l.styles.splice(index, 1))) }
             ToolButton {
                 icon.source: Theme.icon("trash")
                 onClicked: {

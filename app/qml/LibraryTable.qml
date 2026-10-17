@@ -32,11 +32,11 @@ FocusScope {
     })
     /// Columns you can hide (right-click the header), and the order they give way when narrow.
     readonly property var optional: ["artist", "version", "style", "bpm", "time", "meter", "plays"]
-    readonly property var dropOrder: ["plays", "meter", "version", "style", "artist", "time"]
+    readonly property var dropOrder: ["plays", "meter", "version", "style", "artist", "time", "bpm"]
     /// Widths (px): fixed ones, and the share of the rest the flexible ones take.
     readonly property var defaults: ({ style: 100, bpm: 90, time: 60, meter: 64, plays: 60, played: 130, actions: 64 })
     readonly property var weights: ({ title: 2.2, artist: 1.4, version: 0.8 })
-    readonly property var minimums: ({ title: 160, artist: 90, version: 70 })
+    readonly property var minimums: ({ title: 120, artist: 90, version: 70 })
     readonly property var saved: Session.settings && Session.settings.libraryColumns ? Session.settings.libraryColumns : ({ hidden: [], widths: {} })
 
     function widthOf(k) {
@@ -400,7 +400,7 @@ FocusScope {
                             color: cell.fg
                             font.italic: !!cell.r && cell.r.suggested
                             text: !cell.r ? "" : cell.r.suggested ? qsTr("tempo fits")
-                                : cell.r.styles.map(s => cell.highlighted ? s.short || s.name : "<font color='" + s.color + "'>" + (s.short || s.name) + "</font>").join(", ")
+                                : cell.r.styles.map(s => cell.highlighted ? s.short || s.name : "<font color='" + Theme.readable(s.color) + "'>" + (s.short || s.name) + "</font>").join(", ")
                             ToolTip.visible: styleHover.hovered && !!cell.r && cell.r.styles.length > 0
                             ToolTip.text: cell.r ? cell.r.styles.map(s => [s.name].concat(s.problems).join(": ")).join("\n") : ""
                             ToolTip.delay: 600
