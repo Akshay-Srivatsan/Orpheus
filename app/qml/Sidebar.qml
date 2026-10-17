@@ -7,6 +7,8 @@ import Orpheus
 Pane {
     id: root
     padding: 0
+    // One surface for its rows and section titles.
+    background: Rectangle { color: Theme.system.base }
 
     property var playlists: null
     property string renamingSet: ""
@@ -169,7 +171,7 @@ Pane {
                 Layout.fillWidth: true
                 Layout.margins: Theme.spacing
                 wrapMode: Text.WordWrap
-                font.pixelSize: 11
+                font.pointSize: Theme.smallPointSize
                 opacity: 0.6
                 text: qsTr("Crates are your own collections (any mix of dance styles). Drag songs onto one to add them; smart crates fill themselves from rules.")
             }

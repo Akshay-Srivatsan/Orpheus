@@ -30,6 +30,13 @@ QtObject {
     readonly property TextField probe: TextField {}
     readonly property real fieldHeight: probe.implicitHeight
 
+    /// Text sizes, relative to the controls' font (points).
+    readonly property real basePointSize: probe.font.pointSize > 0 ? probe.font.pointSize : 10
+    readonly property real smallPointSize: basePointSize * 0.85
+    readonly property real titlePointSize: basePointSize * 1.3
+    readonly property real largePointSize: basePointSize * 1.6
+    readonly property real hugePointSize: basePointSize * 2
+
     readonly property int spacing: 8
     readonly property int rowHeight: 26
     readonly property int iconSize: 16

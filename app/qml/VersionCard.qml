@@ -105,7 +105,7 @@ Frame {
                 delegate: Label {
                     required property var modelData
                     text: modelData.id
-                    font.pixelSize: 10
+                    font.pointSize: Theme.smallPointSize
                     padding: 2
                     background: Rectangle { radius: 3; border.color: palette.mid; color: "transparent" }
                     ToolTip.visible: chipHover.hovered
@@ -127,7 +127,7 @@ Frame {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             color: Theme.warn
-            font.pixelSize: 11
+            font.pointSize: Theme.smallPointSize
             text: qsTr("Shared: changes here also apply to %1.").arg(root.view.sharedWith.map(n => "“" + n + "”").concat(root.view.otherSongs.map(s => s.label)).join(", "))
         }
         AudioDetails {

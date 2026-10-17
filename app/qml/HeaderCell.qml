@@ -17,6 +17,8 @@ AbstractButton {
     signal contextMenu()
     /// The column's edge was dragged by `dx` pixels.
     signal resized(real dx)
+    /// The drag that resized it ended.
+    signal resizeFinished()
 
     implicitHeight: Theme.rowHeight
     hoverEnabled: true
@@ -62,5 +64,6 @@ AbstractButton {
         property real startX: 0
         onPressed: m => startX = m.x
         onPositionChanged: m => { if (pressed) root.resized(m.x - startX); }
+        onReleased: root.resizeFinished()
     }
 }

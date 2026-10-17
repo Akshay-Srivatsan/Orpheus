@@ -55,7 +55,7 @@ SettingsPage {
                 }
                 Button { visible: !!page.sp && page.sp.hasCachedCredentials; text: qsTr("Reconnect"); onClicked: Session.run("spotify_connect_cached") }
             }
-            Label { visible: !page.sp || !page.sp.connected; text: qsTr("Opens your browser to sign in."); font.pixelSize: 11; opacity: 0.7 }
+            Label { visible: !page.sp || !page.sp.connected; text: qsTr("Opens your browser to sign in."); font.pointSize: Theme.smallPointSize; opacity: 0.7 }
             Label { visible: !!page.sp && !!page.sp.error; text: page.sp && page.sp.error ? page.sp.error : ""; color: Theme.error }
         }
 
@@ -85,7 +85,7 @@ SettingsPage {
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
-                font.pixelSize: 11
+                font.pointSize: Theme.smallPointSize
                 opacity: 0.7
                 text: qsTr("Search and your playlists use a client ID shared by many apps, which Spotify rate-limits. If you get “Spotify is limiting requests”, enter the client ID of your own app from developer.spotify.com (Dashboard → Create app, with redirect URI http://127.0.0.1:8898/login and the Web API). Playback keeps using your normal sign-in.")
             }

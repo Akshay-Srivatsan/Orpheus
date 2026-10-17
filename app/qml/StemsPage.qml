@@ -67,7 +67,7 @@ SettingsPage {
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
-                font.pixelSize: 11
+                font.pointSize: Theme.smallPointSize
                 opacity: 0.7
                 text: qsTr("Separation uses a lot of CPU; Orpheus runs it at low priority, but preparing ahead of an event is best.")
             }

@@ -31,7 +31,8 @@ Item {
     implicitHeight: body.implicitHeight + holdBar.height + 8
     /// Text colour (on the selection's colour when selected).
     readonly property color fg: selected ? Theme.system.highlightedText : Theme.system.text
-    opacity: e.status === "played" ? 0.45 : e.status === "skipped" ? 0.35 : 1
+    /// Played and skipped entries are dimmed (their content, not the selection).
+    readonly property real contentOpacity: e.status === "played" ? 0.45 : e.status === "skipped" ? 0.35 : 1
 
     // Auto mode stops before this entry.
     RowLayout {
@@ -42,7 +43,7 @@ Item {
         spacing: 4
         Rectangle { Layout.leftMargin: 8; Layout.preferredWidth: 22; implicitHeight: 1; color: Theme.warn }
         Icon { glyph: "pause"; sourceSize.width: 12; sourceSize.height: 12; color: Theme.warn }
-        Label { text: qsTr("Auto mode stops here"); color: Theme.warn; font.pixelSize: 11 }
+        Label { text: qsTr("Auto mode stops here"); color: Theme.warn; font.pointSize: Theme.smallPointSize }
         ToolButton {
             icon.source: Theme.icon("x")
             icon.width: 10; icon.height: 10
@@ -67,6 +68,7 @@ Item {
 
     RowLayout {
         id: body
+        opacity: root.contentOpacity
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: holdBar.bottom
@@ -111,7 +113,7 @@ Item {
                     text: root.row.label || "—"
                     font.bold: true
                     font.italic: root.row.noStyle
-                    font.pixelSize: 11
+                    font.pointSize: Theme.smallPointSize
                     color: root.selected || !root.row.styles.length ? root.fg : root.row.styles[0].color
                     ToolTip.visible: labelHover.hovered
                     ToolTip.text: root.row.noStyle && root.club ? qsTr("Not one of %1's styles (right-click: Show As)").arg(root.club.name) : root.row.styles.map(s => s.name).join("\n")
@@ -165,7 +167,7 @@ Item {
                 Label {
                     visible: root.e.announcement !== undefined && root.e.announcement !== null
                     text: root.e.announcement ? root.e.announcement : qsTr("no announcement")
-                    font.pixelSize: 11
+                    font.pointSize: Theme.smallPointSize
                     color: root.fg
                     opacity: Theme.dim
                     elide: Text.ElideRight
@@ -175,14 +177,14 @@ Item {
                     visible: root.isSlot
                     flat: true
                     text: Session.fillingSlot === root.e.id ? qsTr("Choosing… (Cancel)") : qsTr("Choose Song…")
-                    font.pixelSize: 11
+                    font.pointSize: Theme.smallPointSize
                     onClicked: Session.fillingSlot === root.e.id ? Session.fillingSlot = "" : Session.startFillingSlot(root.e)
                 }
                 Label {
                     visible: !!root.row.trackId
                     Layout.fillWidth: true
                     elide: Text.ElideRight
-                    font.pixelSize: 11
+                    font.pointSize: Theme.smallPointSize
                     color: root.fg
                     opacity: root.row.repeat ? Theme.faint : Theme.dim
                     text: root.row.artist + (root.row.versionLabel ? " · " + root.row.versionLabel : "")
@@ -192,7 +194,7 @@ Item {
                     delegate: Label {
                         required property var modelData
                         text: modelData.name
-                        font.pixelSize: 10
+                        font.pointSize: Theme.smallPointSize
                         color: modelData.color
                     }
                 }
@@ -206,7 +208,7 @@ Item {
                 Label {
                     visible: !!root.e.note
                     text: root.e.note || ""
-                    font.pixelSize: 11
+                    font.pointSize: Theme.smallPointSize
                     color: root.fg
                     opacity: Theme.dim
                     elide: Text.ElideRight
@@ -217,11 +219,11 @@ Item {
         }
         ColumnLayout {
             spacing: 0
-            Label { Layout.alignment: Qt.AlignRight; text: root.row.bpm ? Session.fmtBpm(root.row.bpm) : ""; font.pixelSize: 11; color: root.fg; font.features: { "tnum": 1 } }
+            Label { Layout.alignment: Qt.AlignRight; text: root.row.bpm ? Session.fmtBpm(root.row.bpm) : ""; font.pointSize: Theme.smallPointSize; color: root.fg; font.features: { "tnum": 1 } }
             Label {
                 Layout.alignment: Qt.AlignRight
                 text: root.row.durationMs ? Session.fmtTime(root.row.durationMs) : ""
-                font.pixelSize: 11
+                font.pointSize: Theme.smallPointSize
                 font.features: { "tnum": 1 }
                 color: root.row.long && !root.selected ? Theme.warn : root.fg
                 opacity: Theme.dim

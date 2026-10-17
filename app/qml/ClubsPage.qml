@@ -159,7 +159,7 @@ SettingsPage {
 
             RowLayout {
                 Layout.fillWidth: true
-                Label { Layout.fillWidth: true; text: page.sel ? page.sel.name : ""; font.bold: true; font.pixelSize: 16 }
+                Label { Layout.fillWidth: true; text: page.sel ? page.sel.name : ""; font.bold: true; font.pointSize: Theme.titlePointSize }
                 Button {
                     visible: !!page.sel && !!Session.settings && Session.settings.defaultClub !== page.sel.id
                     text: qsTr("Make Default")

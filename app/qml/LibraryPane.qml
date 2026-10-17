@@ -86,7 +86,7 @@ Pane {
             Layout.fillWidth: true
             Layout.margins: Theme.spacing
             Layout.bottomMargin: 0
-            Label { text: root.title; font.bold: true; font.pixelSize: 15 }
+            Label { text: root.title; font.bold: true; font.pointSize: Theme.titlePointSize }
             Label {
                 visible: !!root.crate && !!root.crate.smart
                 text: qsTr("smart crate")

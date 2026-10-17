@@ -33,7 +33,7 @@ Flow {
                 id: row
                 anchors.centerIn: parent
                 spacing: 2
-                Label { text: chip.s.name; font.pixelSize: 11; opacity: chip.on ? 1 : 0.5; anchors.verticalCenter: parent.verticalCenter }
+                Label { text: chip.s.name; font.pointSize: Theme.smallPointSize; opacity: chip.on ? 1 : 0.5; anchors.verticalCenter: parent.verticalCenter }
                 ToolButton {
                     visible: !root.choices
                     icon.source: Theme.icon("x")

@@ -63,7 +63,7 @@ Pane {
             Layout.fillWidth: true
             spacing: 2
             RowLayout {
-                Label { text: Session.fmtTime(root.gapMs); font.bold: true; font.pixelSize: 16; color: root.gapMs > root.gapTarget ? Theme.warn : Theme.system.text; font.features: { "tnum": 1 } }
+                Label { text: Session.fmtTime(root.gapMs); font.bold: true; font.pointSize: Theme.titlePointSize; color: root.gapMs > root.gapTarget ? Theme.warn : Theme.system.text; font.features: { "tnum": 1 } }
                 Label {
                     Layout.fillWidth: true
                     elide: Text.ElideRight

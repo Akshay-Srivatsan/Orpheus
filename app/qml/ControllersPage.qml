@@ -74,7 +74,7 @@ SettingsPage {
         visible: !!page.mapping
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
-        font.pixelSize: 11
+        font.pointSize: Theme.smallPointSize
         opacity: 0.7
         text: qsTr("Left = deck A, right = deck B. SYNC = Go Live (on the deck the room hears: fade out). Pads: Cues mode = hot cues (hold PAD MODE to clear), Sampler mode = stems (vocals / drums / bass / other). Tempo faders use soft takeover; the crossfader always follows the hardware.")
             + (page.mapping && page.mapping.builtin ? " " + qsTr("Editing a built-in mapping creates a custom copy.") : "")

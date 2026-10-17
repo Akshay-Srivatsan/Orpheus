@@ -148,6 +148,15 @@ pub struct SpotifySettings {
     pub auto_connect: bool,
 }
 
+/// The library table's columns on this computer: which are hidden, and the
+/// widths you dragged them to (the others share the space).
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct LibraryColumns {
+    pub hidden: Vec<String>,
+    pub widths: std::collections::BTreeMap<String, f64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
@@ -193,6 +202,7 @@ pub struct Settings {
     pub midi: MidiSettings,
     pub spotify: SpotifySettings,
     pub announce: AnnounceSettings,
+    pub library_columns: LibraryColumns,
 }
 
 impl Default for Settings {
@@ -221,6 +231,7 @@ impl Default for Settings {
             midi: MidiSettings::default(),
             spotify: SpotifySettings { client_id: String::new(), auto_connect: true },
             announce: AnnounceSettings::default(),
+            library_columns: LibraryColumns::default(),
         }
     }
 }

@@ -22,7 +22,7 @@ Rectangle {
         id: label
         anchors.centerIn: parent
         text: root.style ? (root.short ? root.style.short : root.style.name) : ""
-        font.pixelSize: 11
+        font.pointSize: Theme.smallPointSize
         font.bold: true
     }
 

@@ -70,7 +70,7 @@ SettingsPage {
                 Label {
                     visible: !!Session.scan
                     opacity: 0.7
-                    font.pixelSize: 11
+                    font.pointSize: Theme.smallPointSize
                     text: !Session.scan ? "" : Session.scan.running ? Session.scan.phase + "…"
                         : qsTr("Last scan: %1 new, %2 moved, %3 gone").arg(Session.scan.added).arg(Session.scan.relinked).arg(Session.scan.removed)
                 }
@@ -78,7 +78,7 @@ SettingsPage {
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
-                font.pixelSize: 11
+                font.pointSize: Theme.smallPointSize
                 opacity: 0.7
                 text: qsTr("Files are recognised by their audio content, so renaming or reorganising folders keeps everything linked.")
             }
@@ -91,7 +91,7 @@ SettingsPage {
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
-                font.pixelSize: 11
+                font.pointSize: Theme.smallPointSize
                 opacity: 0.7
                 text: qsTr("File locations, waveforms, settings and the Spotify login stay here (not shared).")
             }

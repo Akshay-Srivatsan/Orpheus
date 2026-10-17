@@ -38,7 +38,7 @@ SettingsPage {
     function pickColor(current, apply) { colors.selectedColor = current; colors.apply = apply; colors.open(); }
 
     // ------------------------------------------------------------ your styles
-    Label { text: qsTr("Your styles"); font.bold: true; font.pixelSize: 15 }
+    Label { text: qsTr("Your styles"); font.bold: true; font.pointSize: Theme.titlePointSize }
     Repeater {
         model: page.info ? page.info.styles : []
         delegate: RowLayout {
@@ -121,7 +121,7 @@ SettingsPage {
     }
 
     // ------------------------------------------------------------ your tags
-    Label { text: qsTr("Your tags"); font.bold: true; font.pixelSize: 15; Layout.topMargin: Theme.spacing }
+    Label { text: qsTr("Your tags"); font.bold: true; font.pointSize: Theme.titlePointSize; Layout.topMargin: Theme.spacing }
     Label { text: qsTr("Labels for songs that aren't dance styles, e.g. “Classic”, “Teaching”, “Requests”. Smart crates can use them."); opacity: 0.7; wrapMode: Text.WordWrap; Layout.fillWidth: true }
     Repeater {
         model: page.info ? page.info.tags || [] : []
@@ -179,7 +179,7 @@ SettingsPage {
     RowLayout {
         visible: Session.clubs.length > 0
         Layout.topMargin: Theme.spacing
-        Label { text: qsTr("At a club"); font.bold: true; font.pixelSize: 15 }
+        Label { text: qsTr("At a club"); font.bold: true; font.pointSize: Theme.titlePointSize }
         ComboBox {
             Layout.preferredWidth: 220
             model: Session.clubs.map(c => c.name)

@@ -92,7 +92,7 @@ ColumnLayout {
         Item { implicitWidth: 1 }
         Label {
             opacity: 0.7
-            font.pixelSize: 11
+            font.pointSize: Theme.smallPointSize
             text: root.audio.bpmFrom + (root.r.loudnessDb != null ? " · " + root.r.loudnessDb.toFixed(1) + " LUFS" : "") + " · " + Session.fmtTime(root.r.durationMs)
         }
         FormLabel { text: qsTr("Meter") }

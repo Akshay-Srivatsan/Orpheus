@@ -45,7 +45,7 @@ Pane {
         RowLayout {
             Layout.fillWidth: true
             Layout.margins: Theme.spacing
-            Label { visible: !!root.playlist; text: root.playlist ? root.playlist.name : ""; font.bold: true; font.pixelSize: 15; Layout.fillWidth: true; elide: Text.ElideRight }
+            Label { visible: !!root.playlist; text: root.playlist ? root.playlist.name : ""; font.bold: true; font.pointSize: Theme.titlePointSize; Layout.fillWidth: true; elide: Text.ElideRight }
             Button {
                 visible: !!root.playlist
                 text: qsTr("Add All to Library")

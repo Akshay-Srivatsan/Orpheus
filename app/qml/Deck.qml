@@ -64,7 +64,7 @@ Pane {
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.spacing
-            Label { text: root.letter; font.bold: true; font.pixelSize: 16; color: root.accent }
+            Label { text: root.letter; font.bold: true; font.pointSize: Theme.titlePointSize; color: root.accent }
             // Who hears it.
             RowLayout {
                 visible: !!root.d && (root.d.audible || (root.d.onAir && root.loaded) || root.d.pfl)
@@ -186,7 +186,7 @@ Pane {
                 Label {
                     Layout.fillWidth: true
                     elide: Text.ElideRight
-                    font.pixelSize: 18
+                    font.pointSize: Theme.largePointSize
                     font.bold: true
                     text: root.song ? root.song.title : root.d && root.d.status === "loading" ? qsTr("Loading…") : qsTr("Deck %1 is empty").arg(root.letter)
                     opacity: root.song ? 1 : Theme.dim
@@ -218,7 +218,7 @@ Pane {
                 Label {
                     Layout.alignment: Qt.AlignRight
                     text: root.loaded ? "−" + Session.fmtTime(root.d.remainingMs) : ""
-                    font.pixelSize: 22
+                    font.pointSize: Theme.hugePointSize
                     font.bold: true
                     font.features: { "tnum": 1 }
                     color: root.d && root.d.nearEnd ? Theme.onAir : Theme.system.text

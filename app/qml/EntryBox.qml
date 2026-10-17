@@ -223,7 +223,7 @@ GroupBox {
                     text: root.e.announcement || ""
                     onEditingFinished: root.update({ announcement: text })
                 }
-                Label { visible: !!root.e.announcement; text: qsTr("{dance} is replaced by the dance's name."); font.pixelSize: 11; opacity: 0.6 }
+                Label { visible: !!root.e.announcement; text: qsTr("{dance} is replaced by the dance's name."); font.pointSize: Theme.smallPointSize; opacity: 0.6 }
             }
             FormLabel { visible: root.view.speaks; text: qsTr("Then pause") }
             RowLayout {

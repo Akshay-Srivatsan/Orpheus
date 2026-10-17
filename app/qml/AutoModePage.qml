@@ -43,7 +43,7 @@ SettingsPage {
         ColumnLayout {
             RadioButton { text: qsTr("Manual: start each song with Play Next"); checked: !!page.s && !page.s.autoAdvance; onToggled: if (checked) Session.saveSettings({ autoAdvance: false }) }
             RadioButton { text: qsTr("Automatic (auto mode)"); checked: !!page.s && !!page.s.autoAdvance; onToggled: if (checked) Session.saveSettings({ autoAdvance: true }) }
-            Label { text: qsTr("The Auto button under Play Next switches it for the current session."); font.pixelSize: 11; opacity: 0.7 }
+            Label { text: qsTr("The Auto button under Play Next switches it for the current session."); font.pointSize: Theme.smallPointSize; opacity: 0.7 }
         }
 
         FormLabel { text: qsTr("Announcements"); Layout.alignment: Qt.AlignTop }
@@ -52,7 +52,7 @@ SettingsPage {
             Label {
                 visible: !!page.a && !page.a.enabled
                 text: qsTr("Without announcements, auto mode waits for the “pause between songs” (Settings → General).")
-                font.pixelSize: 11
+                font.pointSize: Theme.smallPointSize
                 opacity: 0.7
             }
         }
@@ -82,7 +82,7 @@ SettingsPage {
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
-                font.pixelSize: 11
+                font.pointSize: Theme.smallPointSize
                 opacity: 0.7
                 text: qsTr("One is picked at random each time (not the same twice in a row). {dance} becomes the next dance, as the projector names it.")
             }
@@ -156,7 +156,7 @@ SettingsPage {
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
-                font.pixelSize: 11
+                font.pointSize: Theme.smallPointSize
                 opacity: 0.7
                 text: qsTr("Announcements are spoken by Kokoro, an open-source text-to-speech model that runs inside Orpheus on this computer. Downloading needs the internet once.")
             }
@@ -168,7 +168,7 @@ SettingsPage {
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
-                font.pixelSize: 11
+                font.pointSize: Theme.smallPointSize
                 opacity: 0.7
                 text: qsTr("How announcements say words they get wrong, e.g. dance names. Write it the way it sounds (“shot-EESH”), or give phonemes between slashes (/ʃɑtˈiʃ/); “phonemes” shows what the voice reads now. Saved with your library.")
             }
@@ -247,7 +247,7 @@ SettingsPage {
                     }
                 }
             }
-            Label { text: qsTr("Announcements play in the room and in your headphones."); font.pixelSize: 11; opacity: 0.7 }
+            Label { text: qsTr("Announcements play in the room and in your headphones."); font.pointSize: Theme.smallPointSize; opacity: 0.7 }
         }
     }
 }

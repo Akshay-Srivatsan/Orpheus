@@ -38,7 +38,7 @@ ToolBar {
             HoverHandler { id: clubHover }
         }
         Item { Layout.fillWidth: true }
-        Label { text: new Date(root.now).toLocaleTimeString(Qt.locale(), Locale.ShortFormat); font.bold: true; font.pixelSize: 15 }
+        Label { text: new Date(root.now).toLocaleTimeString(Qt.locale(), Locale.ShortFormat); font.bold: true; font.pointSize: Theme.titlePointSize }
         Label {
             visible: !!root.startedAt
             text: qsTr("Set %1").arg(root.hm(root.now - root.startedAt)) + (root.setMinutes ? qsTr(" of %1").arg(root.hm(root.setMinutes * 60000)) : "")

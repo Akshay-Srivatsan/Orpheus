@@ -53,7 +53,7 @@ AppDialog {
             Label {
                 Layout.preferredWidth: 320
                 wrapMode: Text.WordWrap
-                font.pixelSize: 11
+                font.pointSize: Theme.smallPointSize
                 opacity: 0.7
                 text: qsTr("The set keeps the club's current guidelines, even if the club publishes new ones (you can move it later).")
                     + (Session.clubs.length ? "" : " " + qsTr("Add clubs in Settings → Clubs."))

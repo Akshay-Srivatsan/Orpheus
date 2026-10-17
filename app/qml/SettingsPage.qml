@@ -19,7 +19,7 @@ ScrollView {
         width: root.availableWidth
         spacing: Theme.spacing
 
-        Label { text: root.title; font.pixelSize: 20; font.bold: true }
+        Label { text: root.title; font.pointSize: Theme.largePointSize; font.bold: true }
         Label {
             visible: !!root.intro
             Layout.fillWidth: true

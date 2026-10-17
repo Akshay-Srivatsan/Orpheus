@@ -251,7 +251,7 @@ ColumnLayout {
     Button { icon.source: Theme.icon("plus"); text: qsTr("Add Style"); onClicked: root.editor.addItem("style") }
 
     // ------------------------------------------------------------ groups
-    Label { text: qsTr("GROUPS (styles counted together)"); font.pixelSize: 11; font.bold: true; opacity: 0.6; Layout.topMargin: Theme.spacing }
+    Label { text: qsTr("GROUPS (styles counted together)"); font.pointSize: Theme.smallPointSize; font.bold: true; opacity: 0.6; Layout.topMargin: Theme.spacing }
     Repeater {
         model: root.c ? root.editor.entries(root.c.group) : []
         delegate: RowLayout {
@@ -302,7 +302,7 @@ ColumnLayout {
     }
     RowLayout {
         Button { icon.source: Theme.icon("plus"); text: qsTr("Add Rule"); onClicked: root.editor.addItem("rule") }
-        Label { text: qsTr("Rules can also count styles in part of the set (edit the file: styles = […], count = …)."); opacity: 0.6; font.pixelSize: 11 }
+        Label { text: qsTr("Rules can also count styles in part of the set (edit the file: styles = […], count = …)."); opacity: 0.6; font.pointSize: Theme.smallPointSize }
     }
 
     // ------------------------------------------------------------ tags

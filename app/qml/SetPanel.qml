@@ -135,7 +135,7 @@ Pane {
                     Label {
                         text: root.set ? root.set.name : ""
                         font.bold: true
-                        font.pixelSize: 15
+                        font.pointSize: Theme.titlePointSize
                         elide: Text.ElideRight
                         TapHandler { onDoubleTapped: root.renaming = true }
                     }

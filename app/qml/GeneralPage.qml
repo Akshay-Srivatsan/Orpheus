@@ -76,7 +76,7 @@ SettingsPage {
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
-                font.pixelSize: 11
+                font.pointSize: Theme.smallPointSize
                 opacity: 0.7
                 text: qsTr("Orpheus never moves the crossfader. Play Next, Go Live and auto mode need it centered, or on the side of the deck they start; otherwise they show an error and the controller's lights flash.")
             }
@@ -109,7 +109,7 @@ SettingsPage {
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
-                font.pixelSize: 11
+                font.pointSize: Theme.smallPointSize
                 opacity: 0.7
                 text: qsTr("If slowed-down songs sound smeared or phasey, try Rubber Band or SoundTouch. Changes apply to the next song loaded.")
             }

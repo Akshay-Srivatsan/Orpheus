@@ -88,7 +88,7 @@ Pane {
                     anchors.fill: parent
                     TextField {
                         Layout.fillWidth: true
-                        font.pixelSize: 16
+                        font.pointSize: Theme.titlePointSize
                         font.bold: true
                         text: root.t ? root.t.title : ""
                         onEditingFinished: if (text !== root.t.title) root.patchTrack({ title: text })

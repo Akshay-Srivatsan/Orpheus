@@ -95,7 +95,7 @@ AppDialog {
         Label {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
-            font.pixelSize: 11
+            font.pointSize: Theme.smallPointSize
             opacity: 0.7
             text: (root.songs.length > 1 ? qsTr("Their versions become versions of one song, and count as the same song in a set. ") : "")
                 + qsTr("Setlists and crates keep working. You can undo it right after, or later with “Separate into Its Own Song” or Split off… (in a version's Audio).")

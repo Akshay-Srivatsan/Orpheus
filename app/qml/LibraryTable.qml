@@ -18,34 +18,71 @@ FocusScope {
 
     signal combine(var songs, var recordings)
 
-    // Column widths (px). Title, artist and version share what the others leave
-    // (by `weights`, down to `minimums`) until a header's edge is dragged, which
-    // fixes that column's width (in `widths`).
-    property var widths: ({ position: 34, style: 92, bpm: 88, time: 52, meter: 56, plays: 52, played: 124 })
+    // Columns. Title, artist and version share what the others leave (by
+    // `weights`, down to `minimums`) until a header's edge is dragged, which fixes
+    // that column's width. Hidden columns and dragged widths are saved on this
+    // computer; when the table is too narrow, columns go in `dropOrder`.
+    readonly property var optional: ["artist", "version", "style", "bpm", "time", "meter", "plays"]
+    readonly property var names: ({ artist: qsTr("Artist"), version: qsTr("Version"), style: qsTr("Style"), bpm: qsTr("BPM"), time: qsTr("Time"), meter: qsTr("Meter"), plays: qsTr("Plays") })
+    readonly property var dropOrder: ["plays", "meter", "version", "style", "artist", "time"]
+    readonly property var defaults: ({ position: 34, style: 92, bpm: 88, time: 52, meter: 56, plays: 52, played: 124 })
     readonly property var weights: ({ title: 2.2, artist: 1.4, version: 0.8 })
     readonly property var minimums: ({ title: 140, artist: 90, version: 60 })
     readonly property int wActions: 56
     readonly property string playsKey: Session.view.kind === "history" ? "played" : "plays"
+    readonly property var saved: Session.settings && Session.settings.libraryColumns ? Session.settings.libraryColumns : ({ hidden: [], widths: {} })
+    /// Widths being dragged (saved when the drag ends).
+    property var dragged: ({})
+    function fixedWidth(k) {
+        if (dragged[k] !== undefined) return dragged[k];
+        if (saved.widths[k] !== undefined) return saved.widths[k];
+        return defaults[k];
+    }
+    function isFlex(k) { return weights[k] !== undefined && fixedWidth(k) === undefined; }
+    readonly property var shownColumns: {
+        let shown = optional.filter(k => !saved.hidden.includes(k));
+        const need = cols => (positioned ? fixedWidth("position") : 0) + wActions + (isFlex("title") ? minimums.title : fixedWidth("title"))
+            + cols.reduce((n, k) => n + (isFlex(k) ? minimums[k] : fixedWidth(k === "plays" ? playsKey : k)), 0);
+        for (const k of dropOrder) {
+            if (need(shown) <= list.width) break;
+            shown = shown.filter(x => x !== k);
+        }
+        return shown;
+    }
+    function shows(k) { return shownColumns.includes(k === "played" ? "plays" : k); }
     readonly property var flex: {
-        const fixed = (positioned ? widths.position : 0) + widths.style + widths.bpm + widths.time + widths.meter + widths[playsKey] + wActions;
-        let free = list.width - fixed;
+        const keys = ["title"].concat(["artist", "version"].filter(k => shows(k)));
+        let free = list.width - wActions - (positioned ? fixedWidth("position") : 0);
+        for (const k of shownColumns) if (weights[k] === undefined) free -= fixedWidth(k === "plays" ? playsKey : k);
         let weight = 0;
-        for (const k of ["title", "artist", "version"]) {
-            if (widths[k] !== undefined) free -= widths[k];
-            else weight += weights[k];
+        for (const k of keys) {
+            if (isFlex(k)) weight += weights[k];
+            else free -= fixedWidth(k);
         }
         const out = {};
-        for (const k of ["title", "artist", "version"])
-            out[k] = widths[k] !== undefined ? widths[k] : Math.max(minimums[k], free * weights[k] / weight);
+        for (const k of keys) out[k] = isFlex(k) ? Math.max(minimums[k], free * weights[k] / weight) : fixedWidth(k);
         return out;
     }
     readonly property real wTitle: flex.title
-    function colWidth(key) { return flex[key] !== undefined ? flex[key] : widths[key]; }
-    function resize(key, dx) {
-        const w = Object.assign({}, widths);
-        w[key] = Math.max(minimums[key] || 32, colWidth(key) + dx);
-        widths = w;
+    function colWidth(key) {
+        if (key !== "title" && key !== "position" && !shows(key)) return 0;
+        return flex[key] !== undefined ? flex[key] : fixedWidth(key);
     }
+    function resize(key, dx) {
+        const d = Object.assign({}, dragged);
+        d[key] = Math.max(minimums[key] || 32, colWidth(key) + dx);
+        dragged = d;
+    }
+    function saveColumns(patch) {
+        const next = { hidden: saved.hidden, widths: Object.assign({}, saved.widths, dragged) };
+        Object.assign(next, patch || {});
+        dragged = {};
+        Session.saveSettings({ libraryColumns: next });
+    }
+    function toggleColumn(k) {
+        saveColumns({ hidden: saved.hidden.includes(k) ? saved.hidden.filter(x => x !== k) : saved.hidden.concat([k]) });
+    }
+
     // Before every title: the fold control (views that fold songs) and where it plays from.
     readonly property int wFold: 34
     readonly property int wMarker: 14
@@ -141,29 +178,29 @@ FocusScope {
         anchors.fill: parent
         spacing: 0
 
-        // Header.
+        // Header. Right-click it to choose the columns.
         Rectangle {
             Layout.fillWidth: true
             implicitHeight: Theme.rowHeight
             color: Theme.system.button
             Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.system.mid }
+            TapHandler { acceptedButtons: Qt.RightButton; onTapped: columnMenu.popup() }
             Row {
                 anchors.fill: parent
                 HeaderCell {
-                    visible: root.positioned; width: root.widths.position; text: "#"; alignment: Qt.AlignRight
-                    sorted: root.sortMark("position"); onClicked: root.sortBy("position")
+                    visible: root.positioned; width: root.colWidth("position"); text: "#"; alignment: Qt.AlignRight
+                    sorted: root.sortMark("position"); onClicked: root.sortBy("position"); onContextMenu: columnMenu.popup()
                 }
                 HeaderCell {
-                    id: titleHeader
                     width: root.wTitle
-                    resizable: true
-                    onResized: dx => root.resize("title", dx)
                     text: qsTr("Title")
                     indent: (root.view && root.view.foldable ? root.wFold : 0) + root.wMarker
                     sorted: root.sortMark("title")
                     onClicked: root.sortBy("title")
-                    tip: root.view && root.view.foldable ? qsTr("Right-click: fold or unfold every song's versions") : ""
-                    onContextMenu: if (root.view && root.view.foldable) { Session.fold = !Session.fold; Session.toggled = []; }
+                    onContextMenu: columnMenu.popup()
+                    resizable: true
+                    onResized: dx => root.resize("title", dx)
+                    onResizeFinished: root.saveColumns()
                     // Fold or unfold every song's versions.
                     ToolButton {
                         visible: !!root.view && root.view.foldable
@@ -177,23 +214,53 @@ FocusScope {
                         onClicked: { Session.fold = !Session.fold; Session.toggled = []; }
                     }
                 }
-                HeaderCell { width: root.colWidth("artist"); text: qsTr("Artist"); sorted: root.sortMark("artist"); onClicked: root.sortBy("artist"); resizable: true; onResized: dx => root.resize("artist", dx) }
-                HeaderCell { width: root.colWidth("version"); text: qsTr("Version"); sorted: root.sortMark("version"); onClicked: root.sortBy("version"); resizable: true; onResized: dx => root.resize("version", dx) }
-                HeaderCell { width: root.widths.style; text: qsTr("Style"); sorted: root.sortMark("style"); onClicked: root.sortBy("style"); resizable: true; onResized: dx => root.resize("style", dx) }
-                HeaderCell { width: root.widths.bpm; text: qsTr("BPM"); alignment: Qt.AlignRight; sorted: root.sortMark("bpm"); onClicked: root.sortBy("bpm"); resizable: true; onResized: dx => root.resize("bpm", dx) }
-                HeaderCell { width: root.widths.time; text: qsTr("Time"); alignment: Qt.AlignRight; sorted: root.sortMark("time"); onClicked: root.sortBy("time"); resizable: true; onResized: dx => root.resize("time", dx) }
-                HeaderCell {
-                    width: root.widths.meter; text: qsTr("Meter"); sorted: root.sortMark("meter"); onClicked: root.sortBy("meter")
-                    tip: qsTr("Triple (3/4, 6/8) or duple (2/4, 4/4)"); resizable: true; onResized: dx => root.resize("meter", dx)
+                Repeater {
+                    model: root.optional
+                    delegate: HeaderCell {
+                        required property string modelData
+                        readonly property string key: modelData === "plays" ? root.playsKey : modelData
+                        visible: root.shows(modelData)
+                        width: root.colWidth(key)
+                        text: key === "played" ? qsTr("Played") : root.names[modelData]
+                        alignment: key === "bpm" || key === "time" || key === "plays" ? Qt.AlignRight : Qt.AlignLeft
+                        tip: key === "meter" ? qsTr("Triple (3/4, 6/8) or duple (2/4, 4/4)") : ""
+                        sorted: root.sortMark(key)
+                        onClicked: root.sortBy(key)
+                        onContextMenu: columnMenu.popup()
+                        resizable: true
+                        onResized: dx => root.resize(key, dx)
+                        onResizeFinished: root.saveColumns()
+                    }
                 }
-                HeaderCell {
-                    width: root.widths[root.playsKey]
-                    text: Session.view.kind === "history" ? qsTr("Played") : qsTr("Plays")
-                    alignment: Session.view.kind === "history" ? Qt.AlignLeft : Qt.AlignRight
-                    sorted: root.sortMark(root.playsKey)
-                    onClicked: root.sortBy(root.playsKey)
-                    resizable: true
-                    onResized: dx => root.resize(root.playsKey, dx)
+            }
+            Menu {
+                id: columnMenu
+                popupType: Popup.Native
+                MenuItem {
+                    text: qsTr("Fold Versions")
+                    checkable: true
+                    checked: Session.fold
+                    enabled: !!root.view && root.view.foldable
+                    onTriggered: { Session.fold = !Session.fold; Session.toggled = []; }
+                }
+                MenuSeparator {}
+                Instantiator {
+                    model: root.optional
+                    delegate: MenuItem {
+                        required property string modelData
+                        text: root.names[modelData]
+                        checkable: true
+                        checked: !root.saved.hidden.includes(modelData)
+                        onTriggered: root.toggleColumn(modelData)
+                    }
+                    onObjectAdded: (i, o) => columnMenu.insertItem(i + 2, o)
+                    onObjectRemoved: (i, o) => columnMenu.removeItem(o)
+                }
+                MenuSeparator {}
+                MenuItem {
+                    text: qsTr("Reset Column Widths")
+                    enabled: Object.keys(root.saved.widths).length > 0
+                    onTriggered: { root.dragged = {}; Session.saveSettings({ libraryColumns: { hidden: root.saved.hidden, widths: {} } }); }
                 }
             }
         }
@@ -240,7 +307,7 @@ FocusScope {
                     spacing: 0
                     opacity: rowItem.r.playedInSet || rowItem.r.suggested ? 0.55 : 1
 
-                    NumberCell { visible: root.positioned; width: root.widths.position; text: rowItem.r.position || ""; color: rowItem.fg; opacity: Theme.dim }
+                    NumberCell { visible: root.positioned; width: root.colWidth("position"); text: rowItem.r.position || ""; color: rowItem.fg; opacity: Theme.dim }
                     // Title: a tree (a song's other versions indented under it). Every row
                     // keeps the fold and source slots, so titles line up.
                     Item {
@@ -272,7 +339,7 @@ FocusScope {
                                         Label {
                                             anchors.verticalCenter: parent.verticalCenter
                                             text: rowItem.r.foldCount
-                                            font.pixelSize: 11
+                                            font.pointSize: Theme.smallPointSize
                                             color: rowItem.fg
                                             opacity: Theme.dim
                                         }
@@ -313,10 +380,11 @@ FocusScope {
                             }
                         }
                     }
-                    Cell { width: root.colWidth("artist"); text: rowItem.r.artist; color: rowItem.fg }
-                    Cell { width: root.colWidth("version"); text: rowItem.r.versionLabel; color: rowItem.fg; opacity: Theme.dim }
+                    Cell { visible: root.shows("artist"); width: root.colWidth("artist"); text: rowItem.r.artist; color: rowItem.fg }
+                    Cell { visible: root.shows("version"); width: root.colWidth("version"); text: rowItem.r.versionLabel; color: rowItem.fg; opacity: Theme.dim }
                     Item {
-                        width: root.widths.style
+                        visible: root.shows("style")
+                        width: root.colWidth("style")
                         height: parent.height
                         clip: true
                         Row {
@@ -331,14 +399,16 @@ FocusScope {
                         }
                     }
                     NumberCell {
-                        width: root.widths.bpm
+                        visible: root.shows("bpm")
+                        width: root.colWidth("bpm")
                         color: rowItem.selected ? rowItem.fg : rowItem.r.tempoFit === "sweet" ? Theme.ok : rowItem.r.tempoFit === "outside" ? Theme.warn : rowItem.fg
                         text: (rowItem.r.analyzing ? "… " : "") + Session.fmtBpm(rowItem.r.bpm) + (Math.abs(rowItem.r.rate - 1) > 0.001 ? "  " + Session.fmtPct(rowItem.r.rate) : "")
                     }
-                    NumberCell { width: root.widths.time; text: Session.fmtTime(rowItem.r.durationMs); color: rowItem.r.long && !rowItem.selected ? Theme.warn : rowItem.fg }
-                    Cell { width: root.widths.meter; text: Session.meterName(rowItem.r.meter); color: rowItem.fg; opacity: Theme.dim }
+                    NumberCell { visible: root.shows("time"); width: root.colWidth("time"); text: Session.fmtTime(rowItem.r.durationMs); color: rowItem.r.long && !rowItem.selected ? Theme.warn : rowItem.fg }
+                    Cell { visible: root.shows("meter"); width: root.colWidth("meter"); text: Session.meterName(rowItem.r.meter); color: rowItem.fg; opacity: Theme.dim }
                     NumberCell {
-                        width: root.widths[root.playsKey]
+                        visible: root.shows("plays")
+                        width: root.colWidth(root.playsKey)
                         horizontalAlignment: rowItem.r.playedAt ? Text.AlignLeft : Text.AlignRight
                         color: rowItem.fg
                         opacity: Theme.dim
