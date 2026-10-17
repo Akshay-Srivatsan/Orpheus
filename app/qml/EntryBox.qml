@@ -5,8 +5,9 @@ import Orpheus
 
 // A set entry's own settings (`view` from `song_view`): which version plays,
 // what it's shown as, overrides for this set, and auto mode.
-Frame {
+GroupBox {
     id: root
+    title: pause ? qsTr("Pause in This Set") : qsTr("In This Set")
 
     property var view
     readonly property var e: view.entry
@@ -35,7 +36,6 @@ Frame {
         anchors.fill: parent
         spacing: 4
 
-        Label { text: root.pause ? qsTr("PAUSE IN THIS SET") : qsTr("IN THIS SET"); font.pixelSize: 10; font.bold: true; opacity: 0.6 }
         GridLayout {
             Layout.fillWidth: true
             columns: 2
@@ -78,7 +78,8 @@ Frame {
                 }
                 Button {
                     visible: root.view.showAs.some(x => !x.fits && !x.on)
-                    text: "+"
+                    icon.source: Theme.icon("plus")
+                    icon.width: Theme.smallIconSize; icon.height: Theme.smallIconSize
                     implicitHeight: 24
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("Any of the club's styles, even one this song doesn't fit")
@@ -184,7 +185,7 @@ Frame {
             }
         }
 
-        Label { text: qsTr("AUTO MODE"); font.pixelSize: 10; font.bold: true; opacity: 0.6 }
+        Heading { text: qsTr("Auto Mode") }
         GridLayout {
             Layout.fillWidth: true
             columns: 2
@@ -236,9 +237,11 @@ Frame {
                 }
                 Label { text: "s" }
             }
-            Item { width: 1 }
+            Item { implicitWidth: 1 }
             CheckBox {
-                text: root.pause ? qsTr("Stop before this pause (start it with Play Next)") : qsTr("Stop before this song (start it with Play Next)")
+                text: root.pause ? qsTr("Stop before this pause") : qsTr("Stop before this song")
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Auto mode waits here: start it with Play Next")
                 checked: !!root.e.hold
                 onToggled: root.update({ hold: checked })
             }

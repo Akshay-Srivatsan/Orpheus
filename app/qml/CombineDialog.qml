@@ -7,10 +7,8 @@ import Orpheus
 // a file and its Spotify track: suggested by comparing fingerprints), it
 // becomes one audio too; otherwise each version keeps its own. Where they
 // differ (title, BPM, …), the DJ picks which value to keep. It can be undone.
-Dialog {
+AppDialog {
     id: root
-    modal: true
-    anchors.centerIn: Overlay.overlay
     width: 620
     title: songs.length > 1 ? qsTr("Combine %1 Songs").arg(songs.length) : qsTr("Combine")
 
@@ -76,20 +74,22 @@ Dialog {
             visible: !!root.preview && root.recordings.length > 1
             Layout.fillWidth: true
             RadioButton {
+                id: different
                 Layout.fillWidth: true
                 enabled: root.songs.length > 1
                 checked: !root.sameAudio
                 onToggled: if (checked) root.sameAudio = false
                 text: qsTr("Different audio — one song, each version keeping its own audio (e.g. several edits for one line dance)")
                     + (root.songs.length < 2 ? qsTr(" (they're already one song)") : "")
-                contentItem: Label { text: parent.text; wrapMode: Text.WordWrap; leftPadding: parent.indicator.width + parent.spacing }
+                contentItem: Label { text: different.text; wrapMode: Text.WordWrap; leftPadding: different.indicator.width + different.spacing }
             }
             RadioButton {
+                id: same
                 Layout.fillWidth: true
                 checked: root.sameAudio
                 onToggled: if (checked) root.sameAudio = true
                 text: qsTr("The same audio — one song and one audio (e.g. a FLAC and an MP3, or a file and its Spotify track): analysed once, one BPM, one set of hot cues; versions that become identical merge")
-                contentItem: Label { text: parent.text; wrapMode: Text.WordWrap; leftPadding: parent.indicator.width + parent.spacing }
+                contentItem: Label { text: same.text; wrapMode: Text.WordWrap; leftPadding: same.indicator.width + same.spacing }
             }
         }
         Label {

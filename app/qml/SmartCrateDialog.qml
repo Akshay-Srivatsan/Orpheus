@@ -5,10 +5,8 @@ import Orpheus
 
 // Creates or edits a smart crate: a crate whose songs are whatever in the
 // library matches its rules (e.g. "in Waltzes and tempo fits Rotary Waltz").
-Dialog {
+AppDialog {
     id: root
-    modal: true
-    anchors.centerIn: Overlay.overlay
     width: 720
     title: editing ? qsTr("Edit Smart Crate") : qsTr("New Smart Crate")
 

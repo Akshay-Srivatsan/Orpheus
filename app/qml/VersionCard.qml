@@ -19,10 +19,11 @@ Frame {
 
     function patch(p) { return Session.run("version_update", { id: v.id, patch: p }); }
 
+    // The selected one (or the set entry's) stands out.
     background: Rectangle {
-        radius: 6
-        color: root.highlighted ? Qt.alpha(palette.highlight, 0.12) : palette.base
-        border.color: root.view.shown.length ? Qt.alpha(root.view.shown[0].color, 0.6) : palette.mid
+        radius: 3
+        color: root.highlighted ? Qt.alpha(Theme.system.highlight, 0.08) : "transparent"
+        border.color: root.highlighted ? Theme.system.highlight : Theme.system.mid
     }
 
     ColumnLayout {
@@ -33,7 +34,8 @@ Frame {
             Layout.fillWidth: true
             ToolButton {
                 visible: root.song.versions.length > 1
-                text: root.view.isPrimary ? "★" : "☆"
+                icon.source: Theme.icon(root.view.isPrimary ? "star-filled" : "star")
+                icon.color: root.view.isPrimary ? Theme.warn : Theme.system.buttonText
                 enabled: !root.view.isPrimary
                 ToolTip.visible: hovered
                 ToolTip.text: root.view.isPrimary ? qsTr("The primary version: it stands for the song in the library") : qsTr("Make this the primary version")
@@ -81,7 +83,14 @@ Frame {
         RowLayout {
             visible: !!root.a
             Layout.fillWidth: true
-            ToolButton { text: (root.audioOpen ? "▾ " : "▸ ") + qsTr("Audio"); onClicked: root.audioOpen = !root.audioOpen }
+            ToolButton {
+                icon.source: Theme.icon(root.audioOpen ? "chevron-down" : "chevron-right")
+                icon.width: 12; icon.height: 12
+                text: qsTr("Audio")
+                ToolTip.visible: hovered
+                ToolTip.text: root.audioOpen ? qsTr("Hide the audio's details") : qsTr("Show the audio's details: BPM, meter, files…")
+                onClicked: root.audioOpen = !root.audioOpen
+            }
             ComboBox {
                 visible: root.song.recordings.length > 1
                 Layout.fillWidth: true
@@ -173,8 +182,8 @@ Frame {
             RowLayout {
                 TimeField { value: root.v.cueInMs; placeholderText: qsTr("auto"); onEdited: ms => root.patch({ cueInMs: ms }) }
                 TimeField { value: root.v.cueOutMs; placeholderText: qsTr("auto"); onEdited: ms => root.patch({ cueOutMs: ms }) }
-                ToolButton { visible: !!root.deck; text: "⇤"; ToolTip.visible: hovered; ToolTip.text: qsTr("Set start to the deck position"); onClicked: root.patch({ cueInMs: Math.round(root.deck.positionMs) }) }
-                ToolButton { visible: !!root.deck; text: "⇥"; ToolTip.visible: hovered; ToolTip.text: qsTr("Set end to the deck position"); onClicked: root.patch({ cueOutMs: Math.round(root.deck.positionMs) }) }
+                ToolButton { visible: !!root.deck; icon.source: Theme.icon("to-start"); ToolTip.visible: hovered; ToolTip.text: qsTr("Set start to the deck position"); onClicked: root.patch({ cueInMs: Math.round(root.deck.positionMs) }) }
+                ToolButton { visible: !!root.deck; icon.source: Theme.icon("to-end"); ToolTip.visible: hovered; ToolTip.text: qsTr("Set end to the deck position"); onClicked: root.patch({ cueOutMs: Math.round(root.deck.positionMs) }) }
             }
             Label { text: qsTr("Fade at") }
             RowLayout {

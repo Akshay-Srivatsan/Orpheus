@@ -1,24 +1,34 @@
 pragma Singleton
 import QtQuick
 
-// Colours and sizes the interface uses beyond the system palette.
+// Colours and sizes the interface uses beyond the system palette. Status
+// colours come in a light and a dark variant, following the system's theme.
 QtObject {
+    readonly property SystemPalette system: SystemPalette { colorGroup: SystemPalette.Active }
+    /// The system's theme is dark (its window colour is).
+    readonly property bool dark: system.window.hslLightness < 0.5
+
     /// Deck A cues in headphones by default (blue), deck B is the room (orange).
-    readonly property var deckColors: ["#0a84ff", "#ff9f0a"]
-    readonly property color onAir: "#ff453a"
-    readonly property color ok: "#30d158"
-    readonly property color warn: "#ffd60a"
-    readonly property color error: "#ff453a"
-    readonly property color spotify: "#1db954"
+    readonly property var deckColors: dark ? ["#0a84ff", "#ff9f0a"] : ["#0064d2", "#c86400"]
+    readonly property color onAir: dark ? "#ff453a" : "#d70015"
+    readonly property color ok: dark ? "#30d158" : "#1a7f37"
+    readonly property color warn: dark ? "#ffd60a" : "#9a6700"
+    readonly property color error: dark ? "#ff453a" : "#cf222e"
+    readonly property color spotify: dark ? "#1ed760" : "#1a9e48"
     /// Hot cue pads 1–4.
     readonly property var cueColors: ["#ff453a", "#ff9f0a", "#30d158", "#64d2ff"]
     /// Stems: vocals, drums, bass, other.
     readonly property var stemColors: ["#ff6482", "#ffd60a", "#30d158", "#64d2ff"]
     /// Styles without a colour.
     readonly property color neutral: "#8e8e93"
+    /// Secondary text (artist, version, counts): the text colour, faded.
+    readonly property real dim: 0.65
+    readonly property real faint: 0.45
 
     readonly property int spacing: 8
     readonly property int rowHeight: 26
+    readonly property int iconSize: 16
+    readonly property int smallIconSize: 14
     readonly property int waveformHeight: 58
     readonly property int decksHeight: 262
     readonly property int sidebarWidth: 220

@@ -66,25 +66,25 @@ Pane {
 
             SectionTitle { text: qsTr("Library") }
             NavItem {
-                text: qsTr("All Songs"); icon.name: "folder-music"; icon.source: Theme.icon("music")
+                text: qsTr("All Songs"); icon.source: Theme.icon("music")
                 count: Session.summary ? Session.summary.songs : 0
                 selected: root.isView({ kind: "all" })
                 onClicked: Session.show({ kind: "all" })
             }
             NavItem {
-                text: qsTr("History"); icon.name: "view-history"; icon.source: Theme.icon("history")
+                text: qsTr("History"); icon.source: Theme.icon("history")
                 selected: root.isView({ kind: "history" })
                 onClicked: Session.show({ kind: "history" })
             }
             NavItem {
-                text: qsTr("Files"); icon.name: "folder"; icon.source: Theme.icon("disc")
+                text: qsTr("Files"); icon.source: Theme.icon("disc")
                 selected: root.isView({ kind: "files" })
                 tip: qsTr("The audio files in your library folders: add ones removed from the library, or remove some")
                 onClicked: Session.show({ kind: "files" })
             }
             NavItem {
                 visible: !!Session.summary && Session.summary.missing > 0
-                text: qsTr("Missing Files"); icon.name: "dialog-warning"; icon.source: Theme.icon("warning")
+                text: qsTr("Missing Files"); icon.source: Theme.icon("warning")
                 count: Session.summary ? Session.summary.missing : 0
                 selected: root.isView({ kind: "missing" })
                 onClicked: Session.show({ kind: "missing" })
@@ -93,7 +93,7 @@ Pane {
             SectionTitle {
                 text: qsTr("Crates")
                 actions: [
-                    Action { text: "+"; onTriggered: crateAddMenu.popup() }
+                    Action { icon.source: Theme.icon("plus"); text: qsTr("New Crate"); onTriggered: crateAddMenu.popup() }
                 ]
                 Menu {
                     id: crateAddMenu
@@ -107,7 +107,7 @@ Pane {
             NavItem {
                 visible: !!Session.activeClub
                 text: Session.activeClub ? qsTr("%1's Songs").arg(Session.activeClub.name) : ""
-                icon.name: "starred"; icon.source: Theme.icon("star")
+                icon.source: Theme.icon("star")
                 count: Session.summary ? Session.summary.clubSongs : 0
                 tip: Session.activeClub ? qsTr("The songs %1 suggests for its styles that you have (Settings → Clubs lists the others)").arg(Session.activeClub.name) : ""
                 selected: root.isView({ kind: "club-songs" })
@@ -124,7 +124,6 @@ Pane {
                         id: crateItem
                         NavItem {
                             text: crateRow.modelData.name
-                            icon.name: crateRow.modelData.smart ? "view-filter" : "folder-favorites"
                             icon.source: Theme.icon(crateRow.modelData.smart ? "auto" : "crate")
                             count: Session.summary && Session.summary.crates[crateRow.modelData.id] !== undefined ? Session.summary.crates[crateRow.modelData.id] : 0
                             selected: root.isView({ kind: "crate", id: crateRow.modelData.id })
@@ -178,8 +177,8 @@ Pane {
             SectionTitle {
                 text: qsTr("Setlists")
                 actions: [
-                    Action { text: "⤓"; onTriggered: root.importSet() },
-                    Action { text: "+"; onTriggered: root.newSetlist() }
+                    Action { icon.source: Theme.icon("download"); text: qsTr("Import a Setlist…"); onTriggered: root.importSet() },
+                    Action { icon.source: Theme.icon("plus"); text: qsTr("New Setlist…"); onTriggered: root.newSetlist() }
                 ]
             }
             Repeater {
@@ -194,7 +193,7 @@ Pane {
                         id: setItem
                         NavItem {
                             text: setRow.modelData.name
-                            icon.name: "view-list-details"; icon.source: Theme.icon("list")
+                            icon.source: Theme.icon("list")
                             count: setRow.modelData.entryCount
                             marked: setRow.isOpen
                             selected: root.isView({ kind: "setlist", id: setRow.modelData.id })
@@ -245,7 +244,7 @@ Pane {
             SectionTitle { text: qsTr("Spotify") }
             NavItem {
                 visible: !!Session.spotify && Session.spotify.connected
-                text: qsTr("Search Spotify"); icon.name: "search"; icon.source: Theme.icon("search")
+                text: qsTr("Search Spotify"); icon.source: Theme.icon("search")
                 selected: root.isView({ kind: "spotify-search" })
                 onClicked: Session.show({ kind: "spotify-search" })
             }
@@ -255,7 +254,7 @@ Pane {
                     required property var modelData
                     Layout.fillWidth: true
                     text: modelData.name
-                    icon.name: "media-playlist-append"; icon.source: Theme.icon("spotify")
+                    icon.source: Theme.icon("spotify")
                     selected: root.isView({ kind: "spotify-playlist", uri: modelData.uri })
                     onClicked: Session.show({ kind: "spotify-playlist", uri: modelData.uri, name: modelData.name })
                 }
@@ -263,7 +262,7 @@ Pane {
             NavItem {
                 visible: !(Session.spotify && Session.spotify.connected)
                 text: Session.spotify && Session.spotify.connecting ? qsTr("Connecting…") : qsTr("Connect Spotify…")
-                icon.name: "network-connect"; icon.source: Theme.icon("spotify")
+                icon.source: Theme.icon("spotify")
                 onClicked: Session.settingsPage = "spotify"
             }
         }

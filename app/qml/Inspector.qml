@@ -80,12 +80,12 @@ Pane {
             }
 
             // The song.
-            Frame {
+            GroupBox {
                 visible: !!root.t
                 Layout.fillWidth: true
+                title: qsTr("Song")
                 ColumnLayout {
                     anchors.fill: parent
-                    Label { text: qsTr("SONG"); font.pixelSize: 10; font.bold: true; opacity: 0.6 }
                     TextField {
                         Layout.fillWidth: true
                         font.pixelSize: 16
@@ -113,8 +113,7 @@ Pane {
                         onEditingFinished: if (text !== (root.t.notes || "")) root.patchTrack({ notes: text })
                     }
                     Label {
-                        opacity: 0.6
-                        font.pixelSize: 11
+                        opacity: Theme.dim
                         text: root.t ? qsTr("%1 version(s) · %2 audio · played %3×").arg(root.t.versions.length).arg(root.t.recordings.length).arg(root.t.playCount) : ""
                     }
                 }
@@ -124,10 +123,10 @@ Pane {
             RowLayout {
                 visible: !!root.t
                 Layout.fillWidth: true
-                Label { Layout.fillWidth: true; text: qsTr("VERSIONS"); font.pixelSize: 10; font.bold: true; opacity: 0.6 }
+                Heading { Layout.fillWidth: true; text: qsTr("Versions") }
                 Button {
                     flat: true
-                    text: qsTr("+ New")
+                    icon.source: Theme.icon("plus"); text: qsTr("New Version")
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("A version playing the same audio (other styles, cues, tempo…)")
                     onClicked: root.newVersion()

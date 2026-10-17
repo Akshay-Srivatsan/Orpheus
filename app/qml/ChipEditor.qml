@@ -36,9 +36,11 @@ Flow {
                 Label { text: chip.s.name; font.pixelSize: 11; opacity: chip.on ? 1 : 0.5; anchors.verticalCenter: parent.verticalCenter }
                 ToolButton {
                     visible: !root.choices
-                    text: "×"
+                    icon.source: Theme.icon("x")
+                    icon.width: 10; icon.height: 10
                     implicitWidth: 16; implicitHeight: 16
                     padding: 0
+                    ToolTip.visible: hovered; ToolTip.text: qsTr("Remove")
                     onClicked: root.edited(root.value.filter(x => x !== chip.modelData))
                 }
             }

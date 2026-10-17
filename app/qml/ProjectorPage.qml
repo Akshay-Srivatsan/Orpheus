@@ -58,12 +58,12 @@ SettingsPage {
         Label { text: qsTr("Text size") }
         RowLayout {
             Slider {
-                id: scale
+                id: textScale
                 from: 0.6; to: 1.6; stepSize: 0.05
                 value: page.p ? page.p.fontScale : 1
                 onMoved: page.setProj({ fontScale: value })
             }
-            Label { text: Math.round(scale.value * 100) + "%" }
+            Label { text: Math.round(textScale.value * 100) + "%" }
         }
         Label { text: qsTr("Theme") }
         TabBar {

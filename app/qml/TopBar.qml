@@ -29,10 +29,10 @@ ToolBar {
         anchors.fill: parent
         spacing: Theme.spacing
 
-        Label { text: "Orpheus"; font.bold: true; font.pixelSize: 15 }
         Label {
-            text: Session.activeClub ? Session.activeClub.label : ""
-            opacity: 0.7
+            Layout.leftMargin: Theme.spacing
+            text: Session.activeClub ? Session.activeClub.label : qsTr("No club")
+            opacity: Session.activeClub ? 1 : Theme.dim
             ToolTip.visible: clubHover.hovered && !!Session.activeClub
             ToolTip.text: qsTr("Club guidelines for this set (styles, tempos, what a set should contain)")
             HoverHandler { id: clubHover }
@@ -61,19 +61,23 @@ ToolBar {
             ToolTip.text: qsTr("Show an announcement on the projector")
             Menu {
                 id: announceMenu
+                popupType: Popup.Native
                 MenuItem {
-                    visible: !!root.p && !!root.p.message
-                    height: visible ? implicitHeight : 0
-                    text: qsTr("Clear “%1”").arg(root.p && root.p.message ? root.p.message : "")
+                    text: root.p && root.p.message ? qsTr("Clear “%1”").arg(root.p.message) : qsTr("Clear")
+                    enabled: !!root.p && !!root.p.message
                     onTriggered: Session.run("projector_message", { message: null })
                 }
-                Repeater {
+                MenuSeparator {}
+                Instantiator {
                     model: Session.activeClub ? Session.activeClub.announcements : []
                     delegate: MenuItem {
                         required property var modelData
                         text: modelData
                         onTriggered: Session.run("projector_message", { message: modelData })
                     }
+                    // After "Clear" and its separator.
+                    onObjectAdded: (i, o) => announceMenu.insertItem(i + 2, o)
+                    onObjectRemoved: (i, o) => announceMenu.removeItem(o)
                 }
                 MenuSeparator {}
                 MenuItem { text: qsTr("Custom Message…"); onTriggered: customMessage.open() }
@@ -87,7 +91,7 @@ ToolBar {
             Menu {
                 id: projectorMenu
                 popupType: Popup.Native
-                Repeater {
+                Instantiator {
                     model: Qt.application.screens
                     delegate: MenuItem {
                         required property var modelData
@@ -95,6 +99,8 @@ ToolBar {
                         text: qsTr("Full Screen on %1 (%2×%3)").arg(modelData.name).arg(modelData.width).arg(modelData.height)
                         onTriggered: root.openProjector(index, true)
                     }
+                    onObjectAdded: (i, o) => projectorMenu.insertItem(i, o)
+                    onObjectRemoved: (i, o) => projectorMenu.removeItem(o)
                 }
                 MenuSeparator {}
                 MenuItem { text: qsTr("Open in a Window"); onTriggered: root.openProjector(-1, false) }
@@ -104,22 +110,26 @@ ToolBar {
         }
 
         // Volumes: the room, then the headphones (slider positions are square roots of the gain).
-        Label { text: "🔈"; ToolTip.visible: masterHover.hovered; ToolTip.text: qsTr("Room volume"); HoverHandler { id: masterHover } }
-        Meter { Layout.preferredWidth: 40; value: Session.levels ? Math.min(1, Math.sqrt(Session.levels.master)) : 0 }
+        Icon { glyph: "speaker"; ToolTip.visible: masterHover.hovered; ToolTip.text: qsTr("Room volume"); HoverHandler { id: masterHover } }
         Slider {
-            Layout.preferredWidth: 90
+            Layout.preferredWidth: 100
+            ToolTip.visible: hovered
+            ToolTip.text: qsTr("Room volume")
             from: 0; to: 1; stepSize: 0.01
             value: Session.levels ? Math.sqrt(Session.levels.masterVolume) : 0
             onMoved: Session.run("levels_set", { master: value * value, cue: null, crossfader: null })
         }
-        Label { text: "🎧"; ToolTip.visible: cueHover.hovered; ToolTip.text: qsTr("Headphone volume"); HoverHandler { id: cueHover } }
-        Meter { Layout.preferredWidth: 40; value: Session.levels ? Math.min(1, Math.sqrt(Session.levels.cue)) : 0 }
+        Meter { value: Session.levels ? Math.min(1, Math.sqrt(Session.levels.master)) : 0 }
+        Icon { Layout.leftMargin: Theme.spacing; glyph: "headphones"; ToolTip.visible: cueHover.hovered; ToolTip.text: qsTr("Headphone volume"); HoverHandler { id: cueHover } }
         Slider {
-            Layout.preferredWidth: 90
+            Layout.preferredWidth: 100
+            ToolTip.visible: hovered
+            ToolTip.text: qsTr("Headphone volume")
             from: 0; to: 1; stepSize: 0.01
             value: Session.levels ? Math.sqrt(Session.levels.cueVolume) : 0
             onMoved: Session.run("levels_set", { master: null, cue: value * value, crossfader: null })
         }
+        Meter { Layout.rightMargin: Theme.spacing; value: Session.levels ? Math.min(1, Math.sqrt(Session.levels.cue)) : 0 }
 
         StatusButton {
             text: qsTr("Audio")
@@ -140,7 +150,6 @@ ToolBar {
             onClicked: Session.settingsPage = "spotify"
         }
         ToolButton {
-            icon.name: "configure"
             icon.source: Theme.icon("gear")
             ToolTip.visible: hovered
             ToolTip.text: qsTr("Settings (Ctrl+,)")
@@ -148,12 +157,10 @@ ToolBar {
         }
     }
 
-    Dialog {
+    AppDialog {
         id: customMessage
         title: qsTr("Show on the projector")
         standardButtons: Dialog.Ok | Dialog.Cancel
-        anchors.centerIn: Overlay.overlay
-        modal: true
         TextField { id: messageField; width: 320; placeholderText: qsTr("Custom message"); onAccepted: customMessage.accept() }
         onOpened: { messageField.text = ""; messageField.forceActiveFocus(); }
         onAccepted: if (messageField.text.trim()) Session.run("projector_message", { message: messageField.text.trim() })

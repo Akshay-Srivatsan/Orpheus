@@ -105,13 +105,14 @@ Pane {
                 onClicked: Session.settingsPage = "clubs"
             }
             Item { Layout.fillWidth: true }
-            TextField {
+            SearchField {
                 id: search
-                Layout.preferredWidth: 240
-                placeholderText: qsTr("Search")
+                Layout.preferredWidth: 260
+                placeholderText: qsTr("Search title, artist, style…")
                 text: Session.search
                 onTextEdited: Session.search = text
-                Keys.onEscapePressed: { text = ""; Session.search = ""; focus = false; }
+                onClearButtonPressed: Session.search = ""
+                Keys.onEscapePressed: { Session.search = ""; focus = false; }
             }
         }
 
@@ -134,7 +135,7 @@ Pane {
             visible: !!Session.fillingSlot || !!Session.pickingEdit
             Layout.fillWidth: true
             padding: 6
-            background: Rectangle { color: Qt.alpha(palette.highlight, 0.18) }
+            background: Rectangle { color: Qt.alpha(Theme.system.highlight, 0.15); Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.system.highlight } }
             RowLayout {
                 anchors.fill: parent
                 Label {

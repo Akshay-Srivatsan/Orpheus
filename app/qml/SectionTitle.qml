@@ -17,18 +17,21 @@ RowLayout {
     Label {
         id: label
         Layout.fillWidth: true
-        font.pixelSize: 11
         font.bold: true
-        font.capitalization: Font.AllUppercase
-        opacity: 0.6
+        opacity: Theme.dim
     }
     Repeater {
         model: root.actions
         delegate: ToolButton {
             required property var modelData
             action: modelData
-            implicitWidth: 24
-            implicitHeight: 22
+            display: AbstractButton.IconOnly
+            icon.width: Theme.smallIconSize
+            icon.height: Theme.smallIconSize
+            implicitWidth: 26
+            implicitHeight: 24
+            ToolTip.visible: hovered
+            ToolTip.text: modelData.text
         }
     }
 }

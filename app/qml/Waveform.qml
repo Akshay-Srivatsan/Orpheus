@@ -17,7 +17,7 @@ Item {
     property var fadeAtMs: null
     property var cueMs: null
     property var hotCues: []
-    property color accent: palette.highlight
+    property color accent: Theme.system.highlight
     property bool interactive: true
 
     signal seeked(real ms, bool alt)
@@ -45,10 +45,20 @@ Item {
     function px(ms) { return durationMs > 0 ? ms / durationMs * width : 0; }
     function msAt(x) { return Math.max(0, Math.min(durationMs, x / width * durationMs)); }
 
+    // A dark well in either theme, so the bands' colours read the same.
     Rectangle {
         anchors.fill: parent
-        radius: 4
-        color: Qt.darker(palette.base, 1.4)
+        radius: 3
+        color: Theme.dark ? Qt.darker(Theme.system.base, 1.4) : Qt.darker(Theme.system.base, 1.06)
+        border.color: Theme.system.mid
+        // Without a song: just the line the waveform will stand on.
+        Rectangle {
+            visible: root.bins.length === 0
+            anchors.centerIn: parent
+            width: parent.width - 16
+            height: 1
+            color: Theme.system.mid
+        }
     }
 
     Canvas {
@@ -62,11 +72,7 @@ Item {
             const data = root.bins;
             const n = data.length / 4;
             const mid = height / 2;
-            if (n === 0) {
-                ctx.fillStyle = Qt.rgba(1, 1, 1, 0.08);
-                ctx.fillRect(0, mid - 1, width, 2);
-                return;
-            }
+            if (n === 0) return;
             for (let x = 0; x < width; x++) {
                 const b = Math.min(n - 1, Math.floor(x / width * n));
                 const peak = data[b * 4] / 255;
@@ -121,13 +127,13 @@ Item {
         }
     }
     // Main cue point.
-    Text {
+    Icon {
         visible: root.cueMs !== null
         x: root.cueMs !== null ? root.px(root.cueMs) - width / 2 : 0
-        y: -3
-        text: "▼"
+        y: -4
+        glyph: "sort-down"
+        sourceSize.width: 14; sourceSize.height: 14
         color: Theme.deckColors[1]
-        font.pixelSize: 10
     }
     // Playhead.
     Rectangle {

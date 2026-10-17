@@ -38,7 +38,7 @@ Pane {
     }
 
     background: Rectangle {
-        color: palette.base
+        color: Theme.system.base
         radius: 6
         border.color: root.d && root.d.audible ? Theme.onAir : Qt.alpha(root.accent, 0.5)
         border.width: root.d && root.d.audible ? 2 : 1
@@ -65,29 +65,31 @@ Pane {
             Layout.fillWidth: true
             spacing: Theme.spacing
             Label { text: root.letter; font.bold: true; font.pixelSize: 16; color: root.accent }
-            Label {
+            // Who hears it.
+            RowLayout {
                 visible: !!root.d && (root.d.audible || (root.d.onAir && root.loaded) || root.d.pfl)
-                text: !root.d ? "" : root.d.audible ? qsTr("● ON AIR") : root.d.onAir ? qsTr("IN THE ROOM") : qsTr("HEADPHONES")
-                color: root.d && root.d.audible ? Theme.onAir : palette.placeholderText
-                font.bold: true
-                font.pixelSize: 11
+                spacing: 4
+                Rectangle { visible: !!root.d && root.d.audible; implicitWidth: 8; implicitHeight: 8; radius: 4; color: Theme.onAir }
+                Label {
+                    text: !root.d ? "" : root.d.audible ? qsTr("On Air") : root.d.onAir ? qsTr("In the room") : qsTr("In headphones")
+                    color: root.d && root.d.audible ? Theme.onAir : Theme.system.text
+                    opacity: root.d && root.d.audible ? 1 : Theme.dim
+                    font.bold: !!root.d && root.d.audible
+                }
             }
             Label {
                 visible: !!root.d && root.d.upNext
                 text: qsTr("Up next")
                 color: Theme.ok
-                font.pixelSize: 11
             }
             Label {
-                color: root.d && root.d.status === "error" ? Theme.error : palette.placeholderText
-                font.pixelSize: 11
+                color: root.d && root.d.status === "error" ? Theme.error : Theme.system.text
+                opacity: root.d && root.d.status === "error" ? 1 : Theme.dim
                 text: !root.d ? "" : root.d.status === "loading" ? qsTr("Loading…") : root.d.fading ? qsTr("Fading out…")
                     : root.d.status === "ended" ? qsTr("Ended") : root.d.status === "error" ? qsTr("Error")
                     : root.d.status === "paused" && root.loaded ? (Math.abs(root.d.positionMs - root.d.cueMs) < 60 ? qsTr("Cued") : qsTr("Paused")) : ""
             }
             Item { Layout.fillWidth: true }
-            // The deck's level, before the crossfader.
-            Meter { Layout.preferredWidth: 50; value: Session.levels ? Math.min(1, Math.sqrt(Session.levels.decks[root.deck])) : 0 }
             Slider {
                 id: volume
                 Layout.preferredWidth: 90
@@ -98,18 +100,21 @@ Pane {
                 ToolTip.text: qsTr("Deck volume (double-click: 0 dB)")
                 TapHandler { acceptedButtons: Qt.LeftButton; onDoubleTapped: root.call("deck_set", { trimDb: 0 }) }
             }
-            Label { text: Session.fmtDb(volume.value); font.pixelSize: 11; Layout.preferredWidth: 52 }
+            Label { text: Session.fmtDb(volume.value); opacity: Theme.dim; font.features: { "tnum": 1 }; Layout.preferredWidth: 52 }
+            // The deck's level, before the crossfader.
+            Meter { value: Session.levels ? Math.min(1, Math.sqrt(Session.levels.decks[root.deck])) : 0 }
             ToolButton {
                 checkable: true
                 checked: !!root.d && root.d.pfl
-                icon.name: "audio-headphones"
                 icon.source: Theme.icon("headphones")
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Hear this deck in headphones")
                 onClicked: root.call("deck_set", { pfl: checked })
             }
             ToolButton {
-                text: "⋯"
+                icon.source: Theme.icon("dots")
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("More for deck %1").arg(root.letter)
                 onClicked: deckMenu.popup()
                 Menu {
                     id: deckMenu
@@ -139,7 +144,8 @@ Pane {
                 Layout.preferredWidth: 52
                 Layout.preferredHeight: 52
                 radius: 4
-                color: root.song ? Qt.alpha(root.song.color, 0.3) : palette.alternateBase
+                color: root.song ? Qt.alpha(root.song.color, 0.3) : Theme.system.alternateBase
+                border.color: Theme.system.mid
                 Image {
                     id: art
                     anchors.fill: parent
@@ -157,10 +163,17 @@ Pane {
                         }
                     }
                 }
+                Icon {
+                    anchors.centerIn: parent
+                    visible: !art.visible && !(root.song && root.song.label)
+                    glyph: "music"
+                    sourceSize.width: 24; sourceSize.height: 24
+                    opacity: Theme.faint
+                }
                 Label {
                     anchors.centerIn: parent
-                    visible: !art.visible
-                    text: root.song ? root.song.label || "♪" : ""
+                    visible: !art.visible && !!root.song && !!root.song.label
+                    text: root.song ? root.song.label || "" : ""
                     font.bold: true
                     elide: Text.ElideRight
                     width: parent.width - 4
@@ -176,14 +189,14 @@ Pane {
                     font.pixelSize: 18
                     font.bold: true
                     text: root.song ? root.song.title : root.d && root.d.status === "loading" ? qsTr("Loading…") : qsTr("Deck %1 is empty").arg(root.letter)
-                    opacity: root.song ? 1 : 0.6
+                    opacity: root.song ? 1 : Theme.dim
                 }
                 RowLayout {
                     Layout.fillWidth: true
                     Label {
                         Layout.fillWidth: true
                         elide: Text.ElideRight
-                        opacity: 0.75
+                        opacity: Theme.dim
                         text: root.song ? root.song.artist + (root.song.versionLabel ? " · " + root.song.versionLabel : "")
                             : Session.settings && Session.settings.autoLoadNext ? qsTr("Drag a song here — the set's next song loads automatically") : qsTr("Drag a song here")
                     }
@@ -196,22 +209,25 @@ Pane {
                     visible: !!root.d && !!root.d.error
                     text: root.d && root.d.error ? root.d.error : ""
                     color: Theme.error
-                    font.pixelSize: 11
                 }
             }
+            // Time left, and played.
             ColumnLayout {
+                visible: root.loaded
                 spacing: 0
                 Label {
                     Layout.alignment: Qt.AlignRight
-                    text: root.loaded ? "−" + Session.fmtTime(root.d.remainingMs) : "–:––"
+                    text: root.loaded ? "−" + Session.fmtTime(root.d.remainingMs) : ""
                     font.pixelSize: 22
                     font.bold: true
-                    color: root.d && root.d.nearEnd ? Theme.onAir : palette.text
+                    font.features: { "tnum": 1 }
+                    color: root.d && root.d.nearEnd ? Theme.onAir : Theme.system.text
                 }
                 Label {
                     Layout.alignment: Qt.AlignRight
                     text: root.loaded ? Session.fmtTime(root.d.elapsedMs) : ""
-                    opacity: 0.6
+                    font.features: { "tnum": 1 }
+                    opacity: Theme.dim
                 }
             }
         }
@@ -237,7 +253,7 @@ Pane {
             Layout.fillWidth: true
             spacing: 6
             Button {
-                text: qsTr("CUE")
+                text: qsTr("Cue")
                 enabled: root.loaded
                 highlighted: root.loaded && !root.playing && Math.abs(root.d.positionMs - root.d.cueMs) < 60
                 onPressed: root.call("deck_cue", { down: true })
@@ -246,7 +262,8 @@ Pane {
                 ToolTip.text: qsTr("While playing, back to the cue point; while paused, set it here (hold to preview)")
             }
             Button {
-                text: root.playing ? "⏸" : "▶"
+                icon.source: Theme.icon(root.playing ? "pause" : "play")
+                implicitWidth: 56
                 enabled: root.loaded && root.d.status !== "loading"
                 onClicked: root.call("deck_action", { action: "toggle" })
                 ToolTip.visible: hovered
@@ -320,18 +337,21 @@ Pane {
             Label {
                 visible: !!root.d && !root.d.stems && !!root.stemJob && (root.stemJob.state === "running" || root.stemJob.state === "queued")
                 text: root.stemJob && root.stemJob.state === "running" ? qsTr("Stems %1%").arg(Math.round(root.stemJob.percent)) : qsTr("Stems queued")
-                opacity: 0.7
+                opacity: Theme.dim
             }
             Button {
                 visible: !!root.song && root.song.hasFile && !root.d.stems && !(root.stemJob && (root.stemJob.state === "running" || root.stemJob.state === "queued"))
                 flat: true
                 enabled: root.loaded
-                text: root.stemJob && root.stemJob.state === "failed" ? qsTr("Stems failed — retry") : qsTr("Prepare stems")
+                text: root.stemJob && root.stemJob.state === "failed" ? qsTr("Retry Stems") : qsTr("Prepare Stems")
+                ToolTip.visible: hovered
+                ToolTip.text: root.stemJob && root.stemJob.state === "failed" ? qsTr("Separating the stems failed: try again") : qsTr("Separate vocals, drums, bass and the rest, to mute them live")
                 onClicked: root.call("deck_stem", { index: 0 })
             }
             Label {
+                visible: root.loaded
                 textFormat: Text.StyledText
-                color: !root.d ? palette.text : root.d.tempoFit === "outside" ? Theme.warn : root.d.tempoFit === "sweet" ? Theme.ok : palette.text
+                color: !root.d ? Theme.system.text : root.d.tempoFit === "outside" ? Theme.warn : root.d.tempoFit === "sweet" ? Theme.ok : Theme.system.text
                 text: "<b>" + Session.fmtBpm(root.d ? root.d.bpm : null) + "</b> BPM"
                     + (root.song && root.song.baseBpm && Math.abs(root.d.tempo - 1) > 0.0005 ? " · " + qsTr("orig %1").arg(Session.fmtBpm(root.song.baseBpm)) : "")
             }
@@ -348,7 +368,8 @@ Pane {
                 enabled: root.loaded
                 contentItem: Label {
                     text: Session.fmtPct(tempo.value)
-                    color: root.d && root.d.tooSlow ? Theme.warn : root.palette.buttonText
+                    color: root.d && root.d.tooSlow ? Theme.warn : Theme.system.buttonText
+                    font.features: { "tnum": 1 }
                     horizontalAlignment: Text.AlignHCenter
                 }
                 ToolTip.visible: hovered

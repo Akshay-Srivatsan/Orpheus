@@ -33,7 +33,7 @@ ColumnLayout {
     }
 
     // ------------------------------------------------------------ the set
-    Label { text: qsTr("THE SET"); font.pixelSize: 11; font.bold: true; opacity: 0.6; Layout.topMargin: Theme.spacing }
+    Heading { text: qsTr("The Set") }
     GridLayout {
         visible: !!root.c
         Layout.fillWidth: true
@@ -93,7 +93,7 @@ ColumnLayout {
     }
 
     // ------------------------------------------------------------ styles
-    Label { text: qsTr("STYLES"); font.pixelSize: 11; font.bold: true; opacity: 0.6; Layout.topMargin: Theme.spacing }
+    Heading { text: qsTr("Styles") }
     RowLayout {
         spacing: 4
         Item { Layout.preferredWidth: 26 }
@@ -234,7 +234,7 @@ ColumnLayout {
                     }
                 }
                 Button {
-                    text: qsTr("+ Add the Selected Song")
+                    icon.source: Theme.icon("plus"); text: qsTr("Add the Selected Song")
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("The song selected in the library (its fingerprint, file hash and Spotify link)")
                     onClicked: {
@@ -248,7 +248,7 @@ ColumnLayout {
             }
         }
     }
-    Button { text: qsTr("+ Add Style"); onClicked: root.editor.addItem("style") }
+    Button { icon.source: Theme.icon("plus"); text: qsTr("Add Style"); onClicked: root.editor.addItem("style") }
 
     // ------------------------------------------------------------ groups
     Label { text: qsTr("GROUPS (styles counted together)"); font.pixelSize: 11; font.bold: true; opacity: 0.6; Layout.topMargin: Theme.spacing }
@@ -282,10 +282,10 @@ ColumnLayout {
             ToolButton { icon.source: Theme.icon("x"); onClicked: root.edit(d => delete d.group[groupRow.modelData.id]) }
         }
     }
-    Button { text: qsTr("+ Add Group"); enabled: !!root.c && Object.keys(root.c.style).length > 0; onClicked: root.editor.addItem("group") }
+    Button { icon.source: Theme.icon("plus"); text: qsTr("Add Group"); enabled: !!root.c && Object.keys(root.c.style).length > 0; onClicked: root.editor.addItem("group") }
 
     // ------------------------------------------------------------ rules
-    Label { text: qsTr("RULES FOR PART OF THE SET"); font.pixelSize: 11; font.bold: true; opacity: 0.6; Layout.topMargin: Theme.spacing }
+    Heading { text: qsTr("Rules for Part of the Set") }
     Repeater {
         model: root.c ? root.editor.entries(root.c.rule) : []
         delegate: RowLayout {
@@ -301,12 +301,12 @@ ColumnLayout {
         }
     }
     RowLayout {
-        Button { text: qsTr("+ Add Rule"); onClicked: root.editor.addItem("rule") }
+        Button { icon.source: Theme.icon("plus"); text: qsTr("Add Rule"); onClicked: root.editor.addItem("rule") }
         Label { text: qsTr("Rules can also count styles in part of the set (edit the file: styles = […], count = …)."); opacity: 0.6; font.pixelSize: 11 }
     }
 
     // ------------------------------------------------------------ tags
-    Label { text: qsTr("TAGS"); font.pixelSize: 11; font.bold: true; opacity: 0.6; Layout.topMargin: Theme.spacing }
+    Heading { text: qsTr("Tags") }
     Repeater {
         model: root.c ? root.editor.entries(root.c.tag) : []
         delegate: RowLayout {
@@ -324,10 +324,10 @@ ColumnLayout {
             ToolButton { icon.source: Theme.icon("x"); onClicked: root.edit(d => delete d.tag[tagRow.modelData.id]) }
         }
     }
-    Button { text: qsTr("+ Add Tag"); onClicked: root.editor.addItem("tag") }
+    Button { icon.source: Theme.icon("plus"); text: qsTr("Add Tag"); onClicked: root.editor.addItem("tag") }
 
     // ------------------------------------------------------------ announcements
-    Label { text: qsTr("ANNOUNCEMENTS"); font.pixelSize: 11; font.bold: true; opacity: 0.6; Layout.topMargin: Theme.spacing }
+    Heading { text: qsTr("Announcements") }
     TextArea {
         Layout.fillWidth: true
         placeholderText: qsTr("One per line: reminders to announce (Announce menu)")

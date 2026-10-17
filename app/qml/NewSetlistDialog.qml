@@ -4,14 +4,12 @@ import QtQuick.Layouts
 import Orpheus
 
 // A new setlist: its name, date, club and whether it's planned or built live.
-Dialog {
+AppDialog {
     id: root
     title: qsTr("New Setlist")
-    modal: true
-    anchors.centerIn: Overlay.overlay
     standardButtons: Dialog.Ok | Dialog.Cancel
 
-    readonly property string today: new Date().toISOString().slice(0, 10)
+    readonly property string today: Qt.formatDate(new Date(), "yyyy-MM-dd")
     readonly property var clubChoice: club.currentIndex > 0 ? Session.clubs[club.currentIndex - 1] : null
     readonly property string defaultName: (clubChoice ? clubChoice.name : qsTr("Social")) + " — " + date.text
 

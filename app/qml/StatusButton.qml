@@ -12,7 +12,7 @@ ToolButton {
     contentItem: RowLayout {
         spacing: 4
         Rectangle {
-            width: 8; height: 8; radius: 4
+            implicitWidth: 8; implicitHeight: 8; radius: 4
             color: root.status === "ok" ? Theme.ok : root.status === "warn" ? Theme.warn : root.status === "bad" ? Theme.error : Theme.neutral
         }
         Label { text: root.text }

@@ -5,7 +5,10 @@ use std::path::Path;
 const SINGLETONS: &[&str] = &["Backend", "Session", "Theme"];
 
 fn main() {
-    // Every .qml file in qml/ belongs to the Orpheus module.
+    // Every .qml file in qml/ belongs to the Orpheus module (the folders are
+    // watched too, so added and removed files count).
+    println!("cargo::rerun-if-changed=qml");
+    println!("cargo::rerun-if-changed=icons");
     let mut files: Vec<QmlFile> = vec![];
     for entry in std::fs::read_dir("qml").expect("qml folder") {
         let path = entry.expect("qml entry").path();

@@ -29,8 +29,8 @@ ItemDelegate {
         anchors.rightMargin: Theme.spacing
         anchors.verticalCenter: parent.verticalCenter
         spacing: 4
-        Label { visible: root.marked; text: "●"; color: Theme.ok; font.pixelSize: 9 }
-        Label { visible: root.count > 0; text: root.count; opacity: 0.55; font.pixelSize: 11 }
+        Rectangle { visible: root.marked; implicitWidth: 7; implicitHeight: 7; radius: 4; color: Theme.ok }
+        Label { visible: root.count > 0; text: root.count; opacity: Theme.dim; font.features: { "tnum": 1 }; color: root.highlighted ? Theme.system.highlightedText : Theme.system.text }
     }
 
     TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.contextMenu() }

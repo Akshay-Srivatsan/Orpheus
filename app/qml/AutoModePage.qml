@@ -104,7 +104,7 @@ SettingsPage {
                     ToolButton { icon.source: Theme.icon("x"); onClicked: page.setAnnounce({ patterns: page.a.patterns.filter((_, j) => j !== index) }) }
                 }
             }
-            Button { text: qsTr("+ Add Sentence"); onClicked: page.setAnnounce({ patterns: page.a.patterns.concat([qsTr("Next up: {dance}.")]) }) }
+            Button { icon.source: Theme.icon("plus"); text: qsTr("Add Sentence"); onClicked: page.setAnnounce({ patterns: page.a.patterns.concat([qsTr("Next up: {dance}.")]) }) }
         }
 
         Label { text: qsTr("Voice"); Layout.alignment: Qt.AlignTop }
@@ -218,7 +218,7 @@ SettingsPage {
                 TextField { id: newWord; Layout.preferredWidth: 180; placeholderText: qsTr("Word or phrase"); onAccepted: addPron.clicked() }
                 Button {
                     id: addPron
-                    text: qsTr("+ Add Pronunciation")
+                    icon.source: Theme.icon("plus"); text: qsTr("Add Pronunciation")
                     enabled: newWord.text.trim().length > 0
                     onClicked: { page.saveProns(page.prons.concat([{ word: newWord.text.trim(), say: "" }])); newWord.text = ""; }
                 }

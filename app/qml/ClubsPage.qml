@@ -118,7 +118,7 @@ SettingsPage {
             }
             Label { visible: !Session.clubs.length; text: qsTr("No clubs yet."); opacity: 0.6 }
             Button {
-                text: qsTr("+ Add Club")
+                icon.source: Theme.icon("plus"); text: qsTr("Add Club")
                 onClicked: addMenu.popup()
                 Menu {
                     id: addMenu
@@ -277,22 +277,18 @@ SettingsPage {
         }
     }
 
-    Dialog {
+    AppDialog {
         id: newClub
         title: qsTr("New Club")
-        modal: true
         standardButtons: Dialog.Ok | Dialog.Cancel
-        anchors.centerIn: Overlay.overlay
         TextField { id: clubName; width: 280; placeholderText: qsTr("Club name"); onAccepted: newClub.accept() }
         onOpened: { clubName.text = ""; clubName.forceActiveFocus(); }
         onAccepted: if (clubName.text.trim()) Session.run("club_new", { name: clubName.text.trim() }).then(r => { if (r) { page.selId = r.clubId; page.versionId = r.versionId; } })
     }
-    Dialog {
+    AppDialog {
         id: urlDialog
         title: qsTr("Import from a Web Address")
-        modal: true
         standardButtons: Dialog.Ok | Dialog.Cancel
-        anchors.centerIn: Overlay.overlay
         TextField { id: url; width: 360; placeholderText: "https://club.example/orpheus.toml"; onAccepted: urlDialog.accept() }
         onOpened: { url.text = ""; url.forceActiveFocus(); }
         onAccepted: {
@@ -301,13 +297,11 @@ SettingsPage {
             Session.run("club_import_url", { url: url.text.trim() }).then(r => { page.busy = false; if (r) page.picked(r, qsTr("Club imported")); });
         }
     }
-    Dialog {
+    AppDialog {
         id: versionName
         property var target: null
         title: qsTr("Name this version")
-        modal: true
         standardButtons: Dialog.Ok | Dialog.Cancel
-        anchors.centerIn: Overlay.overlay
         TextField { id: vname; width: 280; placeholderText: qsTr("Empty: by its date"); onAccepted: versionName.accept() }
         onOpened: { vname.text = target ? target.name : ""; vname.forceActiveFocus(); }
         onAccepted: Session.run("club_rename_version", { clubId: page.sel.id, versionId: target.id, name: vname.text.trim() })

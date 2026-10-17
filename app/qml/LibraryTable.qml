@@ -18,24 +18,58 @@ FocusScope {
 
     signal combine(var songs, var recordings)
 
-    // Column widths (px); the title takes what's left.
-    readonly property int wPosition: 32
-    readonly property int wArtist: Math.max(100, width * 0.18)
-    readonly property int wVersion: Math.max(70, width * 0.11)
-    readonly property int wStyle: 100
-    readonly property int wBpm: 84
-    readonly property int wTime: 48
-    readonly property int wMeter: 52
-    readonly property int wPlays: Session.view.kind === "history" ? 110 : 48
-    readonly property int wActions: 52
-    readonly property int wTitle: Math.max(120, width - 4 - (positioned ? wPosition : 0) - wArtist - wVersion - wStyle - wBpm - wTime - wMeter - wPlays - wActions)
+    // Column widths (px). Title, artist and version share what the others leave
+    // (by `weights`, down to `minimums`) until a header's edge is dragged, which
+    // fixes that column's width (in `widths`).
+    property var widths: ({ position: 34, style: 92, bpm: 88, time: 52, meter: 56, plays: 52, played: 124 })
+    readonly property var weights: ({ title: 2.2, artist: 1.4, version: 0.8 })
+    readonly property var minimums: ({ title: 140, artist: 90, version: 60 })
+    readonly property int wActions: 56
+    readonly property string playsKey: Session.view.kind === "history" ? "played" : "plays"
+    readonly property var flex: {
+        const fixed = (positioned ? widths.position : 0) + widths.style + widths.bpm + widths.time + widths.meter + widths[playsKey] + wActions;
+        let free = list.width - fixed;
+        let weight = 0;
+        for (const k of ["title", "artist", "version"]) {
+            if (widths[k] !== undefined) free -= widths[k];
+            else weight += weights[k];
+        }
+        const out = {};
+        for (const k of ["title", "artist", "version"])
+            out[k] = widths[k] !== undefined ? widths[k] : Math.max(minimums[k], free * weights[k] / weight);
+        return out;
+    }
+    readonly property real wTitle: flex.title
+    function colWidth(key) { return flex[key] !== undefined ? flex[key] : widths[key]; }
+    function resize(key, dx) {
+        const w = Object.assign({}, widths);
+        w[key] = Math.max(minimums[key] || 32, colWidth(key) + dx);
+        widths = w;
+    }
+    // Before every title: the fold control (views that fold songs) and where it plays from.
+    readonly property int wFold: 34
+    readonly property int wMarker: 14
+    readonly property int wIndent: 16
 
     function sortBy(key) {
         if (Session.sort === key || (Session.sort === "" && view && view.sort === key)) Session.descending = !Session.descending;
         else { Session.sort = key; Session.descending = false; }
     }
     function sortMark(key) {
-        return view && view.sort === key ? (Session.descending ? " ▼" : " ▲") : "";
+        return view && view.sort === key ? (Session.descending ? "down" : "up") : "";
+    }
+
+    // A cell's text.
+    component Cell: Label {
+        height: Theme.rowHeight
+        leftPadding: 6
+        rightPadding: 6
+        verticalAlignment: Text.AlignVCenter
+        elide: Text.ElideRight
+    }
+    component NumberCell: Cell {
+        horizontalAlignment: Text.AlignRight
+        font.features: { "tnum": 1 }
     }
 
     function select(index, modifiers) {
@@ -111,31 +145,56 @@ FocusScope {
         Rectangle {
             Layout.fillWidth: true
             implicitHeight: Theme.rowHeight
-            color: palette.button
+            color: Theme.system.button
+            Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.system.mid }
             Row {
                 anchors.fill: parent
-                anchors.leftMargin: 4
-                spacing: 0
-                HeaderCell { visible: root.positioned; width: root.wPosition; text: "#" + root.sortMark("position"); onClicked: root.sortBy("position") }
-                HeaderCell { width: root.wTitle; text: qsTr("Title") + root.sortMark("title"); onClicked: root.sortBy("title") }
-                HeaderCell { width: root.wArtist; text: qsTr("Artist") + root.sortMark("artist"); onClicked: root.sortBy("artist") }
                 HeaderCell {
-                    width: root.wVersion
-                    text: qsTr("Version") + root.sortMark("version") + (root.view && root.view.foldable ? (Session.fold ? "  ▸" : "  ▾") : "")
-                    onClicked: root.sortBy("version")
-                    tip: root.view && root.view.foldable ? qsTr("Right-click: fold or unfold all songs' versions") : ""
-                    onContextMenu: { Session.fold = !Session.fold; Session.toggled = []; }
+                    visible: root.positioned; width: root.widths.position; text: "#"; alignment: Qt.AlignRight
+                    sorted: root.sortMark("position"); onClicked: root.sortBy("position")
                 }
-                HeaderCell { width: root.wStyle; text: qsTr("Style") + root.sortMark("style"); onClicked: root.sortBy("style") }
-                HeaderCell { width: root.wBpm; text: qsTr("BPM") + root.sortMark("bpm"); onClicked: root.sortBy("bpm") }
-                HeaderCell { width: root.wTime; text: qsTr("Time") + root.sortMark("time"); onClicked: root.sortBy("time") }
-                HeaderCell { width: root.wMeter; text: qsTr("Meter") + root.sortMark("meter"); onClicked: root.sortBy("meter"); tip: qsTr("Triple (3/4, 6/8) or duple (2/4, 4/4)") }
                 HeaderCell {
-                    width: root.wPlays
-                    text: (Session.view.kind === "history" ? qsTr("Played") : qsTr("Plays")) + root.sortMark(Session.view.kind === "history" ? "played" : "plays")
-                    onClicked: root.sortBy(Session.view.kind === "history" ? "played" : "plays")
+                    id: titleHeader
+                    width: root.wTitle
+                    resizable: true
+                    onResized: dx => root.resize("title", dx)
+                    text: qsTr("Title")
+                    indent: (root.view && root.view.foldable ? root.wFold : 0) + root.wMarker
+                    sorted: root.sortMark("title")
+                    onClicked: root.sortBy("title")
+                    tip: root.view && root.view.foldable ? qsTr("Right-click: fold or unfold every song's versions") : ""
+                    onContextMenu: if (root.view && root.view.foldable) { Session.fold = !Session.fold; Session.toggled = []; }
+                    // Fold or unfold every song's versions.
+                    ToolButton {
+                        visible: !!root.view && root.view.foldable
+                        x: 2
+                        width: root.wFold - 4
+                        height: parent.height
+                        icon.source: Theme.icon(Session.fold ? "chevron-right" : "chevron-down")
+                        icon.width: 12; icon.height: 12
+                        ToolTip.visible: hovered
+                        ToolTip.text: Session.fold ? qsTr("Unfold all: show every version of every song") : qsTr("Fold all: show each song once, its other versions under it")
+                        onClicked: { Session.fold = !Session.fold; Session.toggled = []; }
+                    }
                 }
-                Item { width: root.wActions }
+                HeaderCell { width: root.colWidth("artist"); text: qsTr("Artist"); sorted: root.sortMark("artist"); onClicked: root.sortBy("artist"); resizable: true; onResized: dx => root.resize("artist", dx) }
+                HeaderCell { width: root.colWidth("version"); text: qsTr("Version"); sorted: root.sortMark("version"); onClicked: root.sortBy("version"); resizable: true; onResized: dx => root.resize("version", dx) }
+                HeaderCell { width: root.widths.style; text: qsTr("Style"); sorted: root.sortMark("style"); onClicked: root.sortBy("style"); resizable: true; onResized: dx => root.resize("style", dx) }
+                HeaderCell { width: root.widths.bpm; text: qsTr("BPM"); alignment: Qt.AlignRight; sorted: root.sortMark("bpm"); onClicked: root.sortBy("bpm"); resizable: true; onResized: dx => root.resize("bpm", dx) }
+                HeaderCell { width: root.widths.time; text: qsTr("Time"); alignment: Qt.AlignRight; sorted: root.sortMark("time"); onClicked: root.sortBy("time"); resizable: true; onResized: dx => root.resize("time", dx) }
+                HeaderCell {
+                    width: root.widths.meter; text: qsTr("Meter"); sorted: root.sortMark("meter"); onClicked: root.sortBy("meter")
+                    tip: qsTr("Triple (3/4, 6/8) or duple (2/4, 4/4)"); resizable: true; onResized: dx => root.resize("meter", dx)
+                }
+                HeaderCell {
+                    width: root.widths[root.playsKey]
+                    text: Session.view.kind === "history" ? qsTr("Played") : qsTr("Plays")
+                    alignment: Session.view.kind === "history" ? Qt.AlignLeft : Qt.AlignRight
+                    sorted: root.sortMark(root.playsKey)
+                    onClicked: root.sortBy(root.playsKey)
+                    resizable: true
+                    onResized: dx => root.resize(root.playsKey, dx)
+                }
             }
         }
 
@@ -160,11 +219,16 @@ FocusScope {
                 width: list.width
                 height: Theme.rowHeight
 
+                readonly property color fg: selected ? Theme.system.highlightedText : Theme.system.text
+
                 Rectangle {
                     anchors.fill: parent
-                    color: rowItem.selected ? palette.highlight : rowItem.index % 2 ? palette.alternateBase : palette.base
-                    opacity: rowItem.selected ? 0.55 : 1
+                    color: rowItem.selected ? Theme.system.highlight
+                        : hover.hovered ? Qt.alpha(Theme.system.highlight, 0.12)
+                        : rowItem.index % 2 ? Theme.system.alternateBase : Theme.system.base
                 }
+                HoverHandler { id: hover }
+                // On a deck: a bar in its colour (red while the room hears it).
                 Rectangle {
                     visible: rowItem.onDeck
                     width: 3; height: parent.height
@@ -173,70 +237,111 @@ FocusScope {
 
                 Row {
                     anchors.fill: parent
-                    anchors.leftMargin: 4
                     spacing: 0
                     opacity: rowItem.r.playedInSet || rowItem.r.suggested ? 0.55 : 1
 
-                    Label { visible: root.positioned; width: root.wPosition; height: parent.height; verticalAlignment: Text.AlignVCenter; text: rowItem.r.position || ""; opacity: 0.6 }
-                    // Title: a tree (a song's other versions indented under it).
-                    RowLayout {
+                    NumberCell { visible: root.positioned; width: root.widths.position; text: rowItem.r.position || ""; color: rowItem.fg; opacity: Theme.dim }
+                    // Title: a tree (a song's other versions indented under it). Every row
+                    // keeps the fold and source slots, so titles line up.
+                    Item {
                         width: root.wTitle
                         height: parent.height
-                        spacing: 4
-                        Item { visible: rowItem.r.child; Layout.preferredWidth: 14 }
-                        ToolButton {
-                            visible: !!root.view && root.view.foldable
-                            enabled: rowItem.r.foldCount > 1
-                            opacity: enabled ? 1 : 0
-                            Layout.preferredWidth: 30
-                            Layout.preferredHeight: Theme.rowHeight - 2
-                            text: rowItem.r.foldCount > 1 ? (rowItem.r.foldOpen ? "▾" : "▸") + rowItem.r.foldCount : ""
-                            font.pixelSize: 10
-                            onClicked: root.toggleFold(rowItem.r.trackId)
+                        Row {
+                            anchors.fill: parent
+                            anchors.leftMargin: 6
+                            Item { visible: rowItem.r.child; width: root.wIndent; height: 1 }
+                            Item {
+                                visible: !!root.view && root.view.foldable
+                                width: root.wFold - (rowItem.r.child ? root.wIndent : 0)
+                                height: parent.height
+                                AbstractButton {
+                                    visible: rowItem.r.foldCount > 1
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: Math.min(parent.width, implicitWidth)
+                                    height: parent.height - 4
+                                    padding: 0
+                                    hoverEnabled: true
+                                    contentItem: Row {
+                                        spacing: 1
+                                        Icon {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            glyph: rowItem.r.foldOpen ? "chevron-down" : "chevron-right"
+                                            sourceSize.width: 12; sourceSize.height: 12
+                                            color: rowItem.fg
+                                        }
+                                        Label {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: rowItem.r.foldCount
+                                            font.pixelSize: 11
+                                            color: rowItem.fg
+                                            opacity: Theme.dim
+                                        }
+                                    }
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: rowItem.r.foldOpen ? qsTr("Fold its versions") : qsTr("Show all %1 versions").arg(rowItem.r.foldCount)
+                                    onClicked: root.toggleFold(rowItem.r.trackId)
+                                }
+                            }
+                            // Where it plays from: nothing for a file, ○ Spotify only, ● a file and Spotify; ⚠ missing.
+                            Item {
+                                width: root.wMarker
+                                height: parent.height
+                                Rectangle {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 7; height: 7; radius: 4
+                                    visible: rowItem.r.availability === "spotifyOnly" || rowItem.r.availability === "fileAndSpotify"
+                                    color: rowItem.r.availability === "fileAndSpotify" ? Theme.spotify : "transparent"
+                                    border.color: Theme.spotify
+                                    border.width: 1.5
+                                }
+                                Icon {
+                                    visible: rowItem.r.availability === "missing"
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    glyph: "warning"
+                                    sourceSize.width: 12; sourceSize.height: 12
+                                    color: Theme.warn
+                                }
+                            }
+                            Label {
+                                width: parent.width - x - 6
+                                height: parent.height
+                                verticalAlignment: Text.AlignVCenter
+                                text: rowItem.r.title
+                                elide: Text.ElideRight
+                                color: rowItem.fg
+                                opacity: rowItem.r.child ? Theme.dim : 1
+                            }
                         }
-                        // Where it plays from: ○ Spotify only, ● a file and Spotify.
-                        Rectangle {
-                            Layout.preferredWidth: 7
-                            Layout.preferredHeight: 7
-                            radius: 4
-                            visible: rowItem.r.availability === "spotifyOnly" || rowItem.r.availability === "fileAndSpotify"
-                            color: rowItem.r.availability === "fileAndSpotify" ? Theme.spotify : "transparent"
-                            border.color: Theme.spotify
-                            border.width: 1.5
-                        }
-                        Label { visible: rowItem.r.availability === "missing"; text: "⚠"; color: Theme.warn }
-                        Label { Layout.fillWidth: true; text: rowItem.r.title; elide: Text.ElideRight }
                     }
-                    Label { width: root.wArtist; height: parent.height; verticalAlignment: Text.AlignVCenter; text: rowItem.r.artist; elide: Text.ElideRight }
-                    Label { width: root.wVersion; height: parent.height; verticalAlignment: Text.AlignVCenter; text: rowItem.r.versionLabel; elide: Text.ElideRight; opacity: 0.6 }
+                    Cell { width: root.colWidth("artist"); text: rowItem.r.artist; color: rowItem.fg }
+                    Cell { width: root.colWidth("version"); text: rowItem.r.versionLabel; color: rowItem.fg; opacity: Theme.dim }
                     Item {
-                        width: root.wStyle
+                        width: root.widths.style
                         height: parent.height
                         clip: true
                         Row {
+                            x: 6
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: 3
-                            Label { visible: rowItem.r.suggested; text: qsTr("tempo fits"); opacity: 0.7; font.italic: true }
+                            Label { visible: rowItem.r.suggested; text: qsTr("tempo fits"); color: rowItem.fg; opacity: Theme.dim; font.italic: true }
                             Repeater {
                                 model: rowItem.r.suggested ? [] : rowItem.r.styles
                                 delegate: StyleBadge { required property var modelData; style: modelData }
                             }
                         }
                     }
-                    Label {
-                        width: root.wBpm
-                        height: parent.height
-                        verticalAlignment: Text.AlignVCenter
-                        color: rowItem.r.tempoFit === "sweet" ? Theme.ok : rowItem.r.tempoFit === "outside" ? Theme.warn : palette.text
-                        text: Session.fmtBpm(rowItem.r.bpm) + (Math.abs(rowItem.r.rate - 1) > 0.001 ? "  " + Session.fmtPct(rowItem.r.rate) : "") + (rowItem.r.analyzing ? " …" : "")
+                    NumberCell {
+                        width: root.widths.bpm
+                        color: rowItem.selected ? rowItem.fg : rowItem.r.tempoFit === "sweet" ? Theme.ok : rowItem.r.tempoFit === "outside" ? Theme.warn : rowItem.fg
+                        text: (rowItem.r.analyzing ? "… " : "") + Session.fmtBpm(rowItem.r.bpm) + (Math.abs(rowItem.r.rate - 1) > 0.001 ? "  " + Session.fmtPct(rowItem.r.rate) : "")
                     }
-                    Label { width: root.wTime; height: parent.height; verticalAlignment: Text.AlignVCenter; text: Session.fmtTime(rowItem.r.durationMs); color: rowItem.r.long ? Theme.warn : palette.text }
-                    Label { width: root.wMeter; height: parent.height; verticalAlignment: Text.AlignVCenter; text: Session.meterName(rowItem.r.meter); opacity: 0.6 }
-                    Label {
-                        width: root.wPlays
-                        height: parent.height
-                        verticalAlignment: Text.AlignVCenter
-                        opacity: 0.6
+                    NumberCell { width: root.widths.time; text: Session.fmtTime(rowItem.r.durationMs); color: rowItem.r.long && !rowItem.selected ? Theme.warn : rowItem.fg }
+                    Cell { width: root.widths.meter; text: Session.meterName(rowItem.r.meter); color: rowItem.fg; opacity: Theme.dim }
+                    NumberCell {
+                        width: root.widths[root.playsKey]
+                        horizontalAlignment: rowItem.r.playedAt ? Text.AlignLeft : Text.AlignRight
+                        color: rowItem.fg
+                        opacity: Theme.dim
                         text: rowItem.r.playedAt ? new Date(rowItem.r.playedAt).toLocaleString(Qt.locale(), "MMM d, h:mm ap") : rowItem.r.plays || ""
                     }
                     Row {
@@ -245,7 +350,8 @@ FocusScope {
                         spacing: 0
                         ToolButton {
                             icon.source: Theme.icon("headphones")
-                            icon.width: 14; icon.height: 14
+                            icon.width: Theme.smallIconSize; icon.height: Theme.smallIconSize
+                            icon.color: rowItem.fg
                             width: root.wActions / 2
                             height: parent.height
                             ToolTip.visible: hovered; ToolTip.text: qsTr("Preview on the free deck")
@@ -253,7 +359,8 @@ FocusScope {
                         }
                         ToolButton {
                             icon.source: Theme.icon(Session.fillingSlot ? "check" : "plus")
-                            icon.width: 14; icon.height: 14
+                            icon.width: Theme.smallIconSize; icon.height: Theme.smallIconSize
+                            icon.color: rowItem.fg
                             width: root.wActions / 2
                             height: parent.height
                             ToolTip.visible: hovered

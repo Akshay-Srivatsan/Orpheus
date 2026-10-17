@@ -19,7 +19,7 @@ ColumnLayout {
     spacing: 4
 
     function patch(p) { Session.run("recording_update", { id: r.id, patch: p }); }
-    function scale(f) { if (r.bpm) patch({ bpm: Math.round(r.bpm * f * 10) / 10, bpmSource: "user" }); }
+    function scaleBpm(f) { if (r.bpm) patch({ bpm: Math.round(r.bpm * f * 10) / 10, bpmSource: "user" }); }
 
     /// Tapping along: four taps or more within a few seconds set the BPM.
     function tap() {
@@ -56,27 +56,40 @@ ColumnLayout {
                 implicitWidth: 110
             }
             Button { text: qsTr("Tap"); onClicked: root.tap(); ToolTip.visible: hovered; ToolTip.text: qsTr("Tap along to the beat (4+ taps)") }
-            ToolButton { text: "½"; onClicked: root.scale(0.5) }
-            ToolButton { text: "⅔"; onClicked: root.scale(2 / 3) }
-            ToolButton { text: "1½"; onClicked: root.scale(1.5) }
-            ToolButton { text: "2×"; onClicked: root.scale(2) }
+            Button {
+                text: qsTr("Correct")
+                enabled: !!root.r.bpm
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("When the BPM counts the wrong beat: halve it, double it…")
+                onClicked: correctMenu.popup()
+                Menu {
+                    id: correctMenu
+                    popupType: Popup.Native
+                    MenuItem { text: qsTr("Halve (½)"); onTriggered: root.scaleBpm(0.5) }
+                    MenuItem { text: qsTr("Two Thirds (⅔)"); onTriggered: root.scaleBpm(2 / 3) }
+                    MenuItem { text: qsTr("One and a Half (1½)"); onTriggered: root.scaleBpm(1.5) }
+                    MenuItem { text: qsTr("Double (2×)"); onTriggered: root.scaleBpm(2) }
+                }
+            }
         }
-        Item { width: 1 }
+        Item { implicitWidth: 1 }
         RowLayout {
             Button {
                 visible: root.r.bpmSource !== "detected"
                 flat: true
-                text: qsTr("↺ Analysed") + (root.r.detectedBpm != null ? " (" + Session.fmtBpm(root.r.detectedBpm) + ")" : "")
+                icon.source: Theme.icon("reload")
+                text: qsTr("Analysed") + (root.r.detectedBpm != null ? " (" + Session.fmtBpm(root.r.detectedBpm) + ")" : "")
                 onClicked: Session.run("recording_reset_bpm", { id: root.r.id, from: "detected" })
             }
             Button {
                 visible: root.r.bpmSource !== "tag" && (root.r.tagBpm != null || root.r.files.length > 0)
                 flat: true
-                text: qsTr("↺ File tag") + (root.r.tagBpm != null ? " (" + Session.fmtBpm(root.r.tagBpm) + ")" : "")
+                icon.source: Theme.icon("reload")
+                text: qsTr("File tag") + (root.r.tagBpm != null ? " (" + Session.fmtBpm(root.r.tagBpm) + ")" : "")
                 onClicked: Session.run("recording_reset_bpm", { id: root.r.id, from: "tag" })
             }
         }
-        Item { width: 1 }
+        Item { implicitWidth: 1 }
         Label {
             opacity: 0.7
             font.pixelSize: 11
@@ -104,7 +117,7 @@ ColumnLayout {
         }
     }
 
-    Label { text: qsTr("FILES & SPOTIFY"); font.pixelSize: 10; font.bold: true; opacity: 0.6 }
+    Heading { text: qsTr("Files and Spotify") }
     Repeater {
         model: root.r.sources
         delegate: RowLayout {
@@ -224,7 +237,9 @@ ColumnLayout {
     }
     Label {
         visible: root.audio.clubSuggests.length > 0
-        text: "★ " + root.audio.clubSuggests.join(", ")
+        text: qsTr("Suggested by the club for %1").arg(root.audio.clubSuggests.join(", "))
+        wrapMode: Text.WordWrap
+        Layout.fillWidth: true
         color: Theme.ok
         ToolTip.visible: suggestHover.hovered
         ToolTip.text: qsTr("The club suggests this audio for these styles")

@@ -46,7 +46,7 @@ SettingsPage {
             required property int index
             Layout.fillWidth: true
             Rectangle {
-                width: 22; height: 22; radius: 4
+                implicitWidth: 22; implicitHeight: 22; radius: 4
                 color: modelData.color || Theme.neutral
                 border.color: palette.mid
                 MouseArea { anchors.fill: parent; onClicked: page.pickColor(modelData.color, c => page.update(l => l.styles[index].color = c)) }
@@ -107,7 +107,7 @@ SettingsPage {
         TextField { id: newStyle; Layout.preferredWidth: 220; placeholderText: qsTr("New style name"); onAccepted: addStyle.clicked() }
         Button {
             id: addStyle
-            text: qsTr("+ Add Style")
+            icon.source: Theme.icon("plus"); text: qsTr("Add Style")
             enabled: newStyle.text.trim().length > 0
             onClicked: { Session.run("style_create", { name: newStyle.text.trim() }); newStyle.text = ""; }
         }
@@ -129,7 +129,7 @@ SettingsPage {
             required property var modelData
             required property int index
             Rectangle {
-                width: 22; height: 22; radius: 4
+                implicitWidth: 22; implicitHeight: 22; radius: 4
                 color: modelData.color || Theme.neutral
                 border.color: palette.mid
                 MouseArea { anchors.fill: parent; onClicked: page.pickColor(modelData.color, c => page.update(l => l.tags[index].color = c)) }
@@ -169,7 +169,7 @@ SettingsPage {
         TextField { id: newTag; Layout.preferredWidth: 220; placeholderText: qsTr("New tag name"); onAccepted: addTag.clicked() }
         Button {
             id: addTag
-            text: qsTr("+ Add Tag")
+            icon.source: Theme.icon("plus"); text: qsTr("Add Tag")
             enabled: newTag.text.trim().length > 0
             onClicked: { Session.run("tag_create", { name: newTag.text.trim() }); newTag.text = ""; }
         }
@@ -231,7 +231,7 @@ SettingsPage {
         Label { text: page.info && page.info.club ? qsTr("%1 may call").arg(page.info.club.label) : "" }
         ComboBox { id: ruleClub; Layout.preferredWidth: 160; model: page.info ? page.info.clubStyles.map(c => c.name) : [] }
         Button {
-            text: qsTr("+ Add Rule")
+            icon.source: Theme.icon("plus"); text: qsTr("Add Rule")
             enabled: ruleMine.currentIndex >= 0 && ruleClub.currentIndex >= 0
             onClicked: Session.run("club_rule_set", { clubId: page.info.club.id, mine: page.info.styles[ruleMine.currentIndex].key, theirs: page.info.clubStyles[ruleClub.currentIndex].key, on: true })
         }

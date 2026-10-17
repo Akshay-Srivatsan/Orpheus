@@ -32,7 +32,7 @@ Pane {
     }
     function setCrossfader(x) { Session.run("levels_set", { master: null, cue: null, crossfader: x }); }
 
-    background: Rectangle { color: palette.base; radius: 6; border.color: palette.mid }
+    background: Rectangle { color: Theme.system.base; radius: 6; border.color: Theme.system.mid }
 
     ColumnLayout {
         anchors.fill: parent
@@ -63,11 +63,11 @@ Pane {
             Layout.fillWidth: true
             spacing: 2
             RowLayout {
-                Label { text: Session.fmtTime(root.gapMs); font.bold: true; font.pixelSize: 16; color: root.gapMs > root.gapTarget ? Theme.warn : palette.text }
+                Label { text: Session.fmtTime(root.gapMs); font.bold: true; font.pixelSize: 16; color: root.gapMs > root.gapTarget ? Theme.warn : Theme.system.text; font.features: { "tnum": 1 } }
                 Label {
                     Layout.fillWidth: true
                     elide: Text.ElideRight
-                    opacity: 0.75
+                    opacity: Theme.dim
                     text: !root.p ? "" : root.p.autoPhase === "announcing" ? qsTr("announcing…")
                         : root.p.autoPhase === "held" ? qsTr("waits for Play Next")
                         : root.autoIn !== null ? qsTr("next song in %1s").arg(Math.ceil(root.autoIn / 1000))
@@ -80,14 +80,13 @@ Pane {
             visible: root.playing && !root.inGap
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
-            font.pixelSize: 11
-            opacity: 0.7
+            opacity: Theme.dim
             text: !root.p ? "" : root.p.autoAdvance ? (root.p.autoPhase === "held" ? qsTr("Auto mode stops before the next song.") : qsTr("Auto mode starts the next song after the pause."))
                 : qsTr("Next song starts only when you press Play Next.")
         }
 
         // Up next.
-        Label { text: qsTr("UP NEXT"); font.pixelSize: 10; font.bold: true; opacity: 0.6 }
+        Heading { text: qsTr("Up Next") }
         RowLayout {
             Layout.fillWidth: true
             visible: !!root.next
@@ -95,19 +94,19 @@ Pane {
                 model: root.next && !root.next.isPause ? root.next.styles.slice(0, 2) : []
                 delegate: StyleBadge { required property var modelData; style: modelData }
             }
+            Icon { visible: !!root.next && root.next.isPause; glyph: "pause"; sourceSize.width: Theme.smallIconSize; sourceSize.height: Theme.smallIconSize }
             Label {
                 Layout.fillWidth: true
                 elide: Text.ElideRight
                 font.bold: true
-                text: !root.next ? "" : root.next.isPause ? "⏸ " + root.next.title : root.next.trackId ? root.next.title : qsTr("Pick a song for this slot")
+                text: !root.next ? "" : root.next.trackId || root.next.isPause ? root.next.title : qsTr("Pick a song for this slot")
             }
         }
         Label {
             visible: !!root.next
             Layout.fillWidth: true
             elide: Text.ElideRight
-            font.pixelSize: 11
-            opacity: 0.7
+            opacity: Theme.dim
             text: !root.next ? "" : root.next.isPause
                 ? qsTr("%1 s").arg(Math.round(root.next.durationMs / 1000)) + (root.next.entry.announcement ? " · “" + root.next.entry.announcement + "”" : "")
                 : [root.next.artist, root.next.bpm ? Session.fmtBpm(root.next.bpm) + " BPM" : "", root.nextDeck ? qsTr("deck %1").arg(root.nextDeck.deck === 0 ? "A" : "B") : ""].filter(x => x).join(" · ")
@@ -116,8 +115,7 @@ Pane {
             visible: !root.next
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
-            font.pixelSize: 11
-            opacity: 0.7
+            opacity: Theme.dim
             text: Session.set ? qsTr("End of setlist") : qsTr("No setlist open — add songs to start a live set")
         }
 
@@ -141,7 +139,9 @@ Pane {
         Button {
             visible: root.crossfader !== 0.5 && !!root.p && root.p.autoAdvance
             flat: true
-            text: qsTr("Auto mode: center the fader")
+            text: qsTr("Center the Crossfader")
+            ToolTip.visible: hovered
+            ToolTip.text: qsTr("Auto mode needs the crossfader centered")
             onClicked: root.setCrossfader(0.5)
         }
 
@@ -156,7 +156,7 @@ Pane {
             }
             Button {
                 visible: !!Session.tts && Session.tts.state === "ready"
-                text: "🔊"
+                icon.source: Theme.icon("mic")
                 enabled: !!root.next
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Announce the next dance now")

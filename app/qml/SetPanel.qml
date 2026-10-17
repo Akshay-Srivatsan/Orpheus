@@ -101,11 +101,11 @@ Pane {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             horizontalAlignment: Text.AlignHCenter
-            opacity: 0.7
+            opacity: Theme.dim
             text: qsTr("Live DJing: press + on a song (or Play Next) — a live set is created for you.\nPreset DJing: plan a setlist ahead of time.")
         }
         Button { Layout.alignment: Qt.AlignHCenter; highlighted: true; text: qsTr("New Setlist…"); onClicked: root.newSetlist() }
-        Label { visible: Session.setlists.length > 0; text: qsTr("RECENT"); font.pixelSize: 10; font.bold: true; opacity: 0.6 }
+        Heading { visible: Session.setlists.length > 0; text: qsTr("Recent") }
         Repeater {
             model: Session.setlists.slice(0, 6)
             delegate: ItemDelegate {
@@ -152,7 +152,9 @@ Pane {
                 }
             }
             ToolButton {
-                text: "⋯"
+                icon.source: Theme.icon("dots")
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("More for this set")
                 onClicked: setMenu.popup()
                 Menu {
                     id: setMenu
@@ -185,10 +187,13 @@ Pane {
             Layout.leftMargin: Theme.spacing
             Layout.rightMargin: Theme.spacing
             Layout.bottomMargin: 6
-            TabBar {
+            ComboBox {
+                readonly property var modes: ["live", "preset"]
+                model: [qsTr("Live"), qsTr("Preset")]
                 currentIndex: root.set && root.set.mode === "preset" ? 1 : 0
-                TabButton { text: qsTr("Live"); width: implicitWidth; onClicked: Session.run("setlist_update", { id: root.set.id, patch: { mode: "live" } }) }
-                TabButton { text: qsTr("Preset"); width: implicitWidth; onClicked: Session.run("setlist_update", { id: root.set.id, patch: { mode: "preset" } }) }
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Live: choose songs as you go. Preset: a setlist planned ahead of time.")
+                onActivated: index => Session.run("setlist_update", { id: root.set.id, patch: { mode: modes[index] } })
             }
             ComboBox {
                 id: clubBox
@@ -272,14 +277,14 @@ Pane {
                 footer: Item {
                     width: entries.width
                     height: Theme.rowHeight * 3
-                    Rectangle { visible: entries.dropIndex === (root.v ? root.v.rows.length : 0); width: parent.width; height: 2; color: palette.highlight }
+                    Rectangle { visible: entries.dropIndex === (root.v ? root.v.rows.length : 0); width: parent.width; height: 2; color: Theme.system.highlight }
                     Label {
                         visible: !!root.v && !root.v.rows.length
                         anchors.centerIn: parent
                         width: parent.width - Theme.spacing * 4
                         wrapMode: Text.WordWrap
                         horizontalAlignment: Text.AlignHCenter
-                        opacity: 0.6
+                        opacity: Theme.dim
                         text: qsTr("Drag songs here, press + on a song, or add style slots below.")
                     }
                 }
@@ -293,7 +298,7 @@ Pane {
             Layout.fillWidth: true
             Layout.maximumHeight: 220
             padding: Theme.spacing
-            background: Rectangle { color: palette.alternateBase }
+            background: Rectangle { color: Theme.system.alternateBase; Rectangle { width: parent.width; height: 1; color: Theme.system.mid } }
             ScrollView {
                 anchors.fill: parent
                 contentWidth: availableWidth
@@ -307,7 +312,7 @@ Pane {
                             delegate: Label {
                                 required property var modelData
                                 textFormat: Text.StyledText
-                                color: modelData.ok ? palette.text : Theme.warn
+                                color: modelData.ok ? Theme.system.text : Theme.warn
                                 text: modelData.name + " <b>" + modelData.have + "</b> / " + modelData.want
                             }
                         }
@@ -318,15 +323,23 @@ Pane {
                             required property var modelData
                             Layout.fillWidth: true
                             enabled: modelData.entries.length > 0
-                            text: (modelData.level === "warn" ? "⚠ " : "ⓘ ") + modelData.text
-                            palette.text: modelData.level === "warn" ? Theme.warn : root.palette.text
+                            text: modelData.text
+                            contentItem: RowLayout {
+                                spacing: Theme.spacing
+                                Icon {
+                                    Layout.alignment: Qt.AlignTop
+                                    glyph: modelData.level === "warn" ? "warning" : "info"
+                                    color: modelData.level === "warn" ? Theme.warn : Theme.system.text
+                                }
+                                Label { Layout.fillWidth: true; text: modelData.text; wrapMode: Text.WordWrap }
+                            }
                             onClicked: Session.selectedEntries = modelData.entries
                         }
                     }
-                    Label {
+                    RowLayout {
                         visible: !!root.v && !!root.v.check && !root.v.check.issues.length
-                        text: qsTr("✓ Follows %1's guidelines.").arg(root.v && root.v.club ? root.v.club.name : "")
-                        color: Theme.ok
+                        Icon { glyph: "check"; color: Theme.ok }
+                        Label { text: qsTr("Follows %1's guidelines.").arg(root.v && root.v.club ? root.v.club.name : ""); color: Theme.ok }
                     }
                 }
             }
@@ -337,7 +350,7 @@ Pane {
             Layout.fillWidth: true
             Layout.margins: Theme.spacing
             Button {
-                text: qsTr("+ Style slot")
+                icon.source: Theme.icon("plus"); text: qsTr("Style Slot")
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Add a placeholder for a dance style; choose the song live")
                 onClicked: slotMenu.popup()
@@ -362,6 +375,7 @@ Pane {
                 }
             }
             Button {
+                icon.source: Theme.icon("pause")
                 text: qsTr("Pause")
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Add a pause without a song: a break, an extra pause, an announcement or a stop for auto mode")
@@ -373,11 +387,14 @@ Pane {
                 checkable: true
                 checked: root.showCheck
                 onToggled: root.showCheck = checked
-                text: root.v && root.v.warnings ? qsTr("⚠ %1 to check").arg(root.v.warnings) : qsTr("Guidelines")
-                palette.buttonText: root.v && root.v.warnings ? Theme.warn : root.palette.buttonText
+                text: root.v && root.v.warnings ? qsTr("%1 to Check").arg(root.v.warnings) : qsTr("Guidelines")
+                icon.source: Theme.icon(root.v && root.v.warnings ? "warning" : "check")
+                icon.color: root.v && root.v.warnings ? Theme.warn : Theme.ok
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("How the set follows the club's guidelines")
             }
             Label {
-                opacity: 0.7
+                opacity: Theme.dim
                 text: !root.v ? "" : qsTr("%1 songs · %2").arg(root.v.rows.filter(r => r.number).length).arg(Session.fmtTime(root.v.totalMs))
                     + (root.v.remainingMs && root.p && root.p.startedAt ? " · " + qsTr("%1 left").arg(Session.fmtTime(root.v.remainingMs)) : "")
             }
