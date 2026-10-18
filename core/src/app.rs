@@ -614,7 +614,7 @@ impl App {
 
     /// Picks the source to play: the recording's preferred kind if available,
     /// otherwise a file on disk, otherwise Spotify.
-    fn choose_source(&self, rec: &Recording, title: &str) -> Result<(String, String)> {
+    pub(crate) fn choose_source(&self, rec: &Recording, title: &str) -> Result<(String, String)> {
         let file = || crate::library::resolve_path(&self.store, &rec.rec.id).map(|p| ("file".to_string(), p.to_string_lossy().to_string()));
         let spotify = || rec.rec.sources.iter().find(|s| s.kind == "spotify").map(|s| ("spotify".to_string(), s.key.clone()));
         let pick = match rec.rec.preferred_source.as_deref() {

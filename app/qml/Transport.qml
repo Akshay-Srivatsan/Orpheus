@@ -38,6 +38,9 @@ Frame {
     }
     readonly property real nextAt: steps.length ? steps[steps.length - 1].to : 0
     readonly property bool estimated: steps.some(s => s.estimated)
+    /// What will go wrong at the next entry: { text, stops } (stops: auto mode can't go on there).
+    readonly property var problems: p && p.nextProblems ? p.nextProblems : []
+    readonly property bool stops: problems.some(x => x.stops)
     function stepName(kind) {
         return { song: qsTr("This song"), pause: qsTr("Pause"), chime: qsTr("Chime"), announcement: qsTr("Announcement"), pauseAfter: qsTr("Pause") }[kind] || kind;
     }
@@ -174,9 +177,10 @@ Frame {
                 }
                 RowLayout {
                     Layout.fillWidth: true
-                    Label { Layout.fillWidth: true; elide: Text.ElideRight; text: qsTr("Next song"); color: Theme.ok; font.bold: true }
+                    readonly property color tint: root.stops ? Theme.warn : Theme.ok
+                    Label { Layout.fillWidth: true; elide: Text.ElideRight; text: root.stops ? qsTr("Auto mode stops") : qsTr("Next song"); color: parent.tint; font.bold: true }
                     Label {
-                        color: Theme.ok
+                        color: parent.tint
                         font.bold: true
                         font.features: { "tnum": 1 }
                         text: (root.estimated ? qsTr("in about %1") : qsTr("in %1")).arg(root.secs(root.nextAt - root.now))
@@ -192,7 +196,8 @@ Frame {
                 text: root.steps.filter(st => st.to > root.now).map(st => {
                     const t = root.stepName(st.kind) + " " + root.stepTime(st);
                     return st.from <= root.now ? "<b>" + t + "</b>" : t;
-                }).concat(["<font color='" + Theme.ok + "'>" + qsTr("next song") + "</font>"]).join(" → ")
+                }).concat([root.stops ? "<font color='" + Theme.warn + "'>" + qsTr("auto mode stops") + "</font>"
+                    : "<font color='" + Theme.ok + "'>" + qsTr("next song") + "</font>"]).join(" → ")
             }
 
             Label { text: qsTr("Up next"); opacity: Theme.dim }
@@ -228,6 +233,33 @@ Frame {
                     ? qsTr("%1 s").arg(Math.round(root.next.durationMs / 1000)) + (root.next.entry.announcement ? " · “" + root.next.entry.announcement + "”" : "")
                         + (root.next.entry.hold ? " · " + qsTr("stops here") : "")
                     : [root.next.artist, root.next.bpm ? Session.fmtBpm(root.next.bpm) + " BPM" : "", root.nextDeck ? qsTr("deck %1").arg(root.nextDeck.deck === 0 ? "A" : "B") : ""].filter(x => x).join(" · ")
+            }
+            // What will go wrong there, known now.
+            Repeater {
+                model: root.problems
+                delegate: RowLayout {
+                    id: problem
+                    required property var modelData
+                    Layout.fillWidth: true
+                    Icon {
+                        Layout.alignment: Qt.AlignTop
+                        glyph: "warning"
+                        color: problem.modelData.stops ? Theme.warn : Theme.system.text
+                        sourceSize.width: Theme.smallIconSize; sourceSize.height: Theme.smallIconSize
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        wrapMode: root.compact ? Text.NoWrap : Text.WordWrap
+                        elide: Text.ElideRight
+                        maximumLineCount: 2
+                        font.pointSize: Theme.smallPointSize
+                        color: problem.modelData.stops ? Theme.warn : Theme.system.text
+                        text: problem.modelData.text
+                        ToolTip.visible: problemHover.hovered && truncated
+                        ToolTip.text: text
+                        HoverHandler { id: problemHover }
+                    }
+                }
             }
             Label {
                 visible: !root.next

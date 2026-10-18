@@ -119,9 +119,9 @@ pub struct Perform {
     pub auto: AutoPhase,
     /// Last announcement pattern used (not repeated next time).
     pub last_pattern: Option<usize>,
-    /// The set entry auto-load last failed to load, and when (it waits
+    /// The set entry auto-load last failed to load, when, and why (it waits
     /// `AUTO_LOAD_RETRY` before trying it again).
-    pub auto_load_failed: Option<(Id, Instant)>,
+    pub auto_load_failed: Option<(Id, Instant, String)>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -151,8 +151,19 @@ pub struct PerformState {
     /// Auto mode's steps to the next entry, in order (none unless it's on
     /// its way there).
     pub auto_steps: Vec<AutoStep>,
+    /// What will go wrong at the next entry, as far as can be told now.
+    pub next_problems: Vec<Problem>,
     /// The steps' times are from the end of the song playing (ms after it).
     pub steps_after_song: bool,
+}
+
+/// Something that will go wrong at the next entry: `stops` auto mode (it
+/// can't start the song, or waits there), or just a warning.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Problem {
+    pub text: String,
+    pub stops: bool,
 }
 
 /// A step of the pause before the next entry in auto mode: `pause`, `chime`,
@@ -675,7 +686,7 @@ impl App {
         if !replaceable || self.perform.lock().pending.is_some() {
             return;
         }
-        if self.perform.lock().auto_load_failed.as_ref().is_some_and(|(id, at)| *id == next.id && at.elapsed() < AUTO_LOAD_RETRY) {
+        if self.perform.lock().auto_load_failed.as_ref().is_some_and(|(id, at, _)| *id == next.id && at.elapsed() < AUTO_LOAD_RETRY) {
             return;
         }
         let Ok((version, track_id)) = self.store.version(&version_id) else { return };
@@ -688,7 +699,7 @@ impl App {
             }
             Err(e) => {
                 log::warn!("auto-load: {e:#}");
-                self.perform.lock().auto_load_failed = Some((next.id.clone(), Instant::now()));
+                self.perform.lock().auto_load_failed = Some((next.id.clone(), Instant::now(), format!("{e:#}")));
             }
         }
     }
@@ -1067,6 +1078,7 @@ impl App {
         let started_at = entries.iter().filter_map(|e| e.played_at).min();
         let next = self.next_entry();
         let next_chime = next.as_ref().and_then(|e| self.chime_version_for(e));
+        let next_problems = next.as_ref().map(|e| self.problems_at(e, crossfader)).unwrap_or_default();
         let next_ready = next.as_ref().map(|e| e.version_id.is_some() || e.kind == EntryKind::Pause).unwrap_or(false);
         let next_held = next.as_ref().is_some_and(|e| e.hold);
         // In the pause: its steps, when. While a song plays: those after it,
@@ -1107,7 +1119,63 @@ impl App {
             next_chime,
             auto_steps: steps,
             steps_after_song,
+            next_problems,
         }
+    }
+
+    /// What will go wrong when `entry` comes up, as far as can be told now
+    /// (`crossfader`: where it is): what stops auto mode first, then warnings.
+    /// It changes nothing (unlike starting it, which these checks mirror).
+    fn problems_at(&self, entry: &SetlistEntry, crossfader: f64) -> Vec<Problem> {
+        let mut out = vec![];
+        let stop = |text: String| Problem { text, stops: true };
+        if entry.kind == EntryKind::Song {
+            match &entry.version_id {
+                None => out.push(stop("It's a slot with no song chosen: auto mode waits there (choose one, or skip it).".into())),
+                Some(vid) => {
+                    let found = self.store.version(vid).ok().and_then(|(v, tid)| Some((v, self.store.track(&tid).ok()?)));
+                    match found {
+                        None => out.push(stop("Its song is no longer in the library.".into())),
+                        Some((v, t)) => match t.recording_of(&v.id) {
+                            None => out.push(stop(format!("The audio of \"{}\" isn't in the library.", t.rec.title))),
+                            Some(r) if r.rec.removed => out.push(stop(format!("The audio of \"{}\" was removed from the library.", t.rec.title))),
+                            Some(r) => match self.choose_source(r, &t.rec.title) {
+                                Err(e) => out.push(stop(format!("{e:#}"))),
+                                Ok((kind, _)) if kind == "spotify" && !self.spotify.is_connected() => {
+                                    out.push(stop(format!("\"{}\" plays from Spotify, and Spotify isn't connected.", t.rec.title)))
+                                }
+                                Ok(_) => {}
+                            },
+                        },
+                    }
+                    if let Some((_, _, why)) = self.perform.lock().auto_load_failed.as_ref().filter(|(id, _, _)| *id == entry.id) {
+                        if out.is_empty() {
+                            out.push(stop(format!("It couldn't be loaded onto a deck: {why}")));
+                        }
+                    }
+                    let deck = self.deck_for_entry(entry, self.free_deck());
+                    if crossfader_side(crossfader) == Some(1 - deck) {
+                        out.push(stop(format!("The crossfader is over to deck {}, and it starts on deck {}: center the crossfader.", deck_name(1 - deck), deck_name(deck))));
+                    }
+                }
+            }
+        }
+        let a = self.settings.read().announce.clone();
+        if self.has_announcement(entry) {
+            if !self.tts.installed(&a.tts_config()) {
+                out.push(Problem { text: "Nothing will be said before it: the announcer's voice isn't downloaded (Settings → Auto Mode).".into(), stops: false });
+            } else if self.with_layers(entry, |l| l.chime_enabled(&a)) {
+                match self.chime_for(entry) {
+                    None => out.push(Problem { text: "Its chime is on, but no version is chosen to play.".into(), stops: false }),
+                    Some(v) => {
+                        if let Err(e) = self.chime_excerpt(&v) {
+                            out.push(Problem { text: format!("Its chime can't play ({e:#})."), stops: false });
+                        }
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// Roughly how long `entry`'s chime and announcement (`text`, or a
