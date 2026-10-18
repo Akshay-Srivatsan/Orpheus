@@ -125,11 +125,11 @@ ColumnLayout {
             }
             // Drag it to the set, a deck or a style.
             DragHandler { id: dragging; target: null }
-            Item {
-                Drag.active: dragging.active
-                Drag.dragType: Drag.Automatic
-                Drag.supportedActions: Qt.CopyAction
-                Drag.mimeData: ({ "application/x-orpheus-spotify": JSON.stringify(root.picked(item.modelData)) })
+            DragLabel {
+                readonly property var tracks: root.picked(item.modelData)
+                handler: dragging
+                text: tracks.length > 1 ? qsTr("%n songs", "", tracks.length) : item.modelData.title
+                payload: ({ "application/x-orpheus-spotify": JSON.stringify(tracks) })
             }
             Menu {
                 id: trackMenu

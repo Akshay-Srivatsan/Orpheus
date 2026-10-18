@@ -258,26 +258,12 @@ ItemDelegate {
             menu.popup();
         }
     }
-    DragHandler {
-        id: dragging
-        target: null
-        onActiveChanged: {
-            if (active) { Session.dragging = true; return; }
-            dragProxy.Drag.drop();
-            // No platform drag came of it: nothing to wait for.
-            if (!dragProxy.started) Session.dragging = false;
-        }
-    }
-    Item {
-        id: dragProxy
-        property bool started: false
-        Drag.onDragStarted: started = true
-        Drag.onDragFinished: { started = false; Session.dragging = false; }
-        Drag.active: dragging.active
-        Drag.dragType: Drag.Automatic
-        Drag.supportedActions: Qt.MoveAction | Qt.CopyAction
-        Drag.mimeData: {
-            const ids = Session.selectedEntries.includes(root.e.id) ? Session.selectedEntries : [root.e.id];
+    DragHandler { id: dragging; target: null }
+    DragLabel {
+        readonly property var ids: Session.selectedEntries.includes(root.e.id) ? Session.selectedEntries : [root.e.id]
+        handler: dragging
+        text: ids.length > 1 ? qsTr("%n entries", "", ids.length) : root.row ? root.row.title || qsTr("Entry") : ""
+        payload: {
             const data = { "application/x-orpheus-entries": JSON.stringify(ids) };
             if (root.e.versionId) data["application/x-orpheus-versions"] = JSON.stringify([root.e.versionId]);
             return data;
@@ -291,14 +277,14 @@ ItemDelegate {
         keys: Session.songKeys.concat(["application/x-orpheus-entries"])
         /// Set entries (not songs) are being dragged over it.
         property bool moving: false
-        onEntered: d => moving = d.formats.includes("application/x-orpheus-entries")
+        onEntered: d => moving = Session.dropHas(d, "application/x-orpheus-entries")
         function onSlot(y) { return root.isSlot && !moving && y > height * 0.2 && y < height * 0.8; }
         onPositionChanged: d => root.dropHover(onSlot(d.y) ? -1 : d.y > height / 2 ? root.rowIndex + 1 : root.rowIndex)
         onExited: root.dropHover(-1)
         onDropped: d => {
             const at = d.y > height / 2 ? root.rowIndex + 1 : root.rowIndex;
-            if (d.formats.includes("application/x-orpheus-entries")) {
-                root.entriesDropped(JSON.parse(d.getDataAsString("application/x-orpheus-entries")), at);
+            if (Session.dropHas(d, "application/x-orpheus-entries")) {
+                root.entriesDropped(JSON.parse(Session.dropText(d, "application/x-orpheus-entries")), at);
                 return;
             }
             const slot = onSlot(d.y);

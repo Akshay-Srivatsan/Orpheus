@@ -204,6 +204,8 @@ FocusScope {
     /// handle their clicks, for double-clicks and dragging.)
     function clickRow(row, modifiers) {
         const index = tree.index(row, 0);
+        // The table takes the keyboard (arrows, Ctrl+A, Delete).
+        tree.forceActiveFocus();
         if ((modifiers & Qt.ShiftModifier) && anchorRow >= 0 && anchorRow < tree.rows) {
             if (!(modifiers & Qt.ControlModifier)) selection.clearSelection();
             for (let r = Math.min(anchorRow, row); r <= Math.max(anchorRow, row); r++)
@@ -534,25 +536,12 @@ FocusScope {
                         onTapped: root.openMenu(cell.row, cell.r, null)
                     }
                     // Drag the selected songs (or this one) to the set, a deck, a crate or a style.
-                    DragHandler {
-                        id: dragging
-                        target: null
-                        onActiveChanged: {
-                            if (active) { Session.dragging = true; return; }
-                            dragProxy.Drag.drop();
-                            // No platform drag came of it: nothing to wait for.
-                            if (!dragProxy.started) Session.dragging = false;
-                        }
-                    }
-                    Item {
-                        id: dragProxy
-                        property bool started: false
-                        Drag.onDragStarted: started = true
-                        Drag.onDragFinished: { started = false; Session.dragging = false; }
-                        Drag.active: dragging.active
-                        Drag.dragType: Drag.Automatic
-                        Drag.supportedActions: Qt.CopyAction
-                        Drag.mimeData: ({ "application/x-orpheus-versions": JSON.stringify(Session.selected.length && cell.r && Session.selected.includes(cell.r.versionId) ? Session.selected : cell.r ? [cell.r.versionId] : []) })
+                    DragHandler { id: dragging; target: null }
+                    DragLabel {
+                        readonly property var ids: Session.selected.length && cell.r && Session.selected.includes(cell.r.versionId) ? Session.selected : cell.r ? [cell.r.versionId] : []
+                        handler: dragging
+                        text: ids.length > 1 ? qsTr("%n songs", "", ids.length) : cell.r ? cell.r.title : ""
+                        payload: ({ "application/x-orpheus-versions": JSON.stringify(ids) })
                     }
                 }
             }

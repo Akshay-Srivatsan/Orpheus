@@ -17,16 +17,25 @@ Pane {
     property bool showCheck: false
     property bool renaming: false
 
+    /// The entry a Shift-click extends the selection from (the last clicked).
+    property string anchor: ""
+    /// A click on an entry: selects it; with Ctrl (⌘ on a Mac) adds or removes
+    /// it; with Shift, selects from the last entry clicked to it. The list
+    /// takes the keyboard (Delete, Ctrl+A).
     function select(entry, modifiers) {
         const sel = Session.selectedEntries;
-        if (modifiers & (Qt.ControlModifier | Qt.MetaModifier)) {
+        const ids = set.entries.map(e => e.id);
+        entries.forceActiveFocus();
+        if ((modifiers & Qt.ShiftModifier) && ids.includes(anchor)) {
+            const a = ids.indexOf(anchor), b = ids.indexOf(entry.id);
+            const range = ids.slice(Math.min(a, b), Math.max(a, b) + 1);
+            Session.selectedEntries = (modifiers & (Qt.ControlModifier | Qt.MetaModifier)) ? [...new Set(sel.concat(range))] : range;
+        } else if (modifiers & (Qt.ControlModifier | Qt.MetaModifier)) {
             Session.selectedEntries = sel.includes(entry.id) ? sel.filter(x => x !== entry.id) : sel.concat([entry.id]);
-        } else if ((modifiers & Qt.ShiftModifier) && sel.length) {
-            const ids = set.entries.map(e => e.id);
-            const a = ids.indexOf(sel[0]), b = ids.indexOf(entry.id);
-            Session.selectedEntries = ids.slice(Math.min(a, b), Math.max(a, b) + 1);
+            anchor = entry.id;
         } else {
             Session.selectedEntries = [entry.id];
+            anchor = entry.id;
         }
         Session.inspectEntry = entry.id;
         const row = v.rows.find(r => r.entry.id === entry.id);
@@ -39,6 +48,13 @@ Pane {
     function choose(entry) {
         if (!entry.versionId) { Session.startFillingSlot(entry); return; }
         Session.run("deck_load", { deck: null, versionId: entry.versionId, entryId: entry.id, play: false });
+    }
+
+    /// Selects every entry (Ctrl+A in the set).
+    function selectAll() {
+        if (!set) return;
+        Session.selectedEntries = set.entries.map(e => e.id);
+        entries.forceActiveFocus();
     }
 
     function remove(ids) {
@@ -307,7 +323,7 @@ Pane {
                 onDropped: d => {
                     const at = root.v.rows.length;
                     entries.dropIndex = -1;
-                    if (d.formats.includes("application/x-orpheus-entries")) root.moveEntries(JSON.parse(d.getDataAsString("application/x-orpheus-entries")), at);
+                    if (Session.dropHas(d, "application/x-orpheus-entries")) root.moveEntries(JSON.parse(Session.dropText(d, "application/x-orpheus-entries")), at);
                     else Session.droppedVersions(d, false).then(ids => { if (ids.length) root.insertSongs(ids, at); });
                 }
             }

@@ -85,7 +85,17 @@ ApplicationWindow {
                 onTriggered: Session.undo()
             }
             MenuSeparator {}
-            Action { text: qsTr("Select &All Songs"); shortcut: StandardKey.SelectAll; onTriggered: library.table.selectAll() }
+            // In the set (it has the keyboard): its entries; else the library's songs.
+            Action {
+                text: qsTr("Select &All")
+                shortcut: StandardKey.SelectAll
+                onTriggered: {
+                    for (let p = window.activeFocusItem; p; p = p.parent) {
+                        if (p === setPanel) { setPanel.selectAll(); return; }
+                    }
+                    library.table.selectAll();
+                }
+            }
             Action { text: qsTr("&Find…"); shortcut: StandardKey.Find; onTriggered: { library.searchField.forceActiveFocus(); library.searchField.selectAll(); } }
         }
         Menu {

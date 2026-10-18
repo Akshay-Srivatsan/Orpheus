@@ -49,6 +49,6 @@ ItemDelegate {
         anchors.fill: parent
         keys: root.dropKeys
         enabled: root.dropKeys.length > 0
-        onDropped: d => root.dropped(JSON.parse(d.getDataAsString("application/x-orpheus-versions") || "[]"))
+        onDropped: d => root.dropped(JSON.parse(Session.dropText(d, "application/x-orpheus-versions") || "[]"))
     }
 }

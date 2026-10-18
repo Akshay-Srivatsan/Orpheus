@@ -58,7 +58,7 @@ Frame {
         enabled: !(root.d && root.d.audible)
         onDropped: drop => {
             // A set entry dragged here plays as that entry.
-            const entries = drop.formats.includes("application/x-orpheus-entries") ? JSON.parse(drop.getDataAsString("application/x-orpheus-entries")) : [];
+            const entries = Session.dropHas(drop, "application/x-orpheus-entries") ? JSON.parse(Session.dropText(drop, "application/x-orpheus-entries")) : [];
             Session.droppedVersions(drop, false).then(ids => { if (ids.length) Session.loadDeck(root.deck, ids[0], entries.length === 1 ? entries[0] : null); });
         }
     }
