@@ -157,12 +157,12 @@ SettingsPage {
                 Icon { visible: !!page.tts && page.tts.state === "ready"; glyph: "check"; color: Theme.ok }
                 Label { visible: !!page.tts && page.tts.state === "ready"; text: qsTr("Ready"); color: Theme.ok }
                 Button {
-                    visible: !!page.tts && page.tts.state === "ready"
+                    enabled: !!page.tts && page.tts.state === "ready"
                     text: qsTr("Remove…")
                     onClicked: Session.confirm(qsTr("Delete the announcer's model and voices from this computer?"), qsTr("Delete"), ok => { if (ok) Session.run("tts_remove"); })
                 }
                 Button {
-                    visible: !page.tts || (page.tts.state !== "ready" && page.tts.state !== "installing")
+                    enabled: !page.tts || (page.tts.state !== "ready" && page.tts.state !== "installing")
                     highlighted: true
                     text: page.tts && page.tts.installedVoices.length ? qsTr("Download This Voice") : qsTr("Download the Voice (%1 MB)").arg(page.a && page.a.model === "fp32" ? 325 : 160)
                     onClicked: Session.run("tts_install")
@@ -225,7 +225,6 @@ SettingsPage {
                             onClicked: Session.run("tts_say", { text: modelData.word })
                         }
                         Button {
-                            flat: true
                             text: qsTr("phonemes")
                             enabled: !!page.tts && page.tts.state === "ready" && !!modelData.word
                             onClicked: Session.run("tts_phonemes", { text: modelData.word }).then(p => {

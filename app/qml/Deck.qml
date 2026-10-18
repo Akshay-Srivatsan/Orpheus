@@ -24,6 +24,8 @@ Frame {
     readonly property real range: (Session.settings ? Session.settings.tempoRangePct : 10) / 100
     readonly property var stemJob: d && d.recordingId && Session.stems ? Session.stems.jobs[d.recordingId] : undefined
     readonly property var stemNames: [qsTr("Vocals"), qsTr("Drums"), qsTr("Bass"), qsTr("Other (melody, instruments)")]
+    /// Its song's stems are being separated (or wait to be).
+    readonly property bool stemsWorking: !!stemJob && (stemJob.state === "running" || stemJob.state === "queued")
     readonly property var stemShort: [qsTr("Vox"), qsTr("Drm"), qsTr("Bas"), qsTr("Oth")]
 
     function call(name, args) {
@@ -140,6 +142,12 @@ Frame {
                     MenuItem { text: qsTr("Set Fade-Out Point Here"); enabled: root.loaded; onTriggered: root.call("deck_set_point", { kind: "fade" }) }
                     MenuItem { text: qsTr("Clear Start / End / Fade"); enabled: root.loaded; onTriggered: root.call("deck_set_point", { kind: "clear" }) }
                     MenuSeparator {}
+                    MenuItem {
+                        readonly property bool failed: !!root.stemJob && root.stemJob.state === "failed"
+                        text: failed ? qsTr("Retry Separating Stems") : qsTr("Prepare Stems (Vocals, Drums, Bass, Other)")
+                        enabled: root.loaded && !!root.song && root.song.hasFile && !root.d.stems && !root.stemsWorking
+                        onTriggered: root.call("deck_stem", { index: 0 })
+                    }
                     MenuItem { text: qsTr("Reset Tempo"); enabled: root.loaded; onTriggered: root.call("deck_tempo_reset") }
                     MenuItem {
                         text: qsTr("Play Next After Current Song")
@@ -356,29 +364,24 @@ Frame {
                 }
             }
             Item { Layout.fillWidth: true }
+            // One button, as the deck is: off air, Go Live; on air, Fade; fading, Cancel Fade.
             Button {
-                visible: !!root.d && root.d.audible && root.playing
-                enabled: !!root.d && !root.d.fading
-                text: qsTr("Fade")
+                readonly property bool fading: !!root.d && root.d.fading
+                readonly property bool live: !!root.d && root.d.audible && root.playing
+                Layout.minimumWidth: 60
+                enabled: fading || live || root.loaded
+                text: fading ? qsTr("Cancel Fade") : live ? qsTr("Fade") : qsTr("Go Live")
                 ToolTip.visible: hovered
-                ToolTip.text: qsTr("Fade out (%1 s)").arg(root.d ? root.d.fadeSecs : 0)
-                onClicked: root.call("deck_action", { action: "fadeOut" })
-            }
-            Button {
-                visible: !(root.d && root.d.audible && root.playing)
-                enabled: root.loaded
-                text: qsTr("Go Live"); Layout.minimumWidth: 60
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Put this deck on air (the other deck fades out first)")
-                onClicked: root.call("deck_go_live").then(r => {
-                    if (r === "armed") Session.toast(qsTr("A song is playing — press Go Live again within 3 s to fade it out."), "info");
-                })
-            }
-            Button {
-                visible: !!root.d && root.d.fading
-                flat: true
-                text: qsTr("Cancel")
-                onClicked: root.call("deck_action", { action: "cancelFade" })
+                ToolTip.text: fading ? qsTr("Stop the fade: the song plays on")
+                    : live ? qsTr("Fade out (%1 s)").arg(root.d ? root.d.fadeSecs : 0)
+                    : qsTr("Put this deck on air (the other deck fades out first)")
+                onClicked: {
+                    if (fading) root.call("deck_action", { action: "cancelFade" });
+                    else if (live) root.call("deck_action", { action: "fadeOut" });
+                    else root.call("deck_go_live").then(r => {
+                        if (r === "armed") Session.toast(qsTr("A song is playing — press Go Live again within 3 s to fade it out."), "info");
+                    });
+                }
             }
         }
 
@@ -386,33 +389,31 @@ Frame {
         RowLayout {
             Layout.fillWidth: true
             spacing: 6
+            // Stems: a toggle each, to mute them quickly (once separated: the
+            // ⋯ menu prepares them); how far separating has got.
             Repeater {
-                model: root.d && root.d.stems ? 4 : 0
+                model: 4
                 delegate: Button {
                     required property int index
+                    readonly property bool ready: !!root.d && !!root.d.stems
                     text: root.stemShort[index]
+                    enabled: ready
                     checkable: true
-                    checked: root.d.stems[index]
+                    checked: ready && root.d.stems[index]
                     Layout.preferredWidth: 44
                     palette.button: checked ? Theme.stemColors[index] : undefined
                     ToolTip.visible: hovered
-                    ToolTip.text: root.stemNames[index]
+                    ToolTip.text: ready ? root.stemNames[index] : qsTr("%1: prepare the stems first (⋯ menu)").arg(root.stemNames[index])
                     onClicked: root.call("deck_stem", { index: index })
                 }
             }
             Label {
-                visible: !!root.d && !root.d.stems && !!root.stemJob && (root.stemJob.state === "running" || root.stemJob.state === "queued")
-                text: root.stemJob && root.stemJob.state === "running" ? qsTr("Stems %1%").arg(Math.round(root.stemJob.percent)) : qsTr("Stems queued")
+                visible: root.stemsWorking
+                text: root.stemJob && root.stemJob.state === "running" ? qsTr("%1%").arg(Math.round(root.stemJob.percent)) : qsTr("queued")
                 opacity: Theme.dim
-            }
-            Button {
-                visible: !!root.song && root.song.hasFile && !root.d.stems && !(root.stemJob && (root.stemJob.state === "running" || root.stemJob.state === "queued"))
-                flat: true
-                enabled: root.loaded
-                text: root.stemJob && root.stemJob.state === "failed" ? qsTr("Retry Stems") : qsTr("Prepare Stems")
-                ToolTip.visible: hovered
-                ToolTip.text: root.stemJob && root.stemJob.state === "failed" ? qsTr("Failed: %1").arg(root.stemJob.message || "") : qsTr("Separate vocals, drums, bass and the rest, to mute them live (takes a minute or two)")
-                onClicked: root.call("deck_stem", { index: 0 })
+                ToolTip.visible: stemsHover.hovered
+                ToolTip.text: qsTr("Separating the stems")
+                HoverHandler { id: stemsHover }
             }
             Label {
                 visible: root.loaded

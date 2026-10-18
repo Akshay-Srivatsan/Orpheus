@@ -287,8 +287,7 @@ Pane {
                 }
             }
             Button {
-                visible: !!root.v && !!root.v.club && !!root.v.club.newerVersion
-                flat: true
+                enabled: !!root.v && !!root.v.club && !!root.v.club.newerVersion
                 text: qsTr("Use newer guidelines")
                 onClicked: Session.run("setlist_update", { id: root.set.id, patch: { club: { id: root.v.club.id, version: root.v.club.newerVersion } } })
             }
@@ -466,7 +465,7 @@ Pane {
             }
 
             Button {
-                visible: !!root.v && !!root.v.check
+                enabled: !!root.v && !!root.v.check
                 checkable: true
                 checked: root.showCheck
                 onToggled: root.showCheck = checked

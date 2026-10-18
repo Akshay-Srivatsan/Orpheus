@@ -160,7 +160,7 @@ SettingsPage {
                 Layout.fillWidth: true
                 Label { Layout.fillWidth: true; text: page.sel ? page.sel.name : ""; font.bold: true; font.pointSize: Theme.titlePointSize }
                 Button {
-                    visible: !!page.sel && !!Session.settings && Session.settings.defaultClub !== page.sel.id
+                    enabled: !!page.sel && !!Session.settings && Session.settings.defaultClub !== page.sel.id
                     text: qsTr("Make Default")
                     onClicked: Session.saveSettings({ defaultClub: page.sel.id })
                 }
@@ -177,7 +177,7 @@ SettingsPage {
                         path => Session.run("club_export", { clubId: page.sel.id, versionId: page.version.id, path: path }))
                 }
                 Button {
-                    visible: page.unusedOld.length > 0
+                    enabled: page.unusedOld.length > 0
                     text: qsTr("Delete Unused Old Versions")
                     onClicked: Session.confirm(qsTr("Delete %1 older version(s) of %2 that no set uses?").arg(page.unusedOld.length).arg(page.sel.name), qsTr("Delete"), ok => {
                         if (!ok) return;

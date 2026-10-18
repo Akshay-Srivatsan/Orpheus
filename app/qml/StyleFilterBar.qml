@@ -4,11 +4,11 @@ import QtQuick.Layouts
 import Orpheus
 
 // Filters the library by your dance styles. Styles are labels on songs, so
-// any view can be narrowed to one or more; dropping songs on a style labels them.
+// any view can be narrowed to one or more.
 ColumnLayout {
     id: root
 
-    /// The library view (`library_view`): its chips and filter targets.
+    /// The library view (`library_view`): its style counts and filter targets.
     property var view: null
 
     spacing: 4
@@ -20,54 +20,23 @@ ColumnLayout {
         Session.selected = [];
     }
 
-    function label(key, ids) {
-        if (!ids.length) return;
-        if (key === "__none") Session.run("style_remove", { versionIds: ids, style: null });
-        else Session.run("style_add", { style: key, versionIds: ids });
-    }
+    /// Every style of yours (with how many songs here have it), then "No style".
+    readonly property var items: !view ? [] : Session.myStyles.map(st => {
+        const c = view.styleCounts.find(x => x.key === st.key);
+        return { key: st.key, name: qsTr("%1 (%2)").arg(st.name).arg(c ? c.songs : 0), on: Session.styleFilter.includes(st.key) };
+    }).concat([{ key: "__none", name: qsTr("No style (%1)").arg(view.noStyleSongs), on: Session.styleFilter.includes("__none") }])
 
-    Flow {
-        Layout.fillWidth: true
-        spacing: 4
-
-        StyleChip {
-            text: qsTr("All styles")
-            checked: !Session.styleFilter.length
-            onChosen: Session.styleFilter = []
-        }
-        Repeater {
-            model: root.view ? root.view.styleCounts : []
-            delegate: StyleChip {
-                required property var modelData
-                text: modelData.short
-                count: modelData.songs
-                color: modelData.color
-                checked: Session.styleFilter.includes(modelData.key)
-                tip: qsTr("%1 — click to filter, Ctrl/Shift-click to add; drop songs here to label them").arg(modelData.name)
-                onChosen: add => root.toggle(modelData.key, add)
-                onDropped: ids => root.label(modelData.key, ids)
-            }
-        }
-        StyleChip {
-            visible: !!root.view && (root.view.noStyleSongs > 0 || Session.styleFilter.includes("__none"))
-            text: qsTr("No style")
-            count: root.view ? root.view.noStyleSongs : 0
-            checked: Session.styleFilter.includes("__none")
-            tip: qsTr("Songs without a dance style — drop songs here to remove their styles")
-            onChosen: add => root.toggle("__none", add)
-            onDropped: ids => root.label("__none", ids)
-        }
-        ComboBox {
-            implicitContentWidthPolicy: ComboBox.WidestText
-            readonly property var hidden: root.view ? Session.myStyles.filter(s => !root.view.styleCounts.some(c => c.key === s.key)) : []
-            visible: hidden.length > 0
-            model: [qsTr("More…")].concat(hidden.map(s => s.name))
-            ToolTip.visible: hovered
-            ToolTip.text: qsTr("Filter by a style with no songs here yet (e.g. to label some)")
-            onActivated: index => {
-                if (index > 0) Session.styleFilter = [hidden[index - 1].key];
-                currentIndex = 0;
-            }
+    RowLayout {
+        Label { text: qsTr("Styles:") }
+        CheckListBox {
+            Layout.preferredWidth: 260
+            items: root.items
+            emptyText: qsTr("All styles")
+            actionText: qsTr("All styles")
+            actionEnabled: Session.styleFilter.length > 0
+            onToggled: key => root.toggle(key, true)
+            onAction: { Session.styleFilter = []; Session.selected = []; }
+            ToolTip.text: qsTr("Show only songs of these styles (Dance Styles in a song's menu labels them)")
         }
     }
 

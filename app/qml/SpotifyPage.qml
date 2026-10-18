@@ -30,7 +30,7 @@ SettingsPage {
                 text: qsTr("Sign in once more to enable Spotify search and your playlists.")
             }
             Button {
-                visible: !!page.sp && page.sp.connected && !page.sp.webApi && !page.sp.ownWebApp
+                enabled: !!page.sp && page.sp.connected && !page.sp.webApi && !page.sp.ownWebApp
                 highlighted: true
                 text: qsTr("Sign In Again…")
                 onClicked: Session.run("spotify_login")
@@ -53,7 +53,7 @@ SettingsPage {
                     text: page.sp && page.sp.connecting ? qsTr("Waiting for browser…") : qsTr("Connect Spotify…")
                     onClicked: Session.run("spotify_login")
                 }
-                Button { visible: !!page.sp && page.sp.hasCachedCredentials; text: qsTr("Reconnect"); onClicked: Session.run("spotify_connect_cached") }
+                Button { enabled: !!page.sp && page.sp.hasCachedCredentials; text: qsTr("Reconnect"); onClicked: Session.run("spotify_connect_cached") }
             }
             Label { visible: !page.sp || !page.sp.connected; text: qsTr("Opens your browser to sign in."); font.pointSize: Theme.smallPointSize; opacity: 0.7 }
             Label { visible: !!page.sp && !!page.sp.error; text: page.sp && page.sp.error ? page.sp.error : ""; color: Theme.error }
@@ -91,7 +91,7 @@ SettingsPage {
             }
             Label { visible: !!page.sp && page.sp.ownWebApp && page.sp.webApi; text: qsTr("Search uses your app.") }
             Button {
-                visible: !!page.sp && page.sp.ownWebApp && !page.sp.webApi
+                enabled: !!page.sp && page.sp.ownWebApp && !page.sp.webApi
                 highlighted: true
                 text: qsTr("Sign In for Search…")
                 onClicked: Session.run("spotify_web_login")

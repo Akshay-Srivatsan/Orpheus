@@ -179,7 +179,6 @@ ItemDelegate {
                     }
                     Button {
                         visible: root.isSlot
-                        flat: true
                         text: Session.fillingSlot === root.e.id ? qsTr("Choosing… (Cancel)") : qsTr("Choose Song…")
                         ToolTip.visible: hovered
                         ToolTip.text: qsTr("Pick its song in the library, or drag a song here")

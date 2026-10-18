@@ -62,7 +62,7 @@ SettingsPage {
                 onActivated: index => page.setMidi({ mappingId: index === 0 ? "" : page.mappings[index - 1].id })
             }
             Button {
-                visible: !!page.mapping && !page.mapping.builtin && !!page.s && page.s.midi.mappingId === page.mapping.id
+                enabled: !!page.mapping && !page.mapping.builtin && !!page.s && page.s.midi.mappingId === page.mapping.id
                 text: qsTr("Delete Mapping")
                 onClicked: Session.confirm(qsTr("Delete the mapping “%1”?").arg(page.mapping.name), qsTr("Delete"),
                     ok => { if (ok) Session.run("midi_mapping_delete", { mappingId: page.mapping.id }).then(() => page.load()); })
@@ -119,6 +119,6 @@ SettingsPage {
             enabled: page.learning === null
             onClicked: page.learn(null)
         }
-        Button { visible: page.learning !== null; flat: true; text: qsTr("Cancel"); onClicked: Session.run("midi_learn_cancel") }
+        Button { enabled: page.learning !== null; text: qsTr("Cancel"); onClicked: Session.run("midi_learn_cancel") }
     }
 }

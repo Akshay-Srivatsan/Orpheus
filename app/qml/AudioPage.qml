@@ -68,9 +68,8 @@ SettingsPage {
                 onActivated: index => page.setAudio({ cueChannels: choices[index] })
             }
             Button {
-                visible: !!page.s && !!page.s.audio.cueDevice
                 text: qsTr("Test")
-                enabled: !(Session.decks[Session.freeDeck] && Session.decks[Session.freeDeck].audible)
+                enabled: !!page.s && !!page.s.audio.cueDevice && !(Session.decks[Session.freeDeck] && Session.decks[Session.freeDeck].audible)
                 onClicked: Session.run("audio_test", { deck: Session.freeDeck })
             }
         }

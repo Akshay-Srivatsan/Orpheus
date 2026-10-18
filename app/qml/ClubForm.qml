@@ -257,8 +257,7 @@ ColumnLayout {
                             HoverHandler { id: haveHover }
                         }
                         Button {
-                            visible: !(songRow.here && songRow.here.have) && !!songRow.modelData.spotify
-                            flat: true
+                            enabled: !(songRow.here && songRow.here.have) && !!songRow.modelData.spotify
                             text: qsTr("Add from Spotify")
                             onClicked: Session.run("spotify_resolve", { input: songRow.modelData.spotify }).then(found => {
                                 if (found && found.length) Session.run("spotify_import", { tracks: found, inLibrary: true }).then(() => Session.toast(qsTr("Added to your library from Spotify."), "info"));
@@ -269,7 +268,6 @@ ColumnLayout {
                             delegate: Button {
                                 required property string modelData
                                 required property int index
-                                flat: true
                                 enabled: !root.editor.busy && !!songRow.modelData.hash
                                 text: qsTr("Download") + ((songRow.modelData.download || []).length > 1 ? " (" + (index + 1) + ")" : "")
                                 ToolTip.visible: hovered; ToolTip.text: modelData

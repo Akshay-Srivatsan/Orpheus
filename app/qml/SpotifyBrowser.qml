@@ -47,16 +47,14 @@ Pane {
             Layout.margins: Theme.spacing
             Label { visible: !!root.playlist; text: root.playlist ? root.playlist.name : ""; font.bold: true; font.pointSize: Theme.titlePointSize; Layout.fillWidth: true; elide: Text.ElideRight }
             Button {
-                visible: !!root.playlist
                 text: qsTr("Add All to Library")
-                enabled: root.results.length > 0
+                enabled: (root.results.length > 0) && (!!root.playlist)
                 onClicked: Session.run("spotify_versions", { tracks: root.results, inLibrary: true }).then(v => { if (v) Session.toast(qsTr("Added %1 songs to your library").arg(v.length), "info"); })
             }
             Button {
-                visible: !!root.playlist
                 highlighted: true
                 text: qsTr("New Setlist from Playlist")
-                enabled: root.results.length > 0
+                enabled: (root.results.length > 0) && (!!root.playlist)
                 onClicked: Session.run("setlist_from_spotify", { name: root.playlist.name, tracks: root.results }).then(n => {
                     if (n !== undefined) Session.toast(qsTr("Created setlist “%1” with %2 songs. Label their dance styles in the set panel.").arg(root.playlist.name).arg(n), "info");
                 })
@@ -68,7 +66,7 @@ Pane {
                 placeholderText: qsTr("Search Spotify, or paste a track / album / playlist link")
                 onAccepted: root.search(text)
             }
-            Button { visible: !root.playlist; text: qsTr("Search"); onClicked: root.search(query.text) }
+            Button { enabled: !root.playlist; text: qsTr("Search"); onClicked: root.search(query.text) }
         }
         Label { visible: !!root.error; Layout.leftMargin: Theme.spacing; text: root.error; color: Theme.error; wrapMode: Text.WordWrap; Layout.fillWidth: true }
         ViewFrame {

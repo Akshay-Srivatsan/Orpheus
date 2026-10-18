@@ -176,14 +176,12 @@ Pane {
                 Layout.fillWidth: true
                 Heading { Layout.fillWidth: true; text: qsTr("Versions") }
                 Button {
-                    flat: true
                     icon.source: Theme.icon("plus"); text: qsTr("New Version")
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("A version playing the same audio (other styles, cues, tempo…)")
                     onClicked: root.newVersion()
                 }
                 Button {
-                    flat: true
                     text: qsTr("Add an Edit…")
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("A version playing other audio: another edit of this song")
@@ -211,7 +209,7 @@ Pane {
                     Keys.onEscapePressed: root.editLinkShown = false
                 }
                 Button { text: qsTr("Add"); enabled: editLink.text.trim().length > 0; onClicked: root.addSpotifyEdit(editLink.text) }
-                Button { flat: true; text: qsTr("Cancel"); onClicked: root.editLinkShown = false }
+                Button { text: qsTr("Cancel"); onClicked: root.editLinkShown = false }
             }
             Repeater {
                 model: root.t ? root.view.versions : []

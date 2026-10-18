@@ -79,7 +79,7 @@ ColumnLayout {
                         id: addButton
                         icon.color: palette.buttonText
                         anchors.fill: parent
-                        visible: !root.inLibrary[item.index]
+                        enabled: !root.inLibrary[item.index]
                         icon.source: Theme.icon("plus")
                         ToolTip.visible: hovered; ToolTip.text: qsTr("Add to library")
                         onClicked: root.toLibrary(item.modelData)

@@ -23,7 +23,7 @@ SettingsPage {
                 currentIndex: s ? Session.clubs.findIndex(c => c.id === s.defaultClub) + 1 : 0
                 onActivated: index => set({ defaultClub: index === 0 ? "" : Session.clubs[index - 1].id })
             }
-            Button { flat: true; text: qsTr("Clubs and their guidelines…"); onClicked: Session.settingsPage = "clubs" }
+            Button { text: qsTr("Clubs and their guidelines…"); onClicked: Session.settingsPage = "clubs" }
         }
 
         FormLabel { text: qsTr("Pause between songs") }
@@ -41,7 +41,7 @@ SettingsPage {
         FormLabel { text: qsTr("Next song") }
         RowLayout {
             Label { text: s && s.autoAdvance ? qsTr("Automatic (auto mode)") : qsTr("Manual: start each song with Play Next") }
-            Button { flat: true; text: qsTr("Auto mode and announcements…"); onClicked: Session.settingsPage = "auto" }
+            Button { text: qsTr("Auto mode and announcements…"); onClicked: Session.settingsPage = "auto" }
         }
 
         FormLabel { text: qsTr("Play Next while playing") }

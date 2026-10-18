@@ -11,7 +11,8 @@ Frame {
     property var view
     property var song
     property bool highlighted: false
-    property bool audioOpen: (song ? song.versions.length : 0) === 1
+    /// Its audio's details are shown (folded at first).
+    property bool audioOpen: false
     /// Just its name (the Info panel keeps which are folded).
     property bool folded: false
     /// Its place among the song's versions (to move it up or down).
@@ -50,10 +51,9 @@ Frame {
                 onClicked: root.toggleFold()
             }
             ToolButton {
-                visible: root.song.versions.length > 1
                 icon.source: Theme.icon(root.view.isPrimary ? "star-filled" : "star")
                 icon.color: root.view.isPrimary ? Theme.warn : Theme.system.buttonText
-                enabled: !root.view.isPrimary
+                enabled: (!root.view.isPrimary) && (root.song.versions.length > 1)
                 ToolTip.visible: hovered
                 ToolTip.text: root.view.isPrimary ? qsTr("The primary version: it stands for the song in the library") : qsTr("Make this the primary version")
                 onClicked: Session.run("track_update", { id: root.song.track.id, patch: { primary: root.v.id } })
@@ -65,17 +65,15 @@ Frame {
             }
             ToolButton {
                 icon.color: palette.buttonText
-                visible: root.song.versions.length > 1
                 icon.source: Theme.icon("up")
-                enabled: root.position > 0
+                enabled: (root.position > 0) && (root.song.versions.length > 1)
                 ToolTip.visible: hovered; ToolTip.text: qsTr("Move up")
                 onClicked: root.moveBy(-1)
             }
             ToolButton {
                 icon.color: palette.buttonText
-                visible: root.song.versions.length > 1
                 icon.source: Theme.icon("down")
-                enabled: root.position < root.song.versions.length - 1
+                enabled: (root.position < root.song.versions.length - 1) && (root.song.versions.length > 1)
                 ToolTip.visible: hovered; ToolTip.text: qsTr("Move down")
                 onClicked: root.moveBy(1)
             }
@@ -131,7 +129,21 @@ Frame {
             }
         }
 
-        // Everything below its name (folded away: just the name).
+        // Folded: what it holds, in one line (its styles, tempo, length).
+        Label {
+            visible: root.folded
+            Layout.fillWidth: true
+            Layout.leftMargin: Theme.spacing * 3
+            elide: Text.ElideRight
+            opacity: Theme.dim
+            font.pointSize: Theme.smallPointSize
+            text: [root.view.shownNames || qsTr("no style"),
+                root.view.playback.target || root.view.playback.base ? Session.fmtBpm(root.view.playback.target || root.view.playback.base) + " BPM" : "",
+                root.a ? Session.fmtTime(root.a.recording.durationMs) : "",
+                root.v.unlisted ? qsTr("hidden from the library") : ""].filter(x => x).join(" · ")
+        }
+
+        // Everything below its name (folded away: the line above says what).
         ColumnLayout {
             visible: !root.folded
             Layout.fillWidth: true
@@ -139,7 +151,7 @@ Frame {
             RowLayout {
                 visible: !!root.v.hidden
                 Label { text: qsTr("Not in the library: only the sets that play it keep it."); color: Theme.warn; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                Button { flat: true; text: qsTr("Show in Library"); onClicked: root.patch({ hidden: false }) }
+                Button { text: qsTr("Show in Library"); onClicked: root.patch({ hidden: false }) }
             }
 
             // The audio it plays.
@@ -150,9 +162,9 @@ Frame {
                     icon.color: palette.buttonText
                     icon.source: Theme.icon(root.audioOpen ? "chevron-down" : "chevron-right")
                     icon.width: 12; icon.height: 12
-                    text: qsTr("Audio")
+                    text: qsTr("Audio details")
                     ToolTip.visible: hovered
-                    ToolTip.text: root.audioOpen ? qsTr("Hide the audio's details") : qsTr("Show the audio's details: BPM, meter, files…")
+                    ToolTip.text: root.audioOpen ? qsTr("Fold the audio's details") : qsTr("Show the audio's details: BPM, meter, gain, files, sources…")
                     onClicked: root.audioOpen = !root.audioOpen
                 }
                 ComboBox {
@@ -194,25 +206,32 @@ Frame {
                 text: !root.a ? qsTr("Its audio was removed from the library: add it again in Library → Files (or find it on Spotify again).")
                     : qsTr("Removed from the library: it can't play until you add it again in Library → Files (or a file that sounds the same).")
             }
-            Label {
-                visible: root.audioOpen && (root.view.sharedWith.length > 0 || root.view.otherSongs.length > 0)
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                color: Theme.warn
-                font.pointSize: Theme.smallPointSize
-                // The other songs are links: they open in Info.
-                textFormat: Text.StyledText
-                linkColor: palette.link
-                text: qsTr("Shared: changes here also apply to %1.").arg(root.view.sharedWith.map(n => "“" + n + "”")
-                    .concat(root.view.otherSongs.map(s => "<a href=\"" + s.id + "\">" + s.label.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</a>")).join(", "))
-                onLinkActivated: id => Session.inspectTrack = id
-                HoverHandler { cursorShape: parent.hoveredLink ? Qt.PointingHandCursor : Qt.ArrowCursor }
-            }
-            AudioDetails {
+            // The audio's details (what "Audio details" folds).
+            Frame {
                 visible: root.audioOpen && !!root.a
                 Layout.fillWidth: true
-                audio: root.a ? root.a : { recording: { sources: [], files: [], filePaths: {} }, chips: [], bpmFrom: "", clubSuggests: [], stemsReady: false }
-                versions: root.song.versions.filter(x => x.version.recording === root.v.recording).map(x => x.version)
+                ColumnLayout {
+                    anchors.fill: parent
+                    Label {
+                        visible: root.view.sharedWith.length > 0 || root.view.otherSongs.length > 0
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        color: Theme.warn
+                        font.pointSize: Theme.smallPointSize
+                        // The other songs are links: they open in Info.
+                        textFormat: Text.StyledText
+                        linkColor: palette.link
+                        text: qsTr("Shared: changes here also apply to %1.").arg(root.view.sharedWith.map(n => "“" + n + "”")
+                            .concat(root.view.otherSongs.map(s => "<a href=\"" + s.id + "\">" + s.label.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</a>")).join(", "))
+                        onLinkActivated: id => Session.inspectTrack = id
+                        HoverHandler { cursorShape: parent.hoveredLink ? Qt.PointingHandCursor : Qt.ArrowCursor }
+                    }
+                    AudioDetails {
+                        Layout.fillWidth: true
+                        audio: root.a ? root.a : { recording: { sources: [], files: [], filePaths: {} }, chips: [], bpmFrom: "", clubSuggests: [], stemsReady: false }
+                        versions: root.song.versions.filter(x => x.version.recording === root.v.recording).map(x => x.version)
+                    }
+                }
             }
 
             GridLayout {
@@ -248,8 +267,8 @@ Frame {
                         text: ((root.view.playback.rate - 1) * 100).toFixed(1) + "%"
                     }
                     Button {
-                        visible: root.view.canFit
-                        flat: true
+                        implicitWidth: implicitContentWidth + leftPadding + rightPadding
+                        enabled: root.view.canFit
                         text: qsTr("Fit")
                         ToolTip.visible: hovered
                         ToolTip.text: qsTr("Set the tempo to the nearest edge of the style's sweet range")
@@ -260,13 +279,13 @@ Frame {
                 RowLayout {
                     TimeField { value: root.v.cueInMs; placeholderText: qsTr("auto"); onEdited: ms => root.patch({ cueInMs: ms }) }
                     TimeField { value: root.v.cueOutMs; placeholderText: qsTr("auto"); onEdited: ms => root.patch({ cueOutMs: ms }) }
-                    ToolButton { icon.color: palette.buttonText; visible: !!root.deck; icon.source: Theme.icon("to-start"); ToolTip.visible: hovered; ToolTip.text: qsTr("Set start to the deck position"); onClicked: root.patch({ cueInMs: Math.round(root.deck.positionMs) }) }
-                    ToolButton { icon.color: palette.buttonText; visible: !!root.deck; icon.source: Theme.icon("to-end"); ToolTip.visible: hovered; ToolTip.text: qsTr("Set end to the deck position"); onClicked: root.patch({ cueOutMs: Math.round(root.deck.positionMs) }) }
+                    Button { implicitWidth: implicitContentWidth + leftPadding + rightPadding; icon.color: palette.buttonText; enabled: !!root.deck; icon.source: Theme.icon("to-start"); ToolTip.visible: hovered; ToolTip.text: qsTr("Set start to the deck position"); onClicked: root.patch({ cueInMs: Math.round(root.deck.positionMs) }) }
+                    Button { implicitWidth: implicitContentWidth + leftPadding + rightPadding; icon.color: palette.buttonText; enabled: !!root.deck; icon.source: Theme.icon("to-end"); ToolTip.visible: hovered; ToolTip.text: qsTr("Set end to the deck position"); onClicked: root.patch({ cueOutMs: Math.round(root.deck.positionMs) }) }
                 }
                 FormLabel { text: qsTr("Fade at") }
                 RowLayout {
                     TimeField { value: root.v.fadeOutMs; placeholderText: qsTr("none"); onEdited: ms => root.patch({ fadeOutMs: ms }) }
-                    Button { visible: !!root.deck; flat: true; text: qsTr("here"); onClicked: root.patch({ fadeOutMs: Math.round(root.deck.positionMs) }) }
+                    Button { implicitWidth: implicitContentWidth + leftPadding + rightPadding; enabled: !!root.deck; text: qsTr("here"); onClicked: root.patch({ fadeOutMs: Math.round(root.deck.positionMs) }) }
                 }
                 FormLabel { text: qsTr("Gain") }
                 RowLayout {
@@ -340,15 +359,13 @@ Frame {
             }
             RowLayout {
                 Button {
-                    flat: true
                     text: qsTr("Club-file entry")
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("To suggest this version in a club's file: the song's title with this recording's fingerprint, length and sources")
                     onClicked: Session.run("club_song_text", { versionId: root.v.id }).then(t => Session.copy(t, qsTr("Song entry")))
                 }
                 Button {
-                    visible: root.song.versions.length > 1
-                    flat: true
+                    enabled: root.song.versions.length > 1
                     text: qsTr("Separate into Its Own Song")
                     onClicked: Session.undoable(qsTr("Separated into its own song"), () => Session.run("versions_separate", { versionIds: [root.v.id] }))
                 }

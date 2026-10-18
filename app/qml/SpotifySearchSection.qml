@@ -10,7 +10,8 @@ ColumnLayout {
     property var results: []
     property bool loading: false
     property string error: ""
-    property bool open: true
+    /// Its results are shown (folded at first: the heading says how many).
+    property bool open: false
     /// Shortest search sent to Spotify, and how long typing must pause first (ms).
     readonly property int minLength: 3
     readonly property int pauseMs: 800
@@ -37,11 +38,13 @@ ColumnLayout {
         Layout.fillWidth: true
         onClicked: root.open = !root.open
         contentItem: RowLayout {
-            Label { text: qsTr("Spotify"); font.bold: true }
-            Label { text: root.loading ? qsTr("searching…") : root.error ? "" : qsTr("%1 results").arg(root.results.length); opacity: 0.6 }
+            Icon { glyph: root.open ? "chevron-down" : "chevron-right"; sourceSize.width: Theme.smallIconSize; sourceSize.height: Theme.smallIconSize }
+            Label { text: qsTr("Spotify results"); font.bold: true }
+            Label { text: root.loading ? qsTr("searching…") : root.error ? "" : qsTr("(%1)").arg(root.results.length); opacity: 0.6 }
             Item { Layout.fillWidth: true }
-            Label { text: root.open ? qsTr("Hide") : qsTr("Show"); opacity: 0.6 }
         }
+        ToolTip.visible: hovered
+        ToolTip.text: root.open ? qsTr("Fold Spotify's results") : qsTr("Show Spotify's results")
     }
     Label { visible: !!root.error; text: root.error; color: Theme.error; Layout.leftMargin: Theme.spacing }
     ViewFrame {
@@ -56,7 +59,6 @@ ColumnLayout {
     }
     Button {
         visible: root.open && root.results.length > root.shownMax
-        flat: true
         text: qsTr("Show All %1 in Spotify Search…").arg(root.results.length)
         onClicked: Session.show({ kind: "spotify-search" })
     }

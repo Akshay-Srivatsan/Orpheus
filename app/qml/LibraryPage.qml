@@ -29,7 +29,7 @@ SettingsPage {
                     text: qsTr("Choose…")
                     onClicked: Session.chooseFile({ folder: true, title: qsTr("Choose the library folder (e.g. a synced folder)") }, dir => { page.set({ libraryDir: dir }); page.load(); })
                 }
-                Button { visible: !!page.s && !!page.s.libraryDir; flat: true; text: qsTr("Use default"); onClicked: { page.set({ libraryDir: null }); page.load(); } }
+                Button { enabled: !!page.s && !!page.s.libraryDir; text: qsTr("Use default"); onClicked: { page.set({ libraryDir: null }); page.load(); } }
                 Button {
                     text: qsTr("Reload")
                     ToolTip.visible: hovered

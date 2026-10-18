@@ -74,15 +74,13 @@ ColumnLayout {
         Item { implicitWidth: 1 }
         RowLayout {
             Button {
-                visible: root.r.bpmSource !== "detected"
-                flat: true
+                enabled: root.r.bpmSource !== "detected"
                 icon.source: Theme.icon("reload")
                 text: qsTr("Analysed") + (root.r.detectedBpm != null ? " (" + Session.fmtBpm(root.r.detectedBpm) + ")" : "")
                 onClicked: Session.run("recording_reset_bpm", { id: root.r.id, from: "detected" })
             }
             Button {
-                visible: root.r.bpmSource !== "tag" && (root.r.tagBpm != null || root.r.files.length > 0)
-                flat: true
+                enabled: root.r.bpmSource !== "tag" && (root.r.tagBpm != null || root.r.files.length > 0)
                 icon.source: Theme.icon("reload")
                 text: qsTr("File tag") + (root.r.tagBpm != null ? " (" + Session.fmtBpm(root.r.tagBpm) + ")" : "")
                 onClicked: Session.run("recording_reset_bpm", { id: root.r.id, from: "tag" })
@@ -139,8 +137,7 @@ ColumnLayout {
                 HoverHandler { id: srcHover }
             }
             Button {
-                visible: root.r.sources.length > 1
-                flat: true
+                enabled: root.r.sources.length > 1
                 text: qsTr("Split off…")
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("This is different audio: give it its own (undoes Combine as the same recording)")
@@ -162,7 +159,7 @@ ColumnLayout {
             }
             ToolButton {
                 icon.color: palette.buttonText
-                visible: root.r.sources.length > 1
+                enabled: root.r.sources.length > 1
                 icon.source: Theme.icon("x")
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Remove this source")
@@ -184,7 +181,7 @@ ColumnLayout {
             onClicked: Session.run("source_link_spotify", { recordingId: root.r.id, uri: link.text }).then(x => { if (x) link.text = ""; })
         }
         Button {
-            visible: !!Session.spotify && Session.spotify.connected
+            enabled: !!Session.spotify && Session.spotify.connected
             text: qsTr("Find")
             ToolTip.visible: hovered
             ToolTip.text: qsTr("Search Spotify (by ISRC, or title and artist) and link the track that sounds the same")
@@ -204,13 +201,13 @@ ColumnLayout {
     RowLayout {
         visible: root.r.files.length > 0
         Label { visible: root.audio.stemsReady; text: qsTr("Stems ready") }
-        Button { visible: root.audio.stemsReady; flat: true; text: qsTr("Delete stems"); onClicked: Session.run("stems_delete", { recordingId: root.r.id }) }
+        Button { enabled: root.audio.stemsReady; text: qsTr("Delete stems"); onClicked: Session.run("stems_delete", { recordingId: root.r.id }) }
         Label {
             visible: !root.audio.stemsReady && !!root.job && root.job.state !== "failed"
             text: root.job && root.job.state === "running" ? qsTr("Preparing stems… %1%").arg(Math.round(root.job.percent)) : qsTr("Preparing stems… (queued)")
         }
         Button {
-            visible: !root.audio.stemsReady && !(root.job && root.job.state !== "failed")
+            enabled: !root.audio.stemsReady && !(root.job && root.job.state !== "failed")
             text: qsTr("Prepare Stems")
             onClicked: Session.run("stems_prepare", { recordingIds: [root.r.id] })
         }
@@ -218,9 +215,8 @@ ColumnLayout {
     }
     RowLayout {
         Label { text: root.r.analyzed ? qsTr("Analysed") : qsTr("Not analysed yet"); opacity: 0.7 }
-        Button { flat: true; text: qsTr("Re-analyse"); onClicked: Session.run("recordings_analyze", { ids: [root.r.id] }) }
+        Button { text: qsTr("Re-analyse"); onClicked: Session.run("recordings_analyze", { ids: [root.r.id] }) }
         Button {
-            flat: true
             text: qsTr("Make a Song from It")
             ToolTip.visible: hovered
             ToolTip.text: qsTr("A new song (in your library) playing this audio, e.g. for another line dance")
@@ -229,10 +225,9 @@ ColumnLayout {
     }
     RowLayout {
         Label { text: qsTr("For a club file:"); opacity: 0.7 }
-        Button { flat: true; text: qsTr("Fingerprint"); enabled: !!root.r.fingerprint; onClicked: Session.copy(root.r.fingerprint, qsTr("Fingerprint")) }
+        Button { text: qsTr("Fingerprint"); enabled: !!root.r.fingerprint; onClicked: Session.copy(root.r.fingerprint, qsTr("Fingerprint")) }
         Button {
-            visible: root.r.sources.some(s => s.kind === "file")
-            flat: true
+            enabled: root.r.sources.some(s => s.kind === "file")
             text: qsTr("Hash")
             onClicked: Session.copy(root.r.sources.find(s => s.kind === "file").key, qsTr("File hash"))
         }

@@ -27,7 +27,6 @@ SettingsPage {
                 visible: !!page.st && page.st.model.state === "ready"
                 Label { text: qsTr("Ready") }
                 Button {
-                    flat: true
                     text: qsTr("Remove Model…")
                     enabled: !page.jobs.some(j => j.job.state === "running")
                     onClicked: Session.confirm(qsTr("Delete the stem separation model (210 MB)? Prepared stems keep working; preparing new ones downloads it again."), qsTr("Delete"),
@@ -39,7 +38,7 @@ SettingsPage {
                 text: page.st && page.st.model.state === "downloading" ? qsTr("Downloading… %1%").arg(page.st.model.total ? Math.round(page.st.model.done / page.st.model.total * 100) : 0) : ""
             }
             Button {
-                visible: !!page.st && (page.st.model.state === "missing" || page.st.model.state === "error")
+                enabled: !!page.st && (page.st.model.state === "missing" || page.st.model.state === "error")
                 highlighted: true
                 text: qsTr("Download Model (about 210 MB)")
                 onClicked: Session.run("stems_download_model")

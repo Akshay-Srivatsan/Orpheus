@@ -64,7 +64,7 @@ Pane {
                 onActivated: index => root.show = values[index]
             }
             Button {
-                visible: root.show === "out" && root.outCount > 0
+                enabled: root.show === "out" && root.outCount > 0
                 text: qsTr("Add All %1 Back").arg(root.shown.length)
                 onClicked: root.add(root.shown.map(f => f.path))
             }
@@ -190,15 +190,13 @@ Pane {
                             id: actions
                             RowLayout {
                                 Button {
-                                    visible: !!cell.f && cell.f.out
-                                    flat: true
+                                    enabled: !!cell.f && cell.f.out
                                     icon.source: Theme.icon("plus")
                                     text: qsTr("Add to Library")
                                     onClicked: root.add([cell.f.path])
                                 }
                                 Button {
-                                    visible: !!cell.f && !cell.f.out && !!cell.f.recording
-                                    flat: true
+                                    enabled: !!cell.f && !cell.f.out && !!cell.f.recording
                                     text: qsTr("Remove…")
                                     onClicked: root.remove(cell.f)
                                 }

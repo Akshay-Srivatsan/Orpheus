@@ -98,7 +98,6 @@ SettingsPage {
             model: page.info ? page.info.undefinedStyles : []
             delegate: Button {
                 required property var modelData
-                flat: true
                 text: modelData.name + " (" + modelData.count + ")"
                 onClicked: Session.run("style_create", { name: modelData.name, key: modelData.key })
             }
@@ -113,7 +112,7 @@ SettingsPage {
             onClicked: { Session.run("style_create", { name: newStyle.text.trim() }); newStyle.text = ""; }
         }
         Button {
-            visible: !!page.info && !!page.info.club && page.info.importable.length > 0
+            enabled: !!page.info && !!page.info.club && page.info.importable.length > 0
             text: page.info && page.info.club ? qsTr("Add %1's %2 other style(s)").arg(page.info.club.label).arg(page.info.importable.length) : ""
             ToolTip.visible: hovered
             ToolTip.text: page.info ? page.info.importable.map(c => c.name).join(", ") : ""
@@ -161,7 +160,6 @@ SettingsPage {
             model: page.info ? page.info.undefinedTags : []
             delegate: Button {
                 required property var modelData
-                flat: true
                 text: modelData.name + " (" + modelData.count + ")"
                 onClicked: Session.run("tag_create", { name: modelData.name, key: modelData.key })
             }

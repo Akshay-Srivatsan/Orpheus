@@ -127,14 +127,12 @@ Pane {
                 opacity: Theme.dim
             }
             Button {
-                visible: !!root.crate && !!root.crate.smart
-                flat: true
+                enabled: !!root.crate && !!root.crate.smart
                 text: qsTr("Edit Rules…")
                 onClicked: root.editSmartCrate(root.crate.id)
             }
             Button {
-                visible: Session.view.kind === "club-songs"
-                flat: true
+                enabled: Session.view.kind === "club-songs"
                 text: qsTr("Get the club's other songs…")
                 onClicked: Session.settingsPage = "clubs"
             }
@@ -183,8 +181,8 @@ Pane {
                             : qsTr("Choosing a song for the slot: double-click a song, press its check button, or drag it onto the slot."))
                         : qsTr("Choosing audio for a new version of “%1”: double-click a song to add its audio.").arg(Session.pickingEditTitle)
                 }
-                Button { flat: true; text: qsTr("Show All Songs"); visible: !!Session.fillingSlot && Session.styleFilter.length > 0; onClicked: Session.styleFilter = [] }
-                Button { flat: true; text: qsTr("Cancel"); onClicked: { Session.fillingSlot = ""; Session.pickingEdit = ""; Session.chimePick = null; } }
+                Button { text: qsTr("Show All Songs"); enabled: !!Session.fillingSlot && Session.styleFilter.length > 0; onClicked: Session.styleFilter = [] }
+                Button { text: qsTr("Cancel"); onClicked: { Session.fillingSlot = ""; Session.pickingEdit = ""; Session.chimePick = null; } }
             }
         }
 

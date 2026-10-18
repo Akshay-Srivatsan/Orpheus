@@ -76,51 +76,17 @@ GroupBox {
                 value: root.e.styles || []
                 onEdited: keys => root.update({ styles: keys.length ? keys : null })
             }
-            Flow {
+            // Its styles that fit first, then the club's others (it doesn't fit those).
+            CheckListBox {
                 visible: !root.pause && !root.anyStyle
                 Layout.fillWidth: true
-                spacing: 4
-                Repeater {
-                    model: root.view.showAs.filter(x => x.fits || x.on)
-                    delegate: Button {
-                        required property var modelData
-                        text: modelData.name
-                        checkable: true
-                        checked: modelData.on
-                        implicitHeight: 24
-                        onClicked: root.toggleShown(modelData.key)
-                    }
-                }
-                Button {
-                    visible: root.view.showAs.some(x => !x.fits && !x.on)
-                    icon.source: Theme.icon("plus")
-                    icon.width: Theme.smallIconSize; icon.height: Theme.smallIconSize
-                    implicitHeight: 24
-                    implicitWidth: 32
-                    ToolTip.visible: hovered
-                    ToolTip.text: qsTr("Any of the club's styles, even one this song doesn't fit")
-                    onClicked: otherStyles.popup()
-                    Menu {
-                        id: otherStyles
-                        Instantiator {
-                            model: root.view.showAs.filter(x => !x.fits && !x.on)
-                            delegate: MenuItem {
-                                required property var modelData
-                                text: qsTr("%1 (doesn't fit)").arg(modelData.name)
-                                onTriggered: root.toggleShown(modelData.key)
-                            }
-                            onObjectAdded: (i, o) => otherStyles.insertItem(i, o)
-                            onObjectRemoved: (i, o) => otherStyles.removeItem(o)
-                        }
-                    }
-                }
-                Button {
-                    visible: !!root.e.clubStyles || !!root.e.styles
-                    flat: true
-                    text: qsTr("Automatic")
-                    implicitHeight: 24
-                    onClicked: root.update(root.e.clubStyles ? { clubStyles: null } : { styles: null })
-                }
+                items: root.view.showAs.filter(x => x.fits).concat(root.view.showAs.filter(x => !x.fits))
+                    .map(x => ({ key: x.key, name: x.fits ? x.name : qsTr("%1 (doesn't fit)").arg(x.name), on: x.on }))
+                emptyText: qsTr("No style")
+                actionText: qsTr("Automatic (what it matches)")
+                actionEnabled: !!root.e.clubStyles || !!root.e.styles
+                onToggled: key => root.toggleShown(key)
+                onAction: root.update(root.e.clubStyles ? { clubStyles: null } : { styles: null })
             }
 
             FormLabel { visible: !root.pause; text: qsTr("Label") }
@@ -150,8 +116,8 @@ GroupBox {
                 }
                 // Playing outside its style's tempo: the nearest that fits.
                 Button {
-                    visible: root.view.fitBpm !== null && root.view.fitBpm !== undefined
-                    flat: true
+                    implicitWidth: implicitContentWidth + leftPadding + rightPadding
+                    enabled: root.view.fitBpm !== null && root.view.fitBpm !== undefined
                     text: qsTr("Fit")
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("Play it at %1 BPM, the nearest tempo that fits its style").arg(Session.fmtBpm(root.view.fitBpm || 0))
@@ -186,25 +152,14 @@ GroupBox {
                 onEditingFinished: if (text !== (root.e.note || "")) root.update({ note: text })
             }
             FormLabel { visible: root.view.tags.length > 0; text: qsTr("Tags") }
-            Flow {
+            CheckListBox {
                 visible: root.view.tags.length > 0
                 Layout.fillWidth: true
-                spacing: 4
-                Repeater {
-                    model: root.view.tags
-                    delegate: Button {
-                        required property var modelData
-                        text: modelData.name
-                        checkable: true
-                        checked: modelData.on
-                        implicitHeight: 24
-                        ToolTip.visible: hovered && !!modelData.note
-                        ToolTip.text: modelData.note
-                        onClicked: {
-                            const tags = root.e.tags || [];
-                            root.update({ tags: modelData.on ? tags.filter(t => t !== modelData.key) : tags.concat([modelData.key]) });
-                        }
-                    }
+                items: root.view.tags
+                emptyText: qsTr("No tags")
+                onToggled: key => {
+                    const tags = root.e.tags || [];
+                    root.update({ tags: tags.includes(key) ? tags.filter(t => t !== key) : tags.concat([key]) });
                 }
             }
         }
@@ -268,8 +223,7 @@ GroupBox {
             }
         }
         Button {
-            visible: !!root.e.overrides && Object.keys(root.e.overrides).length > 0
-            flat: true
+            enabled: !!root.e.overrides && Object.keys(root.e.overrides).length > 0
             text: qsTr("Clear overrides")
             onClicked: root.update({ overrides: {} })
         }

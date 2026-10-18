@@ -46,14 +46,14 @@ ToolBar {
             opacity: Theme.dim
         }
         Button {
+            // (Its label is the message's: there's none without one.)
             visible: !!root.latest && !!root.latest.actionLabel
-            flat: true
             text: root.latest ? root.latest.actionLabel : ""
             onClicked: Session.runToastAction(root.latest.toastId)
         }
         ToolButton {
             icon.color: palette.buttonText
-            visible: !!root.latest
+            enabled: !!root.latest
             icon.source: Theme.icon("x")
             icon.width: Theme.smallIconSize; icon.height: Theme.smallIconSize
             ToolTip.visible: hovered; ToolTip.text: qsTr("Dismiss")

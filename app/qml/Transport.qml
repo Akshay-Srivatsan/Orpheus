@@ -117,7 +117,7 @@ Frame {
                 onClicked: root.playNext()
             }
             Button {
-                visible: !!root.p && root.p.pendingNext
+                enabled: !!root.p && root.p.pendingNext
                 Layout.minimumWidth: 0
                 text: qsTr("Cancel")
                 onClicked: Session.run("perform_cancel_pending")
@@ -291,10 +291,12 @@ Frame {
             }
             ToolButton { text: "B"; font.bold: root.crossfader > 0.5; onClicked: root.setCrossfader(1) }
             // Auto mode needs it centered.
-            ToolButton {
-                visible: root.crossfader !== 0.5 && !!root.p && root.p.autoAdvance
+            Button {
+                // An icon's width (Fusion's buttons are otherwise at least 80 px).
+                implicitWidth: implicitContentWidth + leftPadding + rightPadding
+                enabled: root.crossfader !== 0.5 && !!root.p && root.p.autoAdvance
                 icon.source: Theme.icon("warning")
-                icon.color: Theme.warn
+                icon.color: enabled ? Theme.warn : palette.buttonText
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Auto mode needs the crossfader centered: click to center it")
                 onClicked: root.setCrossfader(0.5)
@@ -322,9 +324,8 @@ Frame {
             Button {
                 Layout.minimumWidth: 0
                 Layout.preferredWidth: implicitContentWidth + leftPadding + rightPadding
-                visible: !!Session.tts && Session.tts.state === "ready"
                 icon.source: Theme.icon("mic")
-                enabled: !!root.next
+                enabled: (!!root.next) && (!!Session.tts && Session.tts.state === "ready")
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Announce the next dance now")
                 onClicked: Session.run("announce_next")
@@ -332,7 +333,7 @@ Frame {
             Button {
                 Layout.minimumWidth: 0
                 Layout.preferredWidth: implicitContentWidth + leftPadding + rightPadding
-                visible: !!root.p && !!root.p.nextChime
+                enabled: !!root.p && !!root.p.nextChime
                 icon.source: Theme.icon("bell")
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Play the next song's chime now")

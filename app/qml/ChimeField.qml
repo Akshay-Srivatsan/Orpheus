@@ -99,7 +99,9 @@ ColumnLayout {
                 else root.set({ sound: id });
             }
         }
-        ToolButton {
+        Button {
+            // An icon's width (Fusion's buttons are otherwise at least 80 px).
+            implicitWidth: implicitContentWidth + leftPadding + rightPadding
             icon.color: palette.buttonText
             icon.source: Theme.icon("play")
             enabled: !!root.sound
