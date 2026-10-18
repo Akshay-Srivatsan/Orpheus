@@ -121,6 +121,27 @@ SettingsPage {
             }
         }
 
+        // The desktop's media keys (Orpheus is a media player on the session bus).
+        FormLabel { visible: Qt.platform.os === "linux"; text: qsTr("Media keys") }
+        ColumnLayout {
+            visible: Qt.platform.os === "linux"
+            Layout.fillWidth: true
+            ComboBox {
+                readonly property var values: ["ignore", "control", "off"]
+                implicitContentWidthPolicy: ComboBox.WidestText
+                model: [qsTr("Taken and ignored (other players don't react)"), qsTr("Control Orpheus"), qsTr("Off (other players get them)")]
+                currentIndex: s ? Math.max(0, values.indexOf(s.mediaKeys)) : 0
+                onActivated: index => set({ mediaKeys: values[index] })
+            }
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                font.pointSize: Theme.smallPointSize
+                opacity: 0.7
+                text: qsTr("Play/pause, next and stop on your keyboard or headset. Controlling Orpheus: Play/Pause starts the next song when nothing plays, or pauses and resumes the song the room hears; Next is Play Next; Stop fades out.")
+            }
+        }
+
         FormLabel { text: qsTr("Levels") }
         ColumnLayout {
             RowLayout {

@@ -1312,6 +1312,7 @@ impl App {
     pub fn emit_perform(&self) {
         emit(&self.handle, "perform-state", self.perform_state());
         emit(&self.handle, "projector", self.projector_payload());
+        self.update_media_player();
     }
 
     pub fn emit_setlist(&self, id: &str) {

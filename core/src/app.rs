@@ -133,6 +133,11 @@ pub struct App {
     spotify_analysed: Mutex<std::collections::HashSet<Id>>,
     /// What analysis is doing, for the status bar.
     analysis: Mutex<AnalysisProgress>,
+    /// Itself (for handlers that outlive a call, e.g. media keys), once started.
+    weak: std::sync::OnceLock<std::sync::Weak<App>>,
+    /// On the session bus as a media player (Settings → General → Media keys).
+    #[cfg(target_os = "linux")]
+    mpris: Mutex<Option<crate::mpris::Mpris>>,
     /// A Find on Spotify job is running (one at a time).
     spotify_finding: std::sync::atomic::AtomicBool,
     /// Undo points of recent actions (see `undo_begin`).
@@ -249,6 +254,9 @@ impl App {
             analysis_tx,
             spotify_analysed: Mutex::new(Default::default()),
             analysis: Mutex::new(Default::default()),
+            weak: std::sync::OnceLock::new(),
+            #[cfg(target_os = "linux")]
+            mpris: Mutex::new(None),
             spotify_finding: Default::default(),
             undo: Default::default(),
             deck_songs: Default::default(),
@@ -356,6 +364,9 @@ impl App {
         }
         if old.auto_gain != new.auto_gain || old.target_loudness_db != new.target_loudness_db || old.compress != new.compress || old.compression != new.compression {
             self.relevel_decks(true);
+        }
+        if old.media_keys != new.media_keys {
+            self.apply_media_keys();
         }
         if old.keylock != new.keylock {
             for d in &self.decks {
@@ -840,6 +851,94 @@ impl App {
         states
     }
 
+    /// Puts the media player on the bus, takes it off, or changes whether its
+    /// keys work Orpheus, as Settings → General → Media keys says.
+    fn apply_media_keys(&self) {
+        #[cfg(target_os = "linux")]
+        {
+            let mode = self.settings.read().media_keys.clone();
+            let mut m = self.mpris.lock();
+            if mode == "off" {
+                *m = None;
+                return;
+            }
+            let control = mode == "control";
+            if let Some(p) = m.as_ref() {
+                p.set_control(control);
+                return;
+            }
+            let Some(weak) = self.weak.get().cloned() else { return };
+            *m = Some(crate::mpris::Mpris::start(self._rt.handle(), control, move |c| {
+                if let Some(app) = weak.upgrade() {
+                    app.media_key(c);
+                }
+            }));
+            drop(m);
+            self.update_media_player();
+        }
+    }
+
+    /// A media key, with Media keys set to control Orpheus: Play/Pause starts
+    /// the next song when nothing plays, or pauses and resumes the deck the
+    /// room hears; Next is Play Next (with its second press while a song
+    /// plays); Stop fades out what the room hears.
+    #[cfg(target_os = "linux")]
+    fn media_key(&self, c: crate::mpris::Command) {
+        use crate::mpris::Command;
+        let live = self.live_deck();
+        let d = &self.decks[live];
+        let heard = self.audible(live);
+        let (heard_any, in_gap) = {
+            let p = self.perform.lock();
+            (p.heard_any, p.gap_started.is_some())
+        };
+        let paused_mid_song = !heard && d.loaded() && d.status() == "paused" && heard_any && !in_gap;
+        let r = match c {
+            Command::PlayPause | Command::Play if paused_mid_song => {
+                self.deck_play_pause(live);
+                Ok(())
+            }
+            Command::PlayPause | Command::Pause if heard => {
+                d.pause();
+                self.emit_perform();
+                Ok(())
+            }
+            Command::Play | Command::PlayPause => self.play_next().map(|_| ()),
+            Command::Pause => Ok(()),
+            Command::Next => self.play_next().map(|_| ()),
+            Command::Stop => {
+                self.fade_out_air();
+                Ok(())
+            }
+        };
+        if let Err(e) = r {
+            emit(&self.handle, "toast", format!("{e:#}"));
+        }
+    }
+
+    /// Tells the media player what the room hears (sent on only when it changes).
+    pub fn update_media_player(&self) {
+        #[cfg(target_os = "linux")]
+        {
+            if self.mpris.lock().is_none() {
+                return;
+            }
+            let live = self.live_deck();
+            let snap = self.decks[live].snapshot();
+            let song = self.deck_song(&snap);
+            let state = crate::mpris::State {
+                playing: self.audible(live),
+                loaded: self.decks[live].loaded(),
+                title: song.as_ref().map(|s| s.title.clone()).unwrap_or_default(),
+                artist: song.as_ref().map(|s| s.artist.clone()).unwrap_or_default(),
+                length_ms: snap.duration_ms,
+            };
+            if let Some(p) = self.mpris.lock().as_ref() {
+                p.update(state);
+            }
+        }
+    }
+
     /// What a deck shows about its song (cached briefly).
     fn deck_song(&self, snap: &DeckSnapshot) -> Option<crate::views::DeckSong> {
         let key = (snap.version_id.clone(), snap.entry_id.clone());
@@ -969,6 +1068,8 @@ impl App {
     }
 
     fn start_threads(self: &Arc<Self>, deck_rx: Receiver<DeckEvent>, analysis_rx: Receiver<(Id, bool)>) {
+        let _ = self.weak.set(Arc::downgrade(self));
+        self.apply_media_keys();
         // Deck events.
         let weak = Arc::downgrade(self);
         std::thread::Builder::new()

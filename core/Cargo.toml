@@ -69,6 +69,8 @@ unicode-normalization = "0.1"
 libc = "0.2"
 cpal = { version = "0.18", features = ["realtime-dbus"] }
 audio_thread_priority = { version = "0.35", default-features = false, features = ["with_dbus"] }
+# A media player on the session bus (MPRIS): media keys come here, not to other players.
+zbus = { version = "4.4", default-features = false, features = ["tokio"] }
 
 # Hardware-accelerated stem separation where the platform provides it.
 [target.'cfg(target_os = "macos")'.dependencies]

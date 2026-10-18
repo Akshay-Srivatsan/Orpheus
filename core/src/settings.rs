@@ -192,6 +192,10 @@ pub struct Settings {
     /// Range of the tempo sliders / MIDI pitch faders in percent.
     pub tempo_range_pct: f64,
     pub auto_gain: bool,
+    /// Media keys (play/pause, next, stop) through the desktop's media player
+    /// interface (MPRIS, Linux): `ignore` (taken, so other players don't react),
+    /// `control` (they work Orpheus) or `off` (not registered).
+    pub media_keys: String,
     /// Evening out songs' dynamics (`audio::compressor`), and how strongly:
     /// `light`, `medium` or `strong`.
     pub compress: bool,
@@ -233,6 +237,7 @@ impl Default for Settings {
             stretch_engine: "signalsmith".into(),
             tempo_range_pct: 10.0,
             auto_gain: false,
+            media_keys: "ignore".into(),
             compress: false,
             compression: "medium".into(),
             target_loudness_db: -14.0,

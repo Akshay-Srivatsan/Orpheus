@@ -15,6 +15,8 @@ pub mod level;
 pub mod library;
 pub mod matching;
 pub mod midi;
+#[cfg(target_os = "linux")]
+pub mod mpris;
 pub mod model;
 pub mod perform;
 pub mod setfile;
