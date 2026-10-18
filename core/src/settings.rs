@@ -220,6 +220,11 @@ pub struct Settings {
     pub spotify: SpotifySettings,
     pub announce: AnnounceSettings,
     pub library_columns: LibraryColumns,
+    /// Which interface: `simple` (a music player: one player, sets to plan and
+    /// play) or `advanced` (two decks, the crossfader, headphone cueing).
+    pub interface: String,
+    /// The simple interface's library columns (their own choice and order).
+    pub simple_library_columns: LibraryColumns,
 }
 
 impl Default for Settings {
@@ -252,6 +257,8 @@ impl Default for Settings {
             spotify: SpotifySettings { client_id: String::new(), auto_connect: true },
             announce: AnnounceSettings::default(),
             library_columns: LibraryColumns::default(),
+            interface: "simple".into(),
+            simple_library_columns: LibraryColumns { hidden: vec!["version".into(), "plays".into()], ..Default::default() },
         }
     }
 }

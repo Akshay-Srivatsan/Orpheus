@@ -58,16 +58,24 @@ FitMenu {
         enabled: !!root.e && !!root.e.versionId && !root.current
         onTriggered: Session.run("perform_play_entry", { entryId: root.e.id })
     }
+    // (No headphones or decks in the simple interface.)
     MenuItem {
+        visible: !Session.simple
+        height: visible ? implicitHeight : 0
         text: qsTr("Preview in Headphones (free deck)")
         enabled: !!root.e && !!root.e.versionId
         onTriggered: Session.preview(root.e.versionId, root.e.id)
     }
-    FitMenu {
-        title: qsTr("Load onto")
-        enabled: !!root.e && !!root.e.versionId
-        MenuItem { text: qsTr("Deck A"); enabled: !(Session.decks[0] && Session.decks[0].audible); onTriggered: Session.run("deck_load", { deck: 0, versionId: root.e.versionId, entryId: root.e.id, play: false }) }
-        MenuItem { text: qsTr("Deck B"); enabled: !(Session.decks[1] && Session.decks[1].audible); onTriggered: Session.run("deck_load", { deck: 1, versionId: root.e.versionId, entryId: root.e.id, play: false }) }
+    Instantiator {
+        model: Session.simple ? 0 : 1
+        delegate: FitMenu {
+            title: qsTr("Load onto")
+            enabled: !!root.e && !!root.e.versionId
+            MenuItem { text: qsTr("Deck A"); enabled: !(Session.decks[0] && Session.decks[0].audible); onTriggered: Session.run("deck_load", { deck: 0, versionId: root.e.versionId, entryId: root.e.id, play: false }) }
+            MenuItem { text: qsTr("Deck B"); enabled: !(Session.decks[1] && Session.decks[1].audible); onTriggered: Session.run("deck_load", { deck: 1, versionId: root.e.versionId, entryId: root.e.id, play: false }) }
+        }
+        onObjectAdded: (i, o) => root.insertMenu(3, o)
+        onObjectRemoved: (i, o) => root.removeMenu(o)
     }
     MenuItem { text: Session.moveAfterText; enabled: !root.current && !(Session.insertAfterRow && root.ids.length === 1 && root.ids[0] === Session.insertAfterRow.entry.id); onTriggered: root.moveNext() }
     MenuItem {
@@ -154,8 +162,11 @@ FitMenu {
     }
     MenuSeparator {}
     MenuItem {
-        text: qsTr("Edit Overrides for This Set…")
-        onTriggered: { Session.inspectEntry = root.e.id; Session.rightTab = "info"; }
+        text: !Session.simple ? qsTr("Edit Overrides for This Set…") : root.row && root.row.isPause ? qsTr("Pause Options…") : qsTr("Song Options…")
+        onTriggered: {
+            if (Session.simple) Session.showSongInfo(root.row && root.row.trackId ? root.row.trackId : "", root.e.id);
+            else { Session.inspectEntry = root.e.id; Session.rightTab = "info"; }
+        }
     }
     MenuItem { text: qsTr("Remove from Set"); enabled: !root.current; onTriggered: root.remove() }
 }

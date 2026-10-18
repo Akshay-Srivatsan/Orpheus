@@ -40,6 +40,8 @@ QtObject {
     readonly property int spacing: 8
     readonly property int rowHeight: 26
     readonly property int iconSize: 16
+    /// The player's Play / Pause icon (larger: it's the main control).
+    readonly property int playIconSize: 24
     readonly property int smallIconSize: 14
     readonly property int waveformHeight: 58
     readonly property int decksHeight: 262

@@ -26,7 +26,7 @@ ApplicationWindow {
             layoutAudit.run(window.contentItem, "main " + window.width + "×" + window.height);
             if (settingsWindow.visible) layoutAudit.run(settingsWindow.contentItem, "settings " + Session.settingsPage + " " + settingsWindow.width + "×" + settingsWindow.height);
             if (projector.visible) layoutAudit.run(projector.contentItem, "projector");
-            for (const d of [newSetlistDialog, combineDialog, smartCrate, libraryColumns])
+            for (const d of [newSetlistDialog, combineDialog, smartCrate, libraryColumns, songInfo])
                 if (d.visible) layoutAudit.run(d.contentItem, "dialog " + d.title);
         }
     }
@@ -41,6 +41,20 @@ ApplicationWindow {
     property var sidebarChoice: null
     property bool setPanelShown: true
     readonly property bool sidebarShown: sidebarChoice === null ? width >= 1000 : sidebarChoice
+    /// The simple interface (one player, sets to plan and play) or the advanced one.
+    readonly property bool simple: Session.simple
+    /// The face shown's set panel and library (menus act on these).
+    readonly property var shownSet: simple ? simpleView.setPanel : setPanel
+    readonly property var shownLibrary: simple ? simpleView.library : library
+
+    function switchInterface(advanced) { Session.saveSettings({ interface: advanced ? "advanced" : "simple" }); }
+    // The simple face has no crossfader: keep it centred, so either deck is heard.
+    function centreForSimple() {
+        if (simple && Session.levels && Session.levels.crossfader !== 0.5)
+            Session.run("levels_set", { master: null, cue: null, crossfader: 0.5 });
+    }
+    onSimpleChanged: centreForSimple()
+    Connections { target: Session; function onLevelsChanged() { window.centreForSimple(); } }
 
     // ------------------------------------------------------------ menus
 
@@ -54,7 +68,12 @@ ApplicationWindow {
         Action { text: qsTr("&Eject"); onTriggered: Session.run("deck_action", { deck: deck, action: "unload" }) }
     }
 
-    menuBar: MenuBar {
+    // Only the face shown has its menus (both at once, their shortcuts would clash).
+    menuBar: Loader { sourceComponent: window.simple ? simpleMenus : advancedMenus }
+
+    Component {
+        id: advancedMenus
+    MenuBar {
         FitMenu {
             title: qsTr("&File")
             Action { text: qsTr("&New Setlist…"); shortcut: StandardKey.New; onTriggered: newSetlistDialog.open() }
@@ -159,20 +178,123 @@ ApplicationWindow {
                 checked: window.visibility === Window.FullScreen
                 onTriggered: window.visibility = checked ? Window.FullScreen : Window.Windowed
             }
+            MenuSeparator {}
+            Action { text: qsTr("Switch to the &Simple Interface"); onTriggered: window.switchInterface(false) }
         }
         FitMenu {
             title: qsTr("&Help")
             Action { text: qsTr("&About Orpheus"); onTriggered: about.open() }
         }
     }
+    }
+
+    Component {
+        id: simpleMenus
+    MenuBar {
+        FitMenu {
+            title: qsTr("&File")
+            Action { text: qsTr("&New Set…"); shortcut: StandardKey.New; onTriggered: newSetlistDialog.open() }
+            Action { text: qsTr("New &Collection"); onTriggered: Session.newCrateWith([]) }
+            Action { text: qsTr("New S&mart Collection…"); onTriggered: smartCrate.edit("new") }
+            MenuSeparator {}
+            Action { text: qsTr("&Import Music…"); shortcut: StandardKey.Open; onTriggered: importMusic.open() }
+            Action { text: qsTr("Import a Se&t…"); onTriggered: sidebar.importSet() }
+            Action { text: qsTr("Import a C&ollection…"); onTriggered: sidebar.importCrate() }
+            FitMenu {
+                title: qsTr("&Export the Set")
+                enabled: !!Session.set
+                Action { text: qsTr("Set &File…"); onTriggered: window.shownSet.exportSet() }
+                Action { text: qsTr("&CSV…"); onTriggered: window.shownSet.exportCsv() }
+            }
+            Action { text: qsTr("&Print the Set…"); shortcut: StandardKey.Print; enabled: !!Session.set; onTriggered: window.shownSet.printSet() }
+            MenuSeparator {}
+            Action { text: qsTr("&Settings…"); shortcut: StandardKey.Preferences; onTriggered: Session.settingsPage = "general" }
+            MenuSeparator {}
+            Action { text: qsTr("&Quit"); shortcut: StandardKey.Quit; onTriggered: Qt.quit() }
+        }
+        FitMenu {
+            title: qsTr("&Edit")
+            Action {
+                text: Session.undos.length ? qsTr("&Undo: %1").arg(Session.undos[Session.undos.length - 1].text) : qsTr("&Undo")
+                enabled: Session.undos.length > 0
+                shortcut: StandardKey.Undo
+                onTriggered: Session.undo()
+            }
+            MenuSeparator {}
+            Action {
+                text: qsTr("Select &All")
+                shortcut: StandardKey.SelectAll
+                onTriggered: Session.simplePage === "songs" ? simpleView.library.table.selectAll() : simpleView.setPanel.selectAll()
+            }
+            Action {
+                text: qsTr("&Find Songs…")
+                shortcut: StandardKey.Find
+                onTriggered: {
+                    Session.simplePage = "songs";
+                    simpleView.library.searchField.forceActiveFocus();
+                    simpleView.library.searchField.selectAll();
+                }
+            }
+        }
+        FitMenu {
+            title: qsTr("&Play")
+            Action { text: qsTr("&Play / Pause"); shortcut: "Space"; onTriggered: playerBar.playPause() }
+            Action { text: qsTr("Play &Next"); shortcut: "Ctrl+Return"; onTriggered: Session.run("perform_play_next") }
+            Action {
+                text: Session.upNextRow ? qsTr("&Skip “%1”").arg(Session.upNextRow.isPause ? qsTr("the pause") : Session.upNextRow.title || Session.upNextRow.label) : qsTr("&Skip the Up-Next Song")
+                enabled: !!Session.upNextRow
+                onTriggered: Session.run("perform_skip_next")
+            }
+            Action {
+                text: qsTr("&Auto Mode")
+                checkable: true
+                checked: !!Session.perform && Session.perform.autoAdvance
+                onTriggered: Session.run("perform_set_auto_advance", { value: checked })
+            }
+            Action { text: qsTr("Announce the Next &Dance"); enabled: !!Session.tts && Session.tts.state === "ready"; onTriggered: Session.run("announce_next") }
+        }
+        FitMenu {
+            title: qsTr("&View")
+            Action { text: qsTr("The S&et"); shortcut: "Ctrl+1"; onTriggered: Session.simplePage = "set" }
+            Action { text: qsTr("All S&ongs"); shortcut: "Ctrl+2"; onTriggered: { Session.show({ kind: "all" }); Session.simplePage = "songs"; } }
+            MenuSeparator {}
+            Action { text: qsTr("Library &Columns…"); onTriggered: libraryColumns.open() }
+            Action { text: qsTr("Show &Hidden Versions"); checkable: true; checked: Session.showUnlisted; onTriggered: Session.showUnlisted = checked }
+            MenuSeparator {}
+            Action { text: qsTr("&Projector in a Window"); onTriggered: projector.showOn(-1, false) }
+            Action { text: qsTr("Close the P&rojector"); onTriggered: projector.close() }
+            MenuSeparator {}
+            Action {
+                text: qsTr("&Full Screen")
+                shortcut: StandardKey.FullScreen
+                checkable: true
+                checked: window.visibility === Window.FullScreen
+                onTriggered: window.visibility = checked ? Window.FullScreen : Window.Windowed
+            }
+            MenuSeparator {}
+            Action { text: qsTr("Switch to the &Advanced Interface"); onTriggered: window.switchInterface(true) }
+        }
+        FitMenu {
+            title: qsTr("&Help")
+            Action { text: qsTr("&About Orpheus"); onTriggered: about.open() }
+        }
+    }
+    }
 
     // ------------------------------------------------------------ layout
 
-    header: TopBar {
+    header: window.simple ? null : topBar
+    TopBar {
+        id: topBar
+        visible: !window.simple
         onOpenProjector: (screen, fullscreen) => projector.showOn(screen, fullscreen)
         onCloseProjector: projector.close()
     }
-    footer: StatusBar {}
+    footer: ColumnLayout {
+        spacing: 0
+        PlayerBar { id: playerBar; visible: window.simple; Layout.fillWidth: true }
+        StatusBar { Layout.fillWidth: true }
+    }
 
     Label {
         visible: !!Backend.failure
@@ -184,8 +306,17 @@ ApplicationWindow {
         color: Theme.error
     }
 
+    SimpleView {
+        id: simpleView
+        visible: !Backend.failure && window.simple
+        anchors.fill: parent
+        onNewSet: newSetlistDialog.open()
+        onCombine: (songs, recordings) => combineDialog.show(songs, recordings)
+        onEditSmartCrate: id => smartCrate.edit(id)
+    }
+
     ColumnLayout {
-        visible: !Backend.failure
+        visible: !Backend.failure && !window.simple
         anchors.fill: parent
         spacing: 0
 
@@ -305,8 +436,11 @@ ApplicationWindow {
     // ------------------------------------------------------------ dialogs
 
     NewSetlistDialog { id: newSetlistDialog }
-    LibraryColumnsDialog { id: libraryColumns; table: library.table }
+    LibraryColumnsDialog { id: libraryColumns; table: window.shownLibrary.table }
     Connections { target: library.table; function onConfigureColumns() { libraryColumns.open(); } }
+    Connections { target: simpleView.library.table; function onConfigureColumns() { libraryColumns.open(); } }
+    SongInfoDialog { id: songInfo }
+    Connections { target: Session; function onSongInfoRequested() { songInfo.open(); } }
     CombineDialog { id: combineDialog }
     SmartCrateDialog { id: smartCrate }
     ProjectorWindow { id: projector }

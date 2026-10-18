@@ -10,6 +10,9 @@ Pane {
     padding: 0
 
     signal newSetlist()
+    /// In the simple interface: double-click opens an entry's options, songs
+    /// are found and added below the set, and there's no deck to load.
+    property bool simple: false
 
     readonly property var v: Session.set
     readonly property var set: v ? v.setlist : null
@@ -46,7 +49,12 @@ Pane {
 
     /// Double-click: load onto the free deck (paused); on a slot, choose its song.
     function choose(entry) {
-        if (!entry.versionId) { Session.startFillingSlot(entry); return; }
+        if (!entry.versionId && !simple) { Session.startFillingSlot(entry); return; }
+        if (simple) {
+            const row = v.rows.find(r => r.entry.id === entry.id);
+            Session.showSongInfo(row && row.trackId ? row.trackId : "", entry.id);
+            return;
+        }
         Session.run("deck_load", { deck: null, versionId: entry.versionId, entryId: entry.id, play: false });
     }
 
@@ -131,9 +139,10 @@ Pane {
             wrapMode: Text.WordWrap
             horizontalAlignment: Text.AlignHCenter
             opacity: Theme.dim
-            text: qsTr("Live DJing: press + on a song (or Play Next) — a live set is created for you.\nPreset DJing: plan a setlist ahead of time.")
+            text: root.simple ? qsTr("A set is the songs you'll play, in order: make one to plan it, then play it with ▶.")
+                : qsTr("Live DJing: press + on a song (or Play Next) — a live set is created for you.\nPreset DJing: plan a setlist ahead of time.")
         }
-        Button { Layout.alignment: Qt.AlignHCenter; highlighted: true; text: qsTr("New Setlist…"); onClicked: root.newSetlist() }
+        Button { Layout.alignment: Qt.AlignHCenter; highlighted: true; text: root.simple ? qsTr("New Set…") : qsTr("New Setlist…"); onClicked: root.newSetlist() }
         Heading { visible: Session.setlists.length > 0; text: qsTr("Recent") }
         Repeater {
             model: Session.setlists.slice(0, 6)
@@ -444,6 +453,14 @@ Pane {
             }
         }
 
+        // The simple interface: find songs and add them.
+        AddSongsBox {
+            visible: root.simple
+            Layout.fillWidth: true
+            Layout.leftMargin: Theme.spacing
+            Layout.rightMargin: Theme.spacing
+            Layout.topMargin: Theme.spacing
+        }
         // Totals, on a line of their own (the buttons below take the width).
         Label {
             Layout.fillWidth: true

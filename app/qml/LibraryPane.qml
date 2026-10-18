@@ -10,6 +10,8 @@ Pane {
     padding: 0
 
     property var view: null
+    /// In the simple interface (see LibraryTable.simple).
+    property bool simple: false
     property alias searchField: search
     /// The songs table (the Library menu acts on its selection).
     property alias table: table
@@ -70,7 +72,8 @@ Pane {
     property bool missed: false
     function reload() {
         missed = false;
-        if (Session.dragging) { missed = true; return; }
+        // Not shown (the other interface's): it catches up when it is.
+        if (Session.dragging || !visible) { missed = true; return; }
         reloadHeader();
         if (spotifyView || filesView) return;
         const q = query();
@@ -98,6 +101,7 @@ Pane {
         function onPerformChanged() { later.restart(); }
     }
     Component.onCompleted: reload()
+    onVisibleChanged: if (visible && missed) later.restart()
 
     SpotifyBrowser {
         visible: root.spotifyView
@@ -190,6 +194,7 @@ Pane {
 
         LibraryTable {
             id: table
+            simple: root.simple
             visible: !root.filesView
             Layout.fillWidth: true
             Layout.fillHeight: true

@@ -15,6 +15,17 @@ SettingsPage {
         columnSpacing: Theme.spacing * 2
         rowSpacing: Theme.spacing
 
+        FormLabel { text: qsTr("Interface") }
+        ColumnLayout {
+            ComboBox {
+                implicitContentWidthPolicy: ComboBox.WidestText
+                model: [qsTr("Simple: one player and your sets"), qsTr("Advanced: two decks, crossfader, headphones")]
+                currentIndex: s && s.interface === "advanced" ? 1 : 0
+                onActivated: index => set({ interface: index === 1 ? "advanced" : "simple" })
+            }
+            Label { text: qsTr("Both use the same library, sets and settings; switch any time (also in the View menu)."); opacity: 0.7 }
+        }
+
         FormLabel { text: qsTr("Default club") }
         RowLayout {
             ComboBox {

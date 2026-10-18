@@ -69,6 +69,17 @@ QtObject {
             : styleFilter.includes("__none") ? [{ field: "style", op: "isEmpty" }] : [];
         return { match: "all", conditions: c.concat(filterConditions) };
     }
+    /// Song Info as a dialog (the simple interface; Main opens it).
+    signal songInfoRequested()
+    function showSongInfo(trackId, entryId) {
+        inspectTrack = trackId || "";
+        inspectEntry = entryId || "";
+        songInfoRequested();
+    }
+    /// The simple interface's page: `set` (the open set) or `songs` (the library).
+    property string simplePage: "set"
+    /// The interface in use: the simple one (a music player), else the advanced (decks).
+    readonly property bool simple: !settings || settings.interface !== "advanced"
     /// The more-filters editor, or a new smart crate from the filters (Main opens them).
     signal filtersEditRequested()
     signal saveFiltersRequested()

@@ -27,7 +27,11 @@ FocusScope {
     /// buttons last. When the table is too narrow, the last chosen columns give
     /// way: their values show at the top of the row's menu (right-click).
     readonly property var optional: ["artist", "version", "style", "bpm", "time", "meter", "plays"]
-    readonly property var saved: Session.settings && Session.settings.libraryColumns ? Session.settings.libraryColumns : ({ order: [], hidden: [], widths: {} })
+    /// The simple interface's table: its own columns, no previewing, and songs
+    /// go to the end of the set (double-click, Enter, +).
+    property bool simple: false
+    readonly property string columnsKey: simple ? "simpleLibraryColumns" : "libraryColumns"
+    readonly property var saved: Session.settings && Session.settings[columnsKey] ? Session.settings[columnsKey] : ({ order: [], hidden: [], widths: {} })
     /// Your order (columns it lacks go at the end, in the default order).
     readonly property var order: {
         const mine = (saved.order || []).filter(k => optional.includes(k));
@@ -110,11 +114,11 @@ FocusScope {
             const w = tree.explicitColumnWidth(c);
             if (w > 0 && keys[c] !== "actions") widths[keys[c] === "plays" ? playsKey : keys[c]] = w;
         }
-        Session.saveSettings({ libraryColumns: Object.assign({ order: order, hidden: saved.hidden, widths: widths }, patch || {}) });
+        Session.saveSettings({ [columnsKey]: Object.assign({ order: order, hidden: saved.hidden, widths: widths }, patch || {}) });
     }
     function resetColumns() {
         tree.clearColumnWidths();
-        Session.saveSettings({ libraryColumns: { order: order, hidden: saved.hidden, widths: {} } });
+        Session.saveSettings({ [columnsKey]: { order: order, hidden: saved.hidden, widths: {} } });
     }
     /// The columns dialog (from the header's menu or the View menu).
     signal configureColumns()
@@ -268,6 +272,11 @@ FocusScope {
         if (Session.chimePick) Session.chimePicked(row.versionId);
         else if (Session.fillingSlot) Session.fillSlot(row.versionId);
         else if (Session.pickingEdit) Session.addEdit({ recording: row.recordingId });
+        // The simple interface: to the end of the set (no set open: the song's Info).
+        else if (simple) {
+            if (Session.set) Session.addToSet([row.versionId], "end");
+            else Session.showSongInfo(row.trackId);
+        }
         else Session.loadDeck(null, row.versionId, null);
     }
 
@@ -522,6 +531,8 @@ FocusScope {
                         RowLayout {
                             spacing: 0
                             ToolButton {
+                                // (The simple interface doesn't preview songs.)
+                                visible: !root.simple
                                 icon.source: Theme.icon("headphones")
                                 icon.width: Theme.smallIconSize; icon.height: Theme.smallIconSize
                                 icon.color: cell.fg
@@ -535,8 +546,8 @@ FocusScope {
                                 icon.color: cell.fg
                                 implicitHeight: 22
                                 ToolTip.visible: hovered
-                                ToolTip.text: Session.fillingSlot ? qsTr("Use this song for the slot") : Session.addAfterText
-                                onClicked: Session.fillingSlot ? Session.fillSlot(cell.r.versionId) : Session.addToSet([cell.r.versionId], "next")
+                                ToolTip.text: Session.fillingSlot ? qsTr("Use this song for the slot") : root.simple ? qsTr("Add to the End of the Set") : Session.addAfterText
+                                onClicked: Session.fillingSlot ? Session.fillSlot(cell.r.versionId) : Session.addToSet([cell.r.versionId], root.simple ? "end" : "next")
                             }
                             ToolButton {
                                 id: moreButton

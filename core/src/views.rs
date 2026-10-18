@@ -943,6 +943,8 @@ pub struct SetRow {
     /// The tempo it plays at, and the rate that takes.
     pub bpm: Option<f64>,
     pub rate: f64,
+    /// Beats in a bar, as detected or set by you.
+    pub meter: Option<u8>,
     /// Playing length (a pause: its length) in ms.
     pub duration_ms: f64,
     pub long: bool,
@@ -1112,6 +1114,7 @@ pub fn set_view(ctx: &ViewContext, set: &Setlist, tracks: &[Track], gap_secs: f6
                 no_style,
                 bpm: pb.and_then(|p| p.target),
                 rate: pb.map_or(1.0, |p| p.rate),
+                meter: rec.and_then(|r| r.rec.beats_per_bar),
                 duration_ms: dur,
                 long: dur > LONG_SONG_MS,
                 warnings,
@@ -1592,6 +1595,8 @@ pub struct DeckSong {
     pub color: String,
     /// Its tempo before the tempo slider (in its style's counting).
     pub base_bpm: Option<f64>,
+    /// Beats in a bar, as detected or set by you.
+    pub meter: Option<u8>,
     /// The club style it's danced as (tempo ranges), if any.
     pub style: Option<StyleDef>,
     pub hot_cues: Vec<HotCue>,
@@ -1631,6 +1636,7 @@ pub fn deck_song(ctx: &ViewContext, track: &Track, version: &Version, entry: Opt
     });
     let custom = custom_label(Some(version), entry);
     DeckSong {
+        meter: rec.and_then(|r| r.rec.beats_per_bar),
         title: track.rec.title.clone(),
         artist: track.rec.artist.clone(),
         version_label: version_label(version, track),

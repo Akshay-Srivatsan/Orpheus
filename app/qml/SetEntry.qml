@@ -227,7 +227,7 @@ ItemDelegate {
             }
             ColumnLayout {
                 spacing: 0
-                Label { Layout.alignment: Qt.AlignRight; text: root.row.bpm ? Session.fmtBpm(root.row.bpm) : ""; font.pointSize: Theme.smallPointSize; color: root.fg; font.features: { "tnum": 1 } }
+                Label { Layout.alignment: Qt.AlignRight; text: [root.row.meter ? Session.meterName(root.row.meter) : "", root.row.bpm ? Session.fmtBpm(root.row.bpm) : ""].filter(x => x).join(" · "); font.pointSize: Theme.smallPointSize; color: root.fg; font.features: { "tnum": 1 } }
                 Label {
                     Layout.alignment: Qt.AlignRight
                     text: root.row.durationMs ? Session.fmtTime(root.row.durationMs) : ""
