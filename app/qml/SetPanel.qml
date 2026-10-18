@@ -186,7 +186,7 @@ Pane {
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("More for this set")
                 onClicked: setMenu.popup()
-                Menu {
+                FitMenu {
                     id: setMenu
                     MenuItem { text: qsTr("Rename"); onTriggered: root.renaming = true }
                     MenuItem { text: qsTr("Duplicate"); onTriggered: Session.run("setlist_duplicate", { id: root.set.id, name: qsTr("%1 (copy)").arg(root.set.name) }) }
@@ -207,7 +207,7 @@ Pane {
                         onTriggered: Session.confirm(qsTr("Mark every song in this set as not played?"), qsTr("Reset"), ok => { if (ok) Session.run("setlist_reset", { id: root.set.id }); })
                     }
                     MenuSeparator {}
-                    Menu {
+                    FitMenu {
                         title: qsTr("Export")
                         MenuItem { text: qsTr("Set File…"); onTriggered: root.exportSet() }
                         MenuItem { text: qsTr("CSV…"); onTriggered: root.exportCsv() }
@@ -465,7 +465,7 @@ Pane {
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Add a placeholder for a dance style; choose the song live")
                 onClicked: slotMenu.popup()
-                Menu {
+                FitMenu {
                     id: slotMenu
                     Instantiator {
                         model: root.v && root.v.club ? root.v.club.styles : Session.myStyles

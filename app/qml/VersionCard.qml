@@ -97,7 +97,7 @@ Frame {
                 icon.source: Theme.icon("dots")
                 ToolTip.visible: hovered; ToolTip.text: qsTr("More for this version")
                 onClicked: moreMenu.popup()
-                Menu {
+                FitMenu {
                     id: moreMenu
                     MenuItem {
                         text: qsTr("Duplicate")

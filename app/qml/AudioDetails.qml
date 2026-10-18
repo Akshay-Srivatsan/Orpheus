@@ -63,7 +63,7 @@ ColumnLayout {
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("When the BPM counts the wrong beat: halve it, double it…; or go back to the analysed or file tag's BPM")
                 onClicked: correctMenu.popup()
-                Menu {
+                FitMenu {
                     id: correctMenu
                     MenuItem {
                         enabled: root.r.bpmSource !== "detected" && root.r.detectedBpm != null
@@ -139,7 +139,7 @@ ColumnLayout {
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("This is different audio: give it its own (undoes Combine as the same recording)")
                 onClicked: splitMenu.popup()
-                Menu {
+                FitMenu {
                     id: splitMenu
                     MenuItem { text: qsTr("Split Off as a Song of Its Own"); onTriggered: root.split(modelData, [], true) }
                     Instantiator {

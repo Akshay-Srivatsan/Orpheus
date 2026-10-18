@@ -148,6 +148,8 @@ pub struct PerformState {
     pub free_deck: usize,
     /// The chime the next entry would have (whether or not it's on).
     pub next_chime: Option<Id>,
+    /// The entry songs are added (or moved) after (`insert_after`); none: the start.
+    pub insert_after: Option<Id>,
     /// Auto mode's steps to the next entry, in order (none unless it's on
     /// its way there).
     pub auto_steps: Vec<AutoStep>,
@@ -408,6 +410,17 @@ impl App {
             return None;
         }
         d.entry_id()
+    }
+
+    /// Where songs go when added (or moved) "after the current song": the
+    /// index in `entries` of the entry they go after — the one the room hears
+    /// (or heard last), else the last one played; none: at the start.
+    pub fn insert_after(&self, entries: &[&SetlistEntry]) -> Option<usize> {
+        let current = self.current_entry_id();
+        current
+            .as_ref()
+            .and_then(|c| entries.iter().position(|e| &e.id == c))
+            .or_else(|| entries.iter().rposition(|e| e.status != "pending"))
     }
 
     /// The entry that would play next.
@@ -1165,6 +1178,10 @@ impl App {
             live_deck,
             free_deck: self.free_deck(),
             next_chime,
+            insert_after: {
+                let all: Vec<&SetlistEntry> = entries.iter().collect();
+                self.insert_after(&all).map(|i| all[i].id.clone())
+            },
             auto_steps: steps,
             steps_after_song,
             next_problems,

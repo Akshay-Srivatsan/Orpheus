@@ -98,6 +98,16 @@ QtObject {
     property var selected: []
     property var selectedEntries: []
     /// The same, as lookups (rows ask whether they're selected: once each).
+    /// The entry shown as up next (what Play Next or auto mode starts).
+    readonly property var upNextRow: set && perform && perform.nextEntryId ? set.rows.find(r => r.entry.id === perform.nextEntryId) || null : null
+
+    /// The set entry songs are added (or moved) after: the one the room hears
+    /// (or heard last), else the last played; null: they go at the start.
+    readonly property var insertAfterRow: set && perform && perform.insertAfter ? set.rows.find(r => r.entry.id === perform.insertAfter) || null : null
+    readonly property string insertAfterName: !insertAfterRow ? "" : insertAfterRow.isPause ? qsTr("the pause") : insertAfterRow.title || insertAfterRow.label || qsTr("the slot")
+    /// How the menus say where songs go (after that entry, else the start).
+    readonly property string addAfterText: insertAfterRow ? qsTr("Add After “%1”").arg(insertAfterName) : qsTr("Add at the Start of the Set")
+    readonly property string moveAfterText: insertAfterRow ? qsTr("Move After “%1”").arg(insertAfterName) : qsTr("Move to the Start of the Set")
     readonly property var selectedSet: { const m = {}; for (const id of selected) m[id] = true; return m; }
     readonly property var selectedEntriesSet: { const m = {}; for (const id of selectedEntries) m[id] = true; return m; }
     property string inspectTrack: ""

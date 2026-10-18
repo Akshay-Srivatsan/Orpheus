@@ -1634,12 +1634,7 @@ pub fn set_add(app: &Arc<App>, version_ids: Vec<Id>, position: SetPosition, styl
         }
     }
     let at = match position {
-        SetPosition::Next => {
-            let current = app.current_entry_id();
-            let cur = set.entries.iter().position(|e| Some(&e.id) == current.as_ref());
-            let last_done = set.entries.iter().rposition(|e| e.status != "pending");
-            Some(cur.max(last_done).map_or(0, |i| i + 1))
-        }
+        SetPosition::Next => Some(app.insert_after(&set.entries.iter().collect::<Vec<_>>()).map_or(0, |i| i + 1)),
         SetPosition::End => None,
         SetPosition::At(i) => Some(i),
     };
@@ -1683,15 +1678,14 @@ pub fn entries_fit_tempo(app: &Arc<App>, ids: Vec<Id>) -> Res<usize> {
     Ok(changed)
 }
 
-/// Moves entries to play next: after what's playing (or, before anything
-/// plays, what was played last) — where `App::next_entry` looks. Played or
+/// Moves entries after the song the room hears (or heard last), else after
+/// the last one played, else to the start (`App::insert_after`). Played or
 /// skipped entries moved are to play again.
 pub fn entries_move_next(app: &Arc<App>, setlist_id: Id, ids: Vec<Id>) -> Res<()> {
     let set = app.store.setlist(&setlist_id).map_err(ae)?;
     let rest: Vec<&SetlistEntry> = set.entries.iter().filter(|e| !ids.contains(&e.id)).collect();
     let current = app.current_entry_id();
-    let cursor = current.as_ref().and_then(|c| rest.iter().position(|e| &e.id == c)).or_else(|| rest.iter().rposition(|e| e.status != "pending"));
-    let at = cursor.map_or(0, |i| i + 1);
+    let at = app.insert_after(&rest).map_or(0, |i| i + 1);
     let moving: Vec<&SetlistEntry> = set.entries.iter().filter(|e| ids.contains(&e.id)).collect();
     for e in moving.iter().filter(|e| e.status != "pending" && Some(&e.id) != current.as_ref()) {
         app.store.entry_update(&e.id, &EntryPatch { status: Some("pending".into()), ..Default::default() }).map_err(ae)?;

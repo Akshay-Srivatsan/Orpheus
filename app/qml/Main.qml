@@ -44,7 +44,7 @@ ApplicationWindow {
 
     // ------------------------------------------------------------ menus
 
-    component DeckMenu: Menu {
+    component DeckMenu: FitMenu {
         required property int deck
         Action { text: qsTr("&Play / Pause"); onTriggered: Session.run("deck_action", { deck: deck, action: "toggle" }) }
         Action { text: qsTr("&Go Live"); onTriggered: Session.run("deck_go_live", { deck: deck }) }
@@ -55,7 +55,7 @@ ApplicationWindow {
     }
 
     menuBar: MenuBar {
-        Menu {
+        FitMenu {
             title: qsTr("&File")
             Action { text: qsTr("&New Setlist…"); shortcut: StandardKey.New; onTriggered: newSetlistDialog.open() }
             Action { text: qsTr("New &Crate"); onTriggered: Session.newCrateWith([]) }
@@ -64,7 +64,7 @@ ApplicationWindow {
             Action { text: qsTr("&Import Music…"); shortcut: StandardKey.Open; onTriggered: importMusic.open() }
             Action { text: qsTr("Import a Se&tlist…"); onTriggered: sidebar.importSet() }
             Action { text: qsTr("Import a C&rate…"); onTriggered: sidebar.importCrate() }
-            Menu {
+            FitMenu {
                 title: qsTr("&Export the Set")
                 enabled: !!Session.set
                 Action { text: qsTr("Set &File…"); onTriggered: setPanel.exportSet() }
@@ -76,7 +76,7 @@ ApplicationWindow {
             MenuSeparator {}
             Action { text: qsTr("&Quit"); shortcut: StandardKey.Quit; onTriggered: Qt.quit() }
         }
-        Menu {
+        FitMenu {
             title: qsTr("&Edit")
             Action {
                 text: Session.undos.length ? qsTr("&Undo: %1").arg(Session.undos[Session.undos.length - 1].text) : qsTr("&Undo")
@@ -98,9 +98,9 @@ ApplicationWindow {
             }
             Action { text: qsTr("&Find…"); shortcut: StandardKey.Find; onTriggered: { library.searchField.forceActiveFocus(); library.searchField.selectAll(); } }
         }
-        Menu {
+        FitMenu {
             title: qsTr("&Library")
-            Action { text: qsTr("Add as the &Next Song"); enabled: Session.selected.length > 0; onTriggered: Session.addToSet(Session.selected, "next") }
+            Action { text: Session.addAfterText; enabled: Session.selected.length > 0; onTriggered: Session.addToSet(Session.selected, "next") }
             Action { text: qsTr("Add to &End of Set"); enabled: Session.selected.length > 0; onTriggered: Session.addToSet(Session.selected, "end") }
             Action { text: qsTr("&Preview in Headphones"); enabled: Session.selected.length > 0; onTriggered: Session.preview(Session.selected[0], null) }
             MenuSeparator {}
@@ -113,10 +113,15 @@ ApplicationWindow {
             Action { text: qsTr("&Rescan Music Folders"); enabled: !(Session.scan && Session.scan.running); onTriggered: Session.run("library_rescan") }
             Action { text: qsTr("Music &Folders…"); onTriggered: Session.settingsPage = "library" }
         }
-        Menu {
+        FitMenu {
             title: qsTr("&Play")
             Action { text: qsTr("Play &Next"); shortcut: "Ctrl+Return"; onTriggered: Session.run("perform_play_next") }
-            Action { text: qsTr("&Skip the Next Song"); onTriggered: Session.run("perform_skip_next") }
+            // The song shown as up next, by name.
+            Action {
+                text: Session.upNextRow ? qsTr("&Skip “%1”").arg(Session.upNextRow.isPause ? qsTr("the pause") : Session.upNextRow.title || Session.upNextRow.label) : qsTr("&Skip the Up-Next Song")
+                enabled: !!Session.upNextRow
+                onTriggered: Session.run("perform_skip_next")
+            }
             Action {
                 text: qsTr("&Auto Mode")
                 checkable: true
@@ -131,7 +136,7 @@ ApplicationWindow {
             MenuSeparator {}
             Action { text: qsTr("&Center the Crossfader"); onTriggered: Session.run("levels_set", { master: null, cue: null, crossfader: 0.5 }) }
         }
-        Menu {
+        FitMenu {
             title: qsTr("&View")
             Action { text: qsTr("&Sidebar"); checkable: true; checked: window.sidebarShown; onTriggered: window.sidebarChoice = checked }
             Action { text: qsTr("Set &Panel"); checkable: true; checked: window.setPanelShown; onTriggered: window.setPanelShown = checked }
@@ -155,7 +160,7 @@ ApplicationWindow {
                 onTriggered: window.visibility = checked ? Window.FullScreen : Window.Windowed
             }
         }
-        Menu {
+        FitMenu {
             title: qsTr("&Help")
             Action { text: qsTr("&About Orpheus"); onTriggered: about.open() }
         }

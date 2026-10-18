@@ -186,7 +186,7 @@ Pane {
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("A version playing other audio: another edit of this song")
                     onClicked: editMenu.popup()
-                    Menu {
+                    FitMenu {
                         id: editMenu
                         MenuItem {
                             text: qsTr("From a File…")

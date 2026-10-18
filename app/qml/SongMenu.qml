@@ -3,7 +3,7 @@ import QtQuick.Controls
 import Orpheus
 
 // The library's context menu for the selected songs (`rows`).
-Menu {
+FitMenu {
     id: root
 
     property var rows: []
@@ -59,7 +59,7 @@ Menu {
         text: qsTr("Add Its Audio to “%1”").arg(Session.pickingEditTitle)
         onTriggered: Session.addEdit({ recording: root.rows[0].recordingId })
     }
-    MenuItem { text: qsTr("Add as the Next Song"); onTriggered: Session.addToSet(root.ids, "next") }
+    MenuItem { text: Session.addAfterText; onTriggered: Session.addToSet(root.ids, "next") }
     MenuItem {
         readonly property bool unlisted: root.rows.length > 0 && root.rows.every(r => r.unlisted)
         text: unlisted ? qsTr("Show in the Library") : qsTr("Hide from the Library")
@@ -67,13 +67,13 @@ Menu {
     }
     MenuItem { text: qsTr("Add to End of Set"); onTriggered: Session.addToSet(root.ids, "end") }
     MenuItem { text: qsTr("Preview in Headphones (free deck)"); onTriggered: Session.preview(root.ids[0], null) }
-    Menu {
+    FitMenu {
         title: qsTr("Load onto")
         MenuItem { text: qsTr("Deck A"); enabled: !(Session.decks[0] && Session.decks[0].audible); onTriggered: Session.loadDeck(0, root.ids[0], null) }
         MenuItem { text: qsTr("Deck B"); enabled: !(Session.decks[1] && Session.decks[1].audible); onTriggered: Session.loadDeck(1, root.ids[0], null) }
     }
     MenuSeparator {}
-    Menu {
+    FitMenu {
         id: crateMenu
         title: qsTr("Add to Crate")
         Instantiator {
@@ -95,7 +95,7 @@ Menu {
         text: qsTr("Remove from Crate")
         onTriggered: Session.run("crate_remove", { id: root.crate.id, versionIds: root.ids })
     }
-    Menu {
+    FitMenu {
         id: styleMenu
         title: qsTr("Dance Styles")
         Instantiator {
@@ -127,7 +127,7 @@ Menu {
             }
         }
     }
-    Menu {
+    FitMenu {
         id: tagMenu
         title: qsTr("Tags")
         enabled: Session.myTags.length > 0
@@ -152,7 +152,7 @@ Menu {
         text: qsTr("Combine…")
         onTriggered: root.combine(root.songs, root.recordings)
     }
-    Menu {
+    FitMenu {
         title: qsTr("Versions")
         enabled: root.songs.length === 1
         MenuItem {
@@ -171,7 +171,7 @@ Menu {
                 () => Session.run("versions_separate", { versionIds: root.ids }))
         }
     }
-    Menu {
+    FitMenu {
         title: qsTr("Audio")
         MenuItem { text: qsTr("Re-analyze"); onTriggered: Session.run("recordings_analyze", { ids: root.recordings }) }
         MenuItem {

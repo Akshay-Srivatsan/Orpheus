@@ -535,7 +535,7 @@ FocusScope {
                                 icon.color: cell.fg
                                 implicitHeight: 22
                                 ToolTip.visible: hovered
-                                ToolTip.text: Session.fillingSlot ? qsTr("Use this song for the slot") : qsTr("Add to the set as the next song")
+                                ToolTip.text: Session.fillingSlot ? qsTr("Use this song for the slot") : Session.addAfterText
                                 onClicked: Session.fillingSlot ? Session.fillSlot(cell.r.versionId) : Session.addToSet([cell.r.versionId], "next")
                             }
                             ToolButton {
@@ -617,7 +617,7 @@ FocusScope {
     }
 
     // The header's menu: the columns to show, folding, widths.
-    Menu {
+    FitMenu {
         id: columnMenu
         MenuItem { text: qsTr("Expand All Songs"); enabled: !!root.view && root.view.foldable; onTriggered: root.expandAll() }
         MenuItem { text: qsTr("Collapse All Songs"); enabled: !!root.view && root.view.foldable; onTriggered: root.collapseAll() }

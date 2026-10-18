@@ -120,7 +120,7 @@ SettingsPage {
             Button {
                 icon.source: Theme.icon("plus"); text: qsTr("Add Club")
                 onClicked: addMenu.popup()
-                Menu {
+                FitMenu {
                     id: addMenu
                     MenuItem { text: qsTr("New Club…"); onTriggered: newClub.open() }
                     MenuItem {
@@ -130,7 +130,7 @@ SettingsPage {
                     }
                     MenuItem { text: qsTr("Import from a Web Address…"); onTriggered: urlDialog.open() }
                     MenuSeparator {}
-                    Menu {
+                    FitMenu {
                         id: exampleMenu
                         title: qsTr("Examples")
                         Instantiator {

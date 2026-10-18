@@ -135,7 +135,7 @@ Frame {
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("More for deck %1").arg(root.letter)
                 onClicked: deckMenu.popup()
-                Menu {
+                FitMenu {
                     id: deckMenu
                     MenuItem { text: qsTr("Set Start of Version Here"); enabled: root.loaded; onTriggered: root.call("deck_set_point", { kind: "start" }) }
                     MenuItem { text: qsTr("Set End of Version Here"); enabled: root.loaded; onTriggered: root.call("deck_set_point", { kind: "end" }) }
@@ -150,7 +150,7 @@ Frame {
                     }
                     MenuItem { text: qsTr("Reset Tempo"); enabled: root.loaded; onTriggered: root.call("deck_tempo_reset") }
                     MenuItem {
-                        text: qsTr("Add to the Set as the Next Song")
+                        text: Session.insertAfterRow ? qsTr("Add to the Set After “%1”").arg(Session.insertAfterName) : qsTr("Add at the Start of the Set")
                         enabled: !!root.d && !!root.d.versionId && !root.d.entryId
                         onTriggered: Session.addToSet([root.d.versionId], "next")
                     }

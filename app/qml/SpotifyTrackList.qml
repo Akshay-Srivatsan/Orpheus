@@ -89,7 +89,7 @@ ColumnLayout {
                 }
                 Label { text: Session.fmtTime(item.modelData.durationMs); opacity: 0.7 }
                 ToolButton { icon.color: palette.buttonText; icon.source: Theme.icon("headphones"); ToolTip.visible: hovered; ToolTip.text: qsTr("Preview in headphones"); onClicked: root.preview(item.modelData) }
-                Button { text: qsTr("Next"); ToolTip.visible: hovered; ToolTip.text: qsTr("Add to the set as the next song (not to your library)"); onClicked: root.toSet([item.modelData], "next") }
+                Button { text: qsTr("Next"); ToolTip.visible: hovered; ToolTip.text: Session.addAfterText + qsTr(" (not to your library)"); onClicked: root.toSet([item.modelData], "next") }
                 Button { text: qsTr("End"); ToolTip.visible: hovered; ToolTip.text: qsTr("Add to the end of the set (not added to your library)"); onClicked: root.toSet([item.modelData], "end") }
                 // In the library (a check), or a button to add it: one slot, so rows line up.
                 Item {
@@ -131,11 +131,11 @@ ColumnLayout {
                 text: tracks.length > 1 ? qsTr("%n songs", "", tracks.length) : item.modelData.title
                 payload: ({ "application/x-orpheus-spotify": JSON.stringify(tracks) })
             }
-            Menu {
+            FitMenu {
                 id: trackMenu
                 MenuItem { text: qsTr("Load onto the Off-Air Deck"); onTriggered: root.load(item.modelData) }
                 MenuItem { text: qsTr("Preview in Headphones"); onTriggered: root.preview(item.modelData) }
-                MenuItem { text: qsTr("Add as the Next Song"); onTriggered: root.toSet(root.picked(item.modelData), "next") }
+                MenuItem { text: Session.addAfterText; onTriggered: root.toSet(root.picked(item.modelData), "next") }
                 MenuItem { text: qsTr("Add to End of Set"); onTriggered: root.toSet(root.picked(item.modelData), "end") }
                 MenuSeparator {}
                 MenuItem {
@@ -145,7 +145,7 @@ ColumnLayout {
                     text: adding.length > 1 ? qsTr("Add %1 to Library").arg(adding.length) : qsTr("Add to Library")
                     onTriggered: root.toLibrary(adding)
                 }
-                Menu {
+                FitMenu {
                     id: asStyle
                     title: qsTr("Add to Library as")
                     enabled: Session.myStyles.length > 0

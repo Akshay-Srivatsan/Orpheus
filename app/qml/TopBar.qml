@@ -80,7 +80,7 @@ ToolBar {
             onClicked: announceMenu.popup(announce, 0, announce.height)
             ToolTip.visible: hovered
             ToolTip.text: qsTr("Show an announcement on the projector")
-            Menu {
+            FitMenu {
                 id: announceMenu
                 MenuItem {
                     text: root.p && root.p.message ? qsTr("Clear “%1”").arg(root.p.message) : qsTr("Clear")
@@ -112,7 +112,7 @@ ToolBar {
             onClicked: projectorMenu.popup(projectorButton, 0, projectorButton.height)
             ToolTip.visible: hovered
             ToolTip.text: qsTr("Projector display for the dancers")
-            Menu {
+            FitMenu {
                 id: projectorMenu
                 Instantiator {
                     model: Qt.application.screens
@@ -200,7 +200,7 @@ ToolBar {
             status: Session.spotify && Session.spotify.connected ? "ok" : Session.spotify && Session.spotify.connecting ? "warn" : ""
             tip: Session.spotify && Session.spotify.connected ? qsTr("Connected as %1").arg(Session.spotify.username) : qsTr("Not connected")
             onClicked: spotifyMenu.popup(spotifyStatus, 0, spotifyStatus.height)
-            Menu {
+            FitMenu {
                 id: spotifyMenu
                 MenuItem {
                     text: qsTr("Refresh the Session")

@@ -3,7 +3,7 @@ import QtQuick.Controls
 import Orpheus
 
 // A set entry's context menu.
-Menu {
+FitMenu {
     id: root
 
     property var row
@@ -63,13 +63,13 @@ Menu {
         enabled: !!root.e && !!root.e.versionId
         onTriggered: Session.preview(root.e.versionId, root.e.id)
     }
-    Menu {
+    FitMenu {
         title: qsTr("Load onto")
         enabled: !!root.e && !!root.e.versionId
         MenuItem { text: qsTr("Deck A"); enabled: !(Session.decks[0] && Session.decks[0].audible); onTriggered: Session.run("deck_load", { deck: 0, versionId: root.e.versionId, entryId: root.e.id, play: false }) }
         MenuItem { text: qsTr("Deck B"); enabled: !(Session.decks[1] && Session.decks[1].audible); onTriggered: Session.run("deck_load", { deck: 1, versionId: root.e.versionId, entryId: root.e.id, play: false }) }
     }
-    MenuItem { text: qsTr("Make It the Next Song"); enabled: !root.current; onTriggered: root.moveNext() }
+    MenuItem { text: Session.moveAfterText; enabled: !root.current && !(Session.insertAfterRow && root.ids.length === 1 && root.ids[0] === Session.insertAfterRow.entry.id); onTriggered: root.moveNext() }
     MenuItem {
         text: qsTr("Fit Tempo to Its Style")
         enabled: root.rows.some(r => !!r.trackId)
@@ -105,7 +105,7 @@ Menu {
         onTriggered: root.update({ status: "pending" })
     }
     MenuSeparator {}
-    Menu {
+    FitMenu {
         id: showAs
         title: qsTr("Show As")
         enabled: !!root.row && !root.row.isPause
@@ -128,7 +128,7 @@ Menu {
             onTriggered: root.update(root.club ? { clubStyles: null } : { styles: null })
         }
     }
-    Menu {
+    FitMenu {
         id: tagMenu
         title: qsTr("Tags")
         enabled: !!root.club && root.club.tags.length > 0

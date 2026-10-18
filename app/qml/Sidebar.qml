@@ -101,7 +101,7 @@ Pane {
                     actions: [
                         Action { icon.source: Theme.icon("plus"); text: qsTr("New Crate"); onTriggered: crateAddMenu.popup() }
                     ]
-                    Menu {
+                    FitMenu {
                         id: crateAddMenu
                         MenuItem { text: qsTr("New Crate"); onTriggered: Session.newCrateWith([]) }
                         MenuItem { text: qsTr("New Smart Crate…"); onTriggered: root.editSmartCrate("new") }
@@ -138,7 +138,7 @@ Pane {
                                 onDoubleClicked: crateRow.modelData.smart ? root.editSmartCrate(crateRow.modelData.id) : Session.renamingCrate = crateRow.modelData.id
                                 onDropped: ids => Session.run("crate_add", { id: crateRow.modelData.id, versionIds: ids })
                                 onContextMenu: crateMenu.popup()
-                                Menu {
+                                FitMenu {
                                     id: crateMenu
                                     MenuItem { text: qsTr("Rename"); onTriggered: Session.renamingCrate = crateRow.modelData.id }
                                     MenuItem { visible: !!crateRow.modelData.smart; text: qsTr("Edit Rules…"); onTriggered: root.editSmartCrate(crateRow.modelData.id) }
@@ -205,7 +205,7 @@ Pane {
                                 onClicked: Session.show({ kind: "setlist", id: setRow.modelData.id })
                                 onDoubleClicked: Session.run("perform_open", { setlistId: setRow.modelData.id })
                                 onContextMenu: setMenu.popup()
-                                Menu {
+                                FitMenu {
                                     id: setMenu
                                     MenuItem {
                                         text: setRow.isOpen ? qsTr("Close in Set Panel") : qsTr("Open in Set Panel")
