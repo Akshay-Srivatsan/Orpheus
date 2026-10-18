@@ -42,6 +42,16 @@ QtObject {
     readonly property int iconSize: 16
     /// The player's Play / Pause icon (larger: it's the main control).
     readonly property int playIconSize: 24
+    /// The simple interface's now-playing header: artwork, title size, and the
+    /// blurred artwork behind it (how blurred, and how dark under white text).
+    readonly property int nowPlayingArtSize: 96
+    readonly property real nowPlayingTitlePointSize: basePointSize * 1.7
+    readonly property real nowPlayingArtistPointSize: basePointSize * 1.15
+    readonly property int nowPlayingBlur: 64
+    readonly property real nowPlayingScrim: 0.55
+    /// Its "up next" column, and the volume slider.
+    readonly property int upNextWidth: 360
+    readonly property int volumeSliderWidth: 110
     readonly property int smallIconSize: 14
     readonly property int waveformHeight: 58
     readonly property int decksHeight: 262

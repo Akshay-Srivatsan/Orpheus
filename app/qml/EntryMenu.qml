@@ -164,8 +164,7 @@ FitMenu {
     MenuItem {
         text: !Session.simple ? qsTr("Edit Overrides for This Set…") : root.row && root.row.isPause ? qsTr("Pause Options…") : qsTr("Song Options…")
         onTriggered: {
-            if (Session.simple) Session.showSongInfo(root.row && root.row.trackId ? root.row.trackId : "", root.e.id);
-            else { Session.inspectEntry = root.e.id; Session.rightTab = "info"; }
+            Session.showInfo(Session.simple && root.row ? root.row.trackId : Session.inspectTrack, root.e.id);
         }
     }
     MenuItem { text: qsTr("Remove from Set"); enabled: !root.current; onTriggered: root.remove() }

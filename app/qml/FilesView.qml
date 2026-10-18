@@ -182,7 +182,7 @@ Pane {
                                 text: !f ? "" : f.removed
                                     ? qsTr("Removed") + (f.songTitles.length ? " · " + qsTr("still in %1").arg(links) : "")
                                     : !f.recording ? qsTr("Not added") : links
-                                onLinkActivated: id => { Session.inspectTrack = id; Session.rightTab = "info"; }
+                                onLinkActivated: id => Session.showInfo(id)
                                 HoverHandler { cursorShape: parent.hoveredLink ? Qt.PointingHandCursor : Qt.ArrowCursor }
                             }
                         }

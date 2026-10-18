@@ -224,13 +224,17 @@ ApplicationWindow {
             Action {
                 text: qsTr("Select &All")
                 shortcut: StandardKey.SelectAll
-                onTriggered: Session.simplePage === "songs" ? simpleView.library.table.selectAll() : simpleView.setPanel.selectAll()
+                onTriggered: {
+                    for (let p = window.activeFocusItem; p; p = p.parent) {
+                        if (p === simpleView.setPanel) { simpleView.setPanel.selectAll(); return; }
+                    }
+                    simpleView.library.table.selectAll();
+                }
             }
             Action {
                 text: qsTr("&Find Songs…")
                 shortcut: StandardKey.Find
                 onTriggered: {
-                    Session.simplePage = "songs";
                     simpleView.library.searchField.forceActiveFocus();
                     simpleView.library.searchField.selectAll();
                 }
@@ -255,8 +259,7 @@ ApplicationWindow {
         }
         FitMenu {
             title: qsTr("&View")
-            Action { text: qsTr("The S&et"); shortcut: "Ctrl+1"; onTriggered: Session.simplePage = "set" }
-            Action { text: qsTr("All S&ongs"); shortcut: "Ctrl+2"; onTriggered: { Session.show({ kind: "all" }); Session.simplePage = "songs"; } }
+            Action { text: qsTr("All S&ongs"); shortcut: "Ctrl+1"; onTriggered: Session.show({ kind: "all" }) }
             MenuSeparator {}
             Action { text: qsTr("Library &Columns…"); onTriggered: libraryColumns.open() }
             Action { text: qsTr("Show &Hidden Versions"); checkable: true; checked: Session.showUnlisted; onTriggered: Session.showUnlisted = checked }
@@ -283,18 +286,15 @@ ApplicationWindow {
 
     // ------------------------------------------------------------ layout
 
-    header: window.simple ? null : topBar
+    header: window.simple ? playerBar : topBar
+    PlayerBar { id: playerBar; visible: window.simple }
     TopBar {
         id: topBar
         visible: !window.simple
         onOpenProjector: (screen, fullscreen) => projector.showOn(screen, fullscreen)
         onCloseProjector: projector.close()
     }
-    footer: ColumnLayout {
-        spacing: 0
-        PlayerBar { id: playerBar; visible: window.simple; Layout.fillWidth: true }
-        StatusBar { Layout.fillWidth: true }
-    }
+    footer: StatusBar {}
 
     Label {
         visible: !!Backend.failure

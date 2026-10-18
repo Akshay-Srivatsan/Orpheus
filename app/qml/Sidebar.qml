@@ -8,8 +8,6 @@ Pane {
     id: root
     padding: Theme.spacing
 
-    property var playlists: null
-    property bool loadingPlaylists: false
     property string renamingSet: ""
 
     signal newSetlist()
@@ -45,17 +43,6 @@ Pane {
         Session.chooseFile({ title: qsTr("Export “%1”").arg(c.name), nameFilters: [qsTr("Orpheus crate (*.toml)")], save: true, name: c.name + ".orpheus-crate.toml" }, path => {
             Session.run("crate_export", { id: c.id, path: path }).then(r => { if (r !== undefined) Session.toast(qsTr("Exported “%1”.").arg(c.name), "info"); });
         });
-    }
-
-    Connections {
-        target: Session
-        function onSpotifyChanged() {
-            if (Session.spotify && Session.spotify.connected && root.playlists === null) {
-                root.playlists = [];
-                root.loadingPlaylists = true;
-                Backend.call("spotify_playlists").then(p => { root.playlists = p; root.loadingPlaylists = false; }, () => root.loadingPlaylists = false);
-            }
-        }
     }
 
     // One surface for its rows and section titles.
@@ -252,7 +239,7 @@ Pane {
                     onClicked: Session.show({ kind: "spotify-search" })
                 }
                 Repeater {
-                    model: Session.spotify && Session.spotify.connected && root.playlists ? root.playlists : []
+                    model: Session.spotify && Session.spotify.connected && Session.spotifyPlaylists ? Session.spotifyPlaylists : []
                     delegate: NavItem {
                         required property var modelData
                         Layout.fillWidth: true
@@ -263,7 +250,7 @@ Pane {
                     }
                 }
                 Label {
-                    visible: root.loadingPlaylists
+                    visible: Session.loadingPlaylists
                     Layout.leftMargin: Theme.spacing * 2
                     text: qsTr("Loading playlists…")
                     opacity: Theme.dim

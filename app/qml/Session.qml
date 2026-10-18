@@ -17,6 +17,16 @@ QtObject {
     property var decks: [null, null]
     property var levels: null
     property var spotify: null
+    /// Your Spotify playlists (fetched once, when Spotify first connects).
+    property var spotifyPlaylists: null
+    property bool loadingPlaylists: false
+    onSpotifyChanged: {
+        if (spotify && spotify.connected && spotifyPlaylists === null) {
+            spotifyPlaylists = [];
+            loadingPlaylists = true;
+            Backend.call("spotify_playlists").then(p => { spotifyPlaylists = p; loadingPlaylists = false; }, () => loadingPlaylists = false);
+        }
+    }
     property var scan: null
     /// What analysis is doing: { current: [{ id, title }], waiting }.
     property var analysis: null
@@ -76,8 +86,21 @@ QtObject {
         inspectEntry = entryId || "";
         songInfoRequested();
     }
-    /// The simple interface's page: `set` (the open set) or `songs` (the library).
-    property string simplePage: "set"
+    /// Adding to the end, naming the set (none open: a new live set is made).
+    readonly property string addToEndText: set ? qsTr("Add to the End of “%1”").arg(set.setlist.name) : qsTr("Add to a New Set")
+    /// Adds songs to the end of a set that may not be open (dropped on it in the sidebar).
+    function addToSetlist(setlist, versionIds) {
+        return run("set_add", { versionIds: versionIds, position: "end", style: null, slot: null, setlistId: setlist.id })
+            .then(r => { if (r !== undefined) toast(qsTr("Added %n song(s) to “%1”", "", versionIds.length).arg(setlist.name), "info"); });
+    }
+    /// A song's (or a set entry's) Info: a dialog in the simple interface,
+    /// the Info tab in the advanced one.
+    function showInfo(trackId, entryId) {
+        if (simple) { showSongInfo(trackId, entryId); return; }
+        inspectTrack = trackId || "";
+        inspectEntry = entryId || "";
+        rightTab = "info";
+    }
     /// The interface in use: the simple one (a music player), else the advanced (decks).
     readonly property bool simple: !settings || settings.interface !== "advanced"
     /// The more-filters editor, or a new smart crate from the filters (Main opens them).

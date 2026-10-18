@@ -60,7 +60,8 @@ ColumnLayout {
             required property int index
             Layout.fillWidth: true
             highlighted: root.selectedUris.includes(modelData.uri)
-            onDoubleClicked: root.load(modelData)
+            // The simple interface has no decks to load: it adds to the set, like its library.
+            onDoubleClicked: Session.simple ? root.toSet([modelData], "end") : root.load(modelData)
             TapHandler {
                 id: tap
                 acceptedButtons: Qt.LeftButton
@@ -88,7 +89,7 @@ ColumnLayout {
                     }
                 }
                 Label { text: Session.fmtTime(item.modelData.durationMs); opacity: 0.7 }
-                ToolButton { icon.color: palette.buttonText; icon.source: Theme.icon("headphones"); ToolTip.visible: hovered; ToolTip.text: qsTr("Preview in headphones"); onClicked: root.preview(item.modelData) }
+                ToolButton { visible: !Session.simple; icon.color: palette.buttonText; icon.source: Theme.icon("headphones"); ToolTip.visible: hovered; ToolTip.text: qsTr("Preview in headphones"); onClicked: root.preview(item.modelData) }
                 Button { text: qsTr("Next"); ToolTip.visible: hovered; ToolTip.text: Session.addAfterText + qsTr(" (not to your library)"); onClicked: root.toSet([item.modelData], "next") }
                 Button { text: qsTr("End"); ToolTip.visible: hovered; ToolTip.text: qsTr("Add to the End of the Set") + qsTr(" (not to your library)"); onClicked: root.toSet([item.modelData], "end") }
                 // In the library (a check), or a button to add it: one slot, so rows line up.
@@ -133,8 +134,9 @@ ColumnLayout {
             }
             FitMenu {
                 id: trackMenu
-                MenuItem { text: qsTr("Load onto the Off-Air Deck"); onTriggered: root.load(item.modelData) }
-                MenuItem { text: qsTr("Preview in Headphones"); onTriggered: root.preview(item.modelData) }
+                // No decks or headphones in the simple interface.
+                MenuItem { visible: !Session.simple; height: visible ? implicitHeight : 0; text: qsTr("Load onto the Off-Air Deck"); onTriggered: root.load(item.modelData) }
+                MenuItem { visible: !Session.simple; height: visible ? implicitHeight : 0; text: qsTr("Preview in Headphones"); onTriggered: root.preview(item.modelData) }
                 MenuItem { text: Session.addAfterText; onTriggered: root.toSet(root.picked(item.modelData), "next") }
                 MenuItem { text: qsTr("Add to the End of the Set"); onTriggered: root.toSet(root.picked(item.modelData), "end") }
                 MenuSeparator {}

@@ -36,6 +36,13 @@ FitMenu {
     }
     MenuSeparator { visible: root.details.length > 0 }
     MenuItem {
+        visible: Session.simple
+        height: visible ? implicitHeight : 0
+        text: qsTr("Song Info…")
+        enabled: root.songs.length === 1
+        onTriggered: Session.showInfo(root.rows[0].trackId)
+    }
+    MenuItem {
         visible: !!root.historyRow && !!root.historyRow.historyEntryId
         height: visible ? implicitHeight : 0
         text: qsTr("Remove from History")
@@ -65,17 +72,27 @@ FitMenu {
         text: unlisted ? qsTr("Show in the Library") : qsTr("Hide from the Library")
         onTriggered: Session.setUnlisted(root.ids, !unlisted)
     }
-    MenuItem { text: qsTr("Add to the End of the Set"); onTriggered: Session.addToSet(root.ids, "end") }
-    MenuItem { text: qsTr("Preview in Headphones (free deck)"); onTriggered: Session.preview(root.ids[0], null) }
-    FitMenu {
-        title: qsTr("Load onto")
-        MenuItem { text: qsTr("Deck A"); enabled: !(Session.decks[0] && Session.decks[0].audible); onTriggered: Session.loadDeck(0, root.ids[0], null) }
-        MenuItem { text: qsTr("Deck B"); enabled: !(Session.decks[1] && Session.decks[1].audible); onTriggered: Session.loadDeck(1, root.ids[0], null) }
+    MenuItem { text: Session.simple ? Session.addToEndText : qsTr("Add to the End of the Set"); onTriggered: Session.addToSet(root.ids, "end") }
+    // No headphones or decks in the simple interface.
+    MenuItem { id: previewItem; visible: !Session.simple; height: visible ? implicitHeight : 0; text: qsTr("Preview in Headphones (free deck)"); onTriggered: Session.preview(root.ids[0], null) }
+    Instantiator {
+        model: Session.simple ? 0 : 1
+        delegate: FitMenu {
+            title: qsTr("Load onto")
+            MenuItem { text: qsTr("Deck A"); enabled: !(Session.decks[0] && Session.decks[0].audible); onTriggered: Session.loadDeck(0, root.ids[0], null) }
+            MenuItem { text: qsTr("Deck B"); enabled: !(Session.decks[1] && Session.decks[1].audible); onTriggered: Session.loadDeck(1, root.ids[0], null) }
+        }
+        // Just after Preview (the items before it can change in number).
+        onObjectAdded: (i, o) => {
+            for (let k = 0; k < root.count; k++)
+                if (root.itemAt(k) === previewItem) { root.insertMenu(k + 1, o); return; }
+        }
+        onObjectRemoved: (i, o) => root.removeMenu(o)
     }
     MenuSeparator {}
     FitMenu {
         id: crateMenu
-        title: qsTr("Add to Crate")
+        title: Session.simple ? qsTr("Add to Collection") : qsTr("Add to Crate")
         Instantiator {
             model: Session.crates.filter(c => !c.smart)
             delegate: MenuItem {
@@ -87,12 +104,12 @@ FitMenu {
             onObjectRemoved: (i, o) => crateMenu.removeItem(o)
         }
         MenuSeparator {}
-        MenuItem { text: qsTr("New Crate…"); onTriggered: Session.newCrateWith(root.ids) }
+        MenuItem { text: Session.simple ? qsTr("New Collection") : qsTr("New Crate…"); onTriggered: Session.newCrateWith(root.ids) }
     }
     MenuItem {
         visible: root.plainCrate
         height: visible ? implicitHeight : 0
-        text: qsTr("Remove from Crate")
+        text: Session.simple ? qsTr("Remove from Collection") : qsTr("Remove from Crate")
         onTriggered: Session.run("crate_remove", { id: root.crate.id, versionIds: root.ids })
     }
     FitMenu {
@@ -122,8 +139,7 @@ FitMenu {
             text: Session.myStyles.length ? qsTr("More in Info…") : qsTr("Create Dance Styles…")
             onTriggered: {
                 if (!Session.myStyles.length) { Session.settingsPage = "styles"; return; }
-                Session.inspectTrack = root.rows[0].trackId;
-                Session.rightTab = "info";
+                Session.showInfo(root.rows[0].trackId);
             }
         }
     }
@@ -157,7 +173,7 @@ FitMenu {
         enabled: root.songs.length === 1
         MenuItem {
             text: qsTr("New Version…")
-            onTriggered: { Session.inspectTrack = root.rows[0].trackId; Session.rightTab = "info"; }
+            onTriggered: Session.showInfo(root.rows[0].trackId)
         }
         MenuItem {
             text: qsTr("Make Primary Version")

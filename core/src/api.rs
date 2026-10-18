@@ -1613,8 +1613,18 @@ pub enum SetPosition {
 /// Adds songs to the open set (opening a new live set if none is): after
 /// what's playing, at the end, or at a position. While filtering on a style
 /// (`style`), a song added is danced as that style. With one song and a style
-/// slot selected (`slot`), it fills the slot instead.
-pub fn set_add(app: &Arc<App>, version_ids: Vec<Id>, position: SetPosition, style: Option<String>, slot: Option<Id>) -> Res<()> {
+/// slot selected (`slot`), it fills the slot instead. `setlist_id`: add to
+/// that set instead (e.g. songs dropped on it in the sidebar).
+pub fn set_add(app: &Arc<App>, version_ids: Vec<Id>, position: SetPosition, style: Option<String>, slot: Option<Id>, setlist_id: Option<Id>) -> Res<()> {
+    if let Some(id) = setlist_id {
+        app.store.setlist(&id).map_err(ae)?;
+        let entries = version_ids.into_iter().map(|v| NewEntry { version_id: Some(v), ..Default::default() }).collect();
+        let at = match position {
+            SetPosition::At(i) => Some(i),
+            _ => None,
+        };
+        return entries_insert(app, id, at, entries).map(|_| ());
+    }
     let open = app.perform.lock().setlist_id.clone().and_then(|id| app.store.setlist(&id).ok());
     let set = match open {
         Some(s) => s,
@@ -3498,9 +3508,11 @@ pub fn call(app: &Arc<App>, name: &str, args: serde_json::Value) -> Res<serde_js
                 position: SetPosition,
                 style: Option<String>,
                 slot: Option<Id>,
+                #[serde(default)]
+                setlist_id: Option<Id>,
             }
             let a: A = parse(args)?;
-            json(set_add(app, a.version_ids, a.position, a.style, a.slot))
+            json(set_add(app, a.version_ids, a.position, a.style, a.slot, a.setlist_id))
         }
         "entries_fit_tempo" => {
             #[derive(Deserialize)]

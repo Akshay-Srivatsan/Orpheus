@@ -272,11 +272,8 @@ FocusScope {
         if (Session.chimePick) Session.chimePicked(row.versionId);
         else if (Session.fillingSlot) Session.fillSlot(row.versionId);
         else if (Session.pickingEdit) Session.addEdit({ recording: row.recordingId });
-        // The simple interface: to the end of the set (no set open: the song's Info).
-        else if (simple) {
-            if (Session.set) Session.addToSet([row.versionId], "end");
-            else Session.showSongInfo(row.trackId);
-        }
+        // The simple interface: to the end of the set beside the library.
+        else if (simple) Session.addToSet([row.versionId], "end");
         else Session.loadDeck(null, row.versionId, null);
     }
 
@@ -546,7 +543,7 @@ FocusScope {
                                 icon.color: cell.fg
                                 implicitHeight: 22
                                 ToolTip.visible: hovered
-                                ToolTip.text: Session.fillingSlot ? qsTr("Use this song for the slot") : root.simple ? qsTr("Add to the End of the Set") : Session.addAfterText
+                                ToolTip.text: Session.fillingSlot ? qsTr("Use this song for the slot") : root.simple ? Session.addToEndText : Session.addAfterText
                                 onClicked: Session.fillingSlot ? Session.fillSlot(cell.r.versionId) : Session.addToSet([cell.r.versionId], root.simple ? "end" : "next")
                             }
                             ToolButton {

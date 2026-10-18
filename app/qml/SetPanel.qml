@@ -453,14 +453,6 @@ Pane {
             }
         }
 
-        // The simple interface: find songs and add them.
-        AddSongsBox {
-            visible: root.simple
-            Layout.fillWidth: true
-            Layout.leftMargin: Theme.spacing
-            Layout.rightMargin: Theme.spacing
-            Layout.topMargin: Theme.spacing
-        }
         // Totals, on a line of their own (the buttons below take the width).
         Label {
             Layout.fillWidth: true
