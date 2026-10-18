@@ -59,7 +59,7 @@ Menu {
         text: qsTr("Add Its Audio to “%1”").arg(Session.pickingEditTitle)
         onTriggered: Session.addEdit({ recording: root.rows[0].recordingId })
     }
-    MenuItem { text: qsTr("Play Next"); onTriggered: Session.addToSet(root.ids, "next") }
+    MenuItem { text: qsTr("Add as the Next Song"); onTriggered: Session.addToSet(root.ids, "next") }
     MenuItem {
         readonly property bool unlisted: root.rows.length > 0 && root.rows.every(r => r.unlisted)
         text: unlisted ? qsTr("Show in the Library") : qsTr("Hide from the Library")

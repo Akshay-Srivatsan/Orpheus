@@ -150,7 +150,7 @@ Frame {
                     }
                     MenuItem { text: qsTr("Reset Tempo"); enabled: root.loaded; onTriggered: root.call("deck_tempo_reset") }
                     MenuItem {
-                        text: qsTr("Play Next After Current Song")
+                        text: qsTr("Add to the Set as the Next Song")
                         enabled: !!root.d && !!root.d.versionId && !root.d.entryId
                         onTriggered: Session.addToSet([root.d.versionId], "next")
                     }

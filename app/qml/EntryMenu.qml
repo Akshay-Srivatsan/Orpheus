@@ -69,7 +69,7 @@ Menu {
         MenuItem { text: qsTr("Deck A"); enabled: !(Session.decks[0] && Session.decks[0].audible); onTriggered: Session.run("deck_load", { deck: 0, versionId: root.e.versionId, entryId: root.e.id, play: false }) }
         MenuItem { text: qsTr("Deck B"); enabled: !(Session.decks[1] && Session.decks[1].audible); onTriggered: Session.run("deck_load", { deck: 1, versionId: root.e.versionId, entryId: root.e.id, play: false }) }
     }
-    MenuItem { text: qsTr("Move to Play Next"); enabled: !root.current; onTriggered: root.moveNext() }
+    MenuItem { text: qsTr("Make It the Next Song"); enabled: !root.current; onTriggered: root.moveNext() }
     MenuItem {
         text: qsTr("Fit Tempo to Its Style")
         enabled: root.rows.some(r => !!r.trackId)

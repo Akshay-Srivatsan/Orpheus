@@ -535,7 +535,7 @@ FocusScope {
                                 icon.color: cell.fg
                                 implicitHeight: 22
                                 ToolTip.visible: hovered
-                                ToolTip.text: Session.fillingSlot ? qsTr("Use this song for the slot") : qsTr("Play next")
+                                ToolTip.text: Session.fillingSlot ? qsTr("Use this song for the slot") : qsTr("Add to the set as the next song")
                                 onClicked: Session.fillingSlot ? Session.fillSlot(cell.r.versionId) : Session.addToSet([cell.r.versionId], "next")
                             }
                             ToolButton {

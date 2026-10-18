@@ -100,7 +100,7 @@ ApplicationWindow {
         }
         Menu {
             title: qsTr("&Library")
-            Action { text: qsTr("Play &Next"); enabled: Session.selected.length > 0; onTriggered: Session.addToSet(Session.selected, "next") }
+            Action { text: qsTr("Add as the &Next Song"); enabled: Session.selected.length > 0; onTriggered: Session.addToSet(Session.selected, "next") }
             Action { text: qsTr("Add to &End of Set"); enabled: Session.selected.length > 0; onTriggered: Session.addToSet(Session.selected, "end") }
             Action { text: qsTr("&Preview in Headphones"); enabled: Session.selected.length > 0; onTriggered: Session.preview(Session.selected[0], null) }
             MenuSeparator {}
