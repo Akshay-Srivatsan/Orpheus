@@ -1655,6 +1655,34 @@ pub fn set_add(app: &Arc<App>, version_ids: Vec<Id>, position: SetPosition, styl
     entries_insert(app, set.id, at, entries).map(|_| ())
 }
 
+/// Fits set entries' tempos to their styles (`views::entry_fit_tempo`): each
+/// one playing outside its style's range gets the nearest tempo inside it;
+/// those that fit are left as they are. Returns how many changed.
+pub fn entries_fit_tempo(app: &Arc<App>, ids: Vec<Id>) -> Res<usize> {
+    let mut changed = 0;
+    let mut sets = std::collections::HashSet::new();
+    for id in ids {
+        let (e, sid) = app.store.entry(&id).map_err(ae)?;
+        let Some((v, tid)) = e.version_id.as_ref().and_then(|v| app.store.version(v).ok()) else { continue };
+        let track = app.store.track(&tid).map_err(ae)?;
+        let set = app.store.setlist(&sid).map_err(ae)?;
+        let ctx = app.view_context(set.club.clone());
+        if let Some(bpm) = crate::views::entry_fit_tempo(&ctx, &track, &v, &e) {
+            let overrides = Overrides { target_bpm: Some(bpm), ..e.overrides.clone() };
+            app.store.entry_update(&id, &EntryPatch { overrides: Some(overrides), ..Default::default() }).map_err(ae)?;
+            changed += 1;
+            sets.insert(sid);
+        }
+    }
+    for sid in &sets {
+        app.emit_setlist(sid);
+    }
+    if changed > 0 {
+        app.emit_perform();
+    }
+    Ok(changed)
+}
+
 /// Moves entries to play next: after what's playing (or, before anything
 /// plays, what was played last) — where `App::next_entry` looks. Played or
 /// skipped entries moved are to play again.
@@ -3479,6 +3507,15 @@ pub fn call(app: &Arc<App>, name: &str, args: serde_json::Value) -> Res<serde_js
             }
             let a: A = parse(args)?;
             json(set_add(app, a.version_ids, a.position, a.style, a.slot))
+        }
+        "entries_fit_tempo" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                ids: Vec<Id>,
+            }
+            let a: A = parse(args)?;
+            json(entries_fit_tempo(app, a.ids))
         }
         "entries_move_next" => {
             #[derive(Deserialize)]

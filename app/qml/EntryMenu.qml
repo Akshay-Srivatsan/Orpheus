@@ -71,6 +71,13 @@ Menu {
     }
     MenuItem { text: qsTr("Move to Play Next"); enabled: !root.current; onTriggered: root.moveNext() }
     MenuItem {
+        text: qsTr("Fit Tempo to Its Style")
+        enabled: root.rows.some(r => !!r.trackId)
+        ToolTip.visible: hovered
+        ToolTip.text: qsTr("Those playing outside their style's tempo get the nearest that fits; the others stay as they are")
+        onTriggered: Session.fitTempos(root.ids)
+    }
+    MenuItem {
         text: qsTr("Auto Mode Stops Before This Song")
         checkable: true
         checked: !!root.e && !!root.e.hold

@@ -1307,6 +1307,8 @@ pub struct EntryView {
     pub show_as: Vec<ShowAs>,
     pub shown_names: String,
     pub playback: Option<Playback>,
+    /// The tempo that would fit its style, if it plays outside it (`entry_fit_tempo`).
+    pub fit_bpm: Option<f64>,
     /// The pause before it, and between its announcement and its start, by default (seconds).
     pub default_pause_before: f64,
     pub default_pause_after: f64,
@@ -1464,6 +1466,7 @@ pub fn song_view(ctx: &ViewContext, track: &Track, entry: Option<&SetlistEntry>,
             show_as,
             shown_names: shown.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(" / "),
             playback: ev.map(|v| playback(track.recording_of(&v.id), v, Some(e), st.as_ref())),
+            fit_bpm: ev.and_then(|v| entry_fit_tempo(ctx, track, v, e)),
             default_pause_before: if speaks || sc.announce.enabled { layers.announce_pauses(sc.announce).0 } else { sc.gap_secs },
             default_pause_after: layers.announce_pauses(sc.announce).1,
             speaks,
@@ -1533,6 +1536,27 @@ fn recording_choices(track: &Track) -> Vec<Choice> {
 
 /// The tempo that brings a version into its style's sweet range (none: it's
 /// already there, or it has no style with one).
+/// The tempo a set entry should play at to fit its style, if it doesn't:
+/// the nearest edge of the style's sweet range (else its extended one) to how
+/// it plays now (its own tempo, else its version's, else the recording's).
+/// Its style is the one it shows as if just added (without its own tempo;
+/// failing that, without its version's either): played out of spec, it may
+/// show none. None: it fits, or there's nothing to fit to.
+pub fn entry_fit_tempo(ctx: &ViewContext, track: &Track, version: &Version, entry: &SetlistEntry) -> Option<f64> {
+    let added = SetlistEntry { overrides: Overrides { target_bpm: None, ..entry.overrides.clone() }, ..entry.clone() };
+    let plain = Version { settings: Overrides { target_bpm: None, ..version.settings.clone() }, ..version.clone() };
+    let shown = [shown_for(ctx, track, version, Some(entry)), shown_for(ctx, track, version, Some(&added)), shown_for(ctx, track, &plain, Some(&added))]
+        .into_iter()
+        .find(|s| club_style_of(s).is_some())?;
+    let st = club_style_of(&shown)?;
+    let bpm = track.recording_of(&version.id)?.rec.bpm?;
+    let c = style_center(st)?;
+    let now = fold_bpm(resolve_settings(Some(version), Some(entry)).target_bpm.unwrap_or(bpm), c);
+    let r = st.sweet.or(st.extended)?;
+    let target = if now < r[0] { r[0] } else if now > r[1] { r[1] } else { return None };
+    Some(crate::matching::round1(target))
+}
+
 pub fn fit_tempo(ctx: &ViewContext, track: &Track, version: &Version) -> Option<Option<f64>> {
     let shown = shown_for(ctx, track, version, None);
     let st = club_style_of(&shown)?;
@@ -1673,6 +1697,21 @@ mod tests {
     }
     fn names(ctx: &ViewContext, t: &Track) -> Vec<String> {
         shown_for(ctx, t, &t.rec.versions[0], None).into_iter().map(|s| s.name).collect()
+    }
+
+    #[test]
+    fn an_entry_out_of_its_style_fits_to_the_nearest_tempo() {
+        let c = ctx();
+        let t = track(120.0, 3, &["waltz"]);
+        let v = &t.rec.versions[0];
+        let at = |bpm: Option<f64>| SetlistEntry { version_id: Some("v".into()), overrides: Overrides { target_bpm: bpm, ..Default::default() }, ..Default::default() };
+        // As it plays (120 for a cross-step waltz, 105-125): it fits, nothing to change.
+        assert_eq!(entry_fit_tempo(&c, &t, v, &at(None)), None);
+        // Played too fast or too slow for it: the nearest tempo in its range.
+        let fast = entry_fit_tempo(&c, &t, v, &at(Some(124.9 + 6.0))).unwrap();
+        assert!(fast <= 125.0 && fast >= 120.0, "{fast}");
+        let slow = entry_fit_tempo(&c, &t, v, &at(Some(100.0))).unwrap();
+        assert!(slow >= 105.0 && slow <= 110.0, "{slow}");
     }
 
     #[test]

@@ -176,6 +176,12 @@ Pane {
                     MenuItem { text: qsTr("Duplicate"); onTriggered: Session.run("setlist_duplicate", { id: root.set.id, name: qsTr("%1 (copy)").arg(root.set.name) }) }
                     MenuItem { text: qsTr("Settings for This Set…"); onTriggered: chimeDialog.open() }
                     MenuItem {
+                        text: qsTr("Fit All Tempos to Their Styles")
+                        ToolTip.visible: hovered
+                        ToolTip.text: qsTr("E.g. after changing the club: songs playing outside their style's tempo get the nearest that fits; the others stay as they are")
+                        onTriggered: Session.fitTempos(root.v.rows.map(r => r.entry.id))
+                    }
+                    MenuItem {
                         text: qsTr("Reset Played / Skipped")
                         onTriggered: Session.confirm(qsTr("Mark every song in this set as not played?"), qsTr("Reset"), ok => { if (ok) Session.run("setlist_reset", { id: root.set.id }); })
                     }

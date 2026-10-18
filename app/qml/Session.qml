@@ -49,6 +49,15 @@ QtObject {
     property bool suggestByTempo: true
     /// The library lists versions you hid from it too.
     property bool showUnlisted: false
+    /// Fits set entries' tempos to their styles (those playing outside them),
+    /// and says how many changed.
+    function fitTempos(entryIds) {
+        return run("entries_fit_tempo", { ids: entryIds }).then(n => {
+            if (n === undefined) return;
+            toast(n ? qsTr("%n song(s) set to a tempo that fits its style", "", n) : qsTr("They already fit their styles' tempos"), "info");
+        });
+    }
+
     /// Hides versions from the library's lists, or shows them again.
     function setUnlisted(versionIds, value) {
         return Promise.all(versionIds.map(id => run("version_update", { id: id, patch: { unlisted: value } })));

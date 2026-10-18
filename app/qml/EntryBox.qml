@@ -148,6 +148,15 @@ GroupBox {
                     opacity: 0.6
                     text: root.view.playback && root.view.playback.target ? "→ " + Session.fmtBpm(root.view.playback.target) + " (" + ((root.view.playback.rate - 1) * 100).toFixed(1) + "%)" : ""
                 }
+                // Playing outside its style's tempo: the nearest that fits.
+                Button {
+                    visible: root.view.fitBpm !== null && root.view.fitBpm !== undefined
+                    flat: true
+                    text: qsTr("Fit")
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Play it at %1 BPM, the nearest tempo that fits its style").arg(Session.fmtBpm(root.view.fitBpm || 0))
+                    onClicked: root.override({ targetBpm: root.view.fitBpm })
+                }
             }
             FormLabel { visible: !root.pause; text: qsTr("Start / end") }
             RowLayout {
