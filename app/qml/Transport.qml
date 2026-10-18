@@ -37,10 +37,10 @@ Frame {
         return [{ kind: "song", from: now, to: end, estimated: false }]
             .concat(p.autoSteps.map(s => Object.assign({}, s, { from: s.from + end, to: s.to + end })));
     }
-    /// Lines of text the middle keeps room for beside the decks: six steps
-    /// (the song, pause, chime, announcement, pause, next song), the progress
-    /// bar, what's up next (three), two warnings.
-    readonly property int reservedLines: 12
+    /// Lines of text the middle keeps room for beside the decks: the steps
+    /// (wrapped: three), what's up next (two), two warnings (a line each); and
+    /// the progress bar.
+    readonly property int reservedLines: 7
     FontMetrics { id: lines; font: root.font }
     readonly property real nextAt: steps.length ? steps[steps.length - 1].to : 0
     readonly property bool estimated: steps.some(s => s.estimated)
@@ -50,6 +50,14 @@ Frame {
     function stepName(kind) {
         return { song: qsTr("The song"), pause: qsTr("Pause"), chime: qsTr("Chime"), announcement: qsTr("Announcement"), pauseAfter: qsTr("Pause") }[kind] || kind;
     }
+    /// Text a bit lighter than the rest (steps done), for styled text.
+    readonly property color dimText: Qt.tint(Theme.system.text, Qt.rgba(Theme.system.window.r, Theme.system.window.g, Theme.system.window.b, 1 - Theme.dim))
+    readonly property string stepsText: steps.map(st => {
+        const t = stepName(st.kind) + " " + stepTime(st);
+        return st.to <= now ? "<font color='" + dimText + "'><s>" + t + "</s></font>" : st.from <= now ? "<b>" + t + "</b>" : t;
+    }).concat(["<b><font color='" + (stops ? Theme.warn : Theme.ok) + "'>"
+        + (stops ? qsTr("Auto mode stops") : qsTr("Next song")) + " " + (estimated ? qsTr("in about %1") : qsTr("in %1")).arg(secs(nextAt - now))
+        + "</font></b>"]).join(" → ")
     function secs(ms) { return ms < 60000 ? qsTr("%1 s").arg(Math.max(0, Math.ceil(ms / 1000))) : Session.fmtTime(ms); }
     /// A step's time: done, left (the current one), or how long (estimated: about).
     function stepTime(st) {
@@ -133,7 +141,7 @@ Frame {
             Layout.preferredWidth: 0
             Layout.horizontalStretchFactor: root.compact ? 3 : 1
             clip: true
-            Layout.preferredHeight: root.compact ? implicitHeight : lines.height * root.reservedLines
+            Layout.preferredHeight: root.compact ? implicitHeight : lines.height * root.reservedLines + progress.implicitHeight
             Layout.alignment: Qt.AlignTop
             contentWidth: availableWidth
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
@@ -167,6 +175,7 @@ Frame {
                 }
                 // The pause so far (its room kept while a song plays).
                 ProgressBar {
+                    id: progress
                     visible: !root.compact
                     Layout.fillWidth: true
                     opacity: root.inGap ? 1 : 0
@@ -174,59 +183,24 @@ Frame {
                     value: !root.inGap ? 0 : root.steps.length ? Math.min(1, root.gapMs / Math.max(1, root.nextAt - root.p.gapStartedAt)) : Math.min(1, root.gapMs / root.gapTarget)
                 }
 
-                // Auto mode's steps to the next song: each with its time (done, left,
-                // or how long), then when the next song starts.
-                ColumnLayout {
-                    visible: root.steps.length > 0 && !root.compact
-                    Layout.fillWidth: true
-                    spacing: 0
-                    Repeater {
-                        model: root.steps
-                        delegate: RowLayout {
-                            id: step
-                            required property var modelData
-                            readonly property bool done: modelData.to <= root.now
-                            readonly property bool current: !done && modelData.from <= root.now
-                            Layout.fillWidth: true
-                            // Done: greyed and struck out (it stays, so the list keeps its length).
-                            opacity: done ? Theme.dim : 1
-                            Label { Layout.fillWidth: true; elide: Text.ElideRight; text: root.stepName(step.modelData.kind); font.bold: step.current; font.strikeout: step.done }
-                            Label { text: root.stepTime(step.modelData); font.bold: step.current; font.features: { "tnum": 1 } }
-                        }
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        readonly property color tint: root.stops ? Theme.warn : Theme.ok
-                        Label { Layout.fillWidth: true; elide: Text.ElideRight; text: root.stops ? qsTr("Auto mode stops") : qsTr("Next song"); color: parent.tint; font.bold: true }
-                        Label {
-                            color: parent.tint
-                            font.bold: true
-                            font.features: { "tnum": 1 }
-                            text: (root.estimated ? qsTr("in about %1") : qsTr("in %1")).arg(root.secs(root.nextAt - root.now))
-                        }
-                    }
-                }
-                // The same on one line (below the decks).
+                // Auto mode's steps to the next song, as one line (wrapping beside
+                // the decks): each with its time (done: struck out; the current
+                // one bold), then when the next song starts.
                 Label {
-                    visible: root.steps.length > 0 && root.compact
+                    visible: root.steps.length > 0
                     Layout.fillWidth: true
-                    elide: Text.ElideRight
+                    wrapMode: root.compact ? Text.NoWrap : Text.WordWrap
+                    elide: root.compact ? Text.ElideRight : Text.ElideNone
                     textFormat: Text.StyledText
-                    text: root.steps.map(st => {
-                        const t = root.stepName(st.kind) + " " + root.stepTime(st);
-                        return st.to <= root.now ? "<s>" + t + "</s>" : st.from <= root.now ? "<b>" + t + "</b>" : t;
-                    }).concat([root.stops ? "<font color='" + Theme.warn + "'>" + qsTr("auto mode stops") + "</font>"
-                        : "<font color='" + Theme.ok + "'>" + qsTr("next song") + "</font>"]).join(" → ")
+                    text: root.stepsText
                 }
 
                 // (Below the decks there are three lines: the status or steps, what's
-                // next, a warning. So "Up next" goes before the title there, and
-                // the progress bar and the artist line are left out.)
-                Label { visible: !root.compact; text: qsTr("Up next"); opacity: Theme.dim }
+                // next, a warning: the progress bar and the artist line are left out.)
                 RowLayout {
                     Layout.fillWidth: true
                     visible: !!root.next
-                    Label { visible: root.compact; text: qsTr("Up next:"); opacity: Theme.dim }
+                    Label { text: qsTr("Up next:"); opacity: Theme.dim }
                     // Its dance: the custom label (e.g. "Mixer"), else its styles.
                     Label {
                         visible: !!root.next && !root.next.isPause
@@ -273,13 +247,12 @@ Frame {
                         }
                         Label {
                             Layout.fillWidth: true
-                            wrapMode: root.compact ? Text.NoWrap : Text.WordWrap
+                            // One line each (the panel's room is fixed); all of it in the tooltip.
                             elide: Text.ElideRight
-                            maximumLineCount: 2
                             font.pointSize: Theme.smallPointSize
                             color: problem.modelData.stops ? Theme.warn : Theme.system.text
                             text: (root.compact && root.problems.length > 1 ? qsTr("(%1 more) ").arg(root.problems.length - 1) : "") + problem.modelData.text
-                            ToolTip.visible: problemHover.hovered && (truncated || root.problems.length > 1)
+                            ToolTip.visible: problemHover.hovered && (truncated || (root.compact && root.problems.length > 1))
                             ToolTip.text: root.compact ? root.problems.map(x => x.text).join("\n") : text
                             HoverHandler { id: problemHover }
                         }
