@@ -130,20 +130,29 @@ pub fn has_criteria(s: &Style) -> bool {
     !s.meter.is_empty() || s.tempo.is_some() || s.preferred.is_some() || s.length.is_some()
 }
 
-/// The detector tells only triple (3) from duple (4): a detected 4 may be 2/4.
+/// A meter's class: Orpheus knows a song as triple or duple (detected, or
+/// set by you), not 2/4 from 4/4 (nor 3/4 from 6/8), so a style's meter is
+/// compared by class.
+fn meter_class(m: u8) -> u8 {
+    match m {
+        3 | 6 => 3,
+        2 | 4 => 2,
+        other => other,
+    }
+}
+
 fn meter_fits(style: &Style, f: &SongFacts) -> Option<bool> {
     if style.meter.is_empty() {
         return Some(true);
     }
-    let m = f.meter?;
-    Some(style.meter.contains(&m) || (f.meter_detected && m == 4 && style.meter.contains(&2)))
+    let m = meter_class(f.meter?);
+    Some(style.meter.iter().any(|&s| meter_class(s) == m))
 }
 
 fn meter_name(m: u8) -> String {
-    match m {
-        3 => "triple (3)".into(),
-        2 => "2/4".into(),
-        4 => "4/4".into(),
+    match meter_class(m) {
+        3 => "triple (3/4, 6/8)".into(),
+        2 => "duple (2/4, 4/4)".into(),
         _ => format!("{m} beats a bar"),
     }
 }
@@ -162,7 +171,8 @@ pub fn assess(id: &str, style: &Style, f: &SongFacts, tc: TempoChange) -> Assess
     let (mut fit, mut rate, mut bpm) = (Fit::Unchecked, 1.0, None);
 
     if meter_fits(style, f) == Some(false) {
-        let theirs: Vec<String> = style.meter.iter().map(|&m| meter_name(m)).collect();
+        let mut theirs: Vec<String> = style.meter.iter().map(|&m| meter_name(m)).collect();
+        theirs.dedup();
         problems.push(format!("{} meter; {} is {}", meter_name(f.meter.unwrap_or_default()), style.name, theirs.join(" or ")));
     }
 
@@ -615,11 +625,16 @@ mod tests {
     }
 
     #[test]
-    fn a_detected_4_may_be_2_4() {
+    fn meters_are_compared_as_duple_or_triple() {
         let c = club();
+        // A 2/4 style takes duple songs, detected or set by you (stored as 4).
         assert!(assess("polka", &c.styles["polka"], &song(115.0, Some(4)), tc()).ok);
         let by_hand = SongFacts { meter_detected: false, ..song(115.0, Some(4)) };
-        assert!(!assess("polka", &c.styles["polka"], &by_hand, tc()).ok);
+        assert!(assess("polka", &c.styles["polka"], &by_hand, tc()).ok);
+        // Triple isn't duple.
+        let waltz = assess("polka", &c.styles["polka"], &song(115.0, Some(3)), tc());
+        assert!(!waltz.ok && waltz.problems[0].contains("triple"), "{:?}", waltz.problems);
+        assert!(!assess("lindy", &c.styles["lindy"], &SongFacts { length_secs: Some(200.0), ..song(140.0, Some(6)) }, tc()).ok);
         // Unknown meter: not ruled out.
         assert!(assess("polka", &c.styles["polka"], &song(115.0, None), tc()).ok);
     }
