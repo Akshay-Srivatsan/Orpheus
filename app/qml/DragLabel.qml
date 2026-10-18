@@ -29,15 +29,20 @@ Label {
     Drag.hotSpot.x: -offset
     Drag.hotSpot.y: -offset
 
+    /// Starts it now (a label shared by many rows is given their handler as
+    /// its drag starts: see LibraryTable).
+    function start() {
+        Session.dragging = true;
+        root.Drag.active = true;
+    }
+
     // It starts and ends with the handler (dropping where it ends). Views keep
     // their rows meanwhile (`Session.dragging`).
     Connections {
         target: root.handler
         function onActiveChanged() {
-            if (root.handler.active) {
-                Session.dragging = true;
-                root.Drag.active = true;
-            } else {
+            if (root.handler.active) root.start();
+            else {
                 root.Drag.drop();
                 Session.dragging = false;
             }

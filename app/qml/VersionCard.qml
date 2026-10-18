@@ -22,7 +22,9 @@ Frame {
     readonly property var v: view.version
     readonly property var a: view.audio
     /// The deck holding this version, if any (its position sets start/end/fade).
-    readonly property var deck: Session.decks.find(d => d && d.versionId === v.id && d.status !== "empty") || null
+    readonly property bool onDeck: !!Session.deckVersions[v.id]
+    /// Where that deck is now (read when asked: it moves many times a second).
+    function deckMs() { return Math.round(Session.decks[Session.deckVersions[v.id].deck].positionMs); }
 
     /// Something is said before it (in a set that doesn't say otherwise).
     readonly property bool speaks: v.announcement === undefined || v.announcement === null ? view.inherited.speaks : !!v.announcement.trim()
@@ -279,13 +281,13 @@ Frame {
                 RowLayout {
                     TimeField { value: root.v.cueInMs; placeholderText: qsTr("auto"); onEdited: ms => root.patch({ cueInMs: ms }) }
                     TimeField { value: root.v.cueOutMs; placeholderText: qsTr("auto"); onEdited: ms => root.patch({ cueOutMs: ms }) }
-                    Button { implicitWidth: implicitContentWidth + leftPadding + rightPadding; icon.color: palette.buttonText; enabled: !!root.deck; icon.source: Theme.icon("to-start"); ToolTip.visible: hovered; ToolTip.text: qsTr("Set start to the deck position"); onClicked: root.patch({ cueInMs: Math.round(root.deck.positionMs) }) }
-                    Button { implicitWidth: implicitContentWidth + leftPadding + rightPadding; icon.color: palette.buttonText; enabled: !!root.deck; icon.source: Theme.icon("to-end"); ToolTip.visible: hovered; ToolTip.text: qsTr("Set end to the deck position"); onClicked: root.patch({ cueOutMs: Math.round(root.deck.positionMs) }) }
+                    Button { implicitWidth: implicitContentWidth + leftPadding + rightPadding; icon.color: palette.buttonText; enabled: root.onDeck; icon.source: Theme.icon("to-start"); ToolTip.visible: hovered; ToolTip.text: qsTr("Set start to the deck position"); onClicked: root.patch({ cueInMs: root.deckMs() }) }
+                    Button { implicitWidth: implicitContentWidth + leftPadding + rightPadding; icon.color: palette.buttonText; enabled: root.onDeck; icon.source: Theme.icon("to-end"); ToolTip.visible: hovered; ToolTip.text: qsTr("Set end to the deck position"); onClicked: root.patch({ cueOutMs: root.deckMs() }) }
                 }
                 FormLabel { text: qsTr("Fade at") }
                 RowLayout {
                     TimeField { value: root.v.fadeOutMs; placeholderText: qsTr("none"); onEdited: ms => root.patch({ fadeOutMs: ms }) }
-                    Button { implicitWidth: implicitContentWidth + leftPadding + rightPadding; enabled: !!root.deck; text: qsTr("here"); onClicked: root.patch({ fadeOutMs: Math.round(root.deck.positionMs) }) }
+                    Button { implicitWidth: implicitContentWidth + leftPadding + rightPadding; enabled: root.onDeck; text: qsTr("here"); onClicked: root.patch({ fadeOutMs: root.deckMs() }) }
                 }
                 FormLabel { text: qsTr("Gain") }
                 RowLayout {

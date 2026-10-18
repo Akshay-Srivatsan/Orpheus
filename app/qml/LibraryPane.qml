@@ -97,9 +97,15 @@ Pane {
         function onLibraryChanged() { later.restart(); }
         function onSetlistChanged(id) { if (Session.view.kind === "setlist" || Session.view.kind === "history") later.restart(); }
         function onHistoryChanged() { if (Session.view.kind === "history") later.restart(); }
-        function onActiveClubChanged() { later.restart(); }
-        function onPerformChanged() { later.restart(); }
     }
+    // What the rows take from the performance and the club (songs played in
+    // the open set are dimmed; the club's styles): reload when that changes,
+    // not on every change to them (each action in the set changes them).
+    readonly property string performKey: !Session.perform ? "" : Session.perform.setlistId + "|" + (Session.set
+        ? Session.set.rows.filter(r => r.entry.status === "played" || r.entry.status === "playing").map(r => r.entry.versionId).join(",") : "")
+    readonly property string clubKey: JSON.stringify(Session.activeClub)
+    onPerformKeyChanged: later.restart()
+    onClubKeyChanged: later.restart()
     Component.onCompleted: reload()
     onVisibleChanged: if (visible && missed) later.restart()
 

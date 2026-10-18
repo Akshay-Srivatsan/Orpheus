@@ -20,7 +20,7 @@ ItemDelegate {
 
     readonly property var e: row.entry
     readonly property bool isSlot: !row.isPause && !row.trackId
-    readonly property bool playingNow: current && Session.decks[Session.liveDeck] && Session.decks[Session.liveDeck].status === "playing"
+    readonly property bool playingNow: current && Session.livePlaying
 
     signal picked(int modifiers)
     signal chosen()

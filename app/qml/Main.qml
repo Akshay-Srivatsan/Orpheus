@@ -242,7 +242,7 @@ ApplicationWindow {
         }
         FitMenu {
             title: qsTr("&Play")
-            Action { text: qsTr("&Play / Pause"); shortcut: "Space"; onTriggered: playerBar.playPause() }
+            Action { text: qsTr("&Play / Pause"); shortcut: "Space"; onTriggered: playerBar.item.playPause() }
             Action { text: qsTr("Play &Next"); shortcut: "Ctrl+Return"; onTriggered: Session.run("perform_play_next") }
             Action {
                 text: Session.upNextRow ? qsTr("&Skip “%1”").arg(Session.upNextRow.isPause ? qsTr("the pause") : Session.upNextRow.title || Session.upNextRow.label) : qsTr("&Skip the Up-Next Song")
@@ -286,13 +286,23 @@ ApplicationWindow {
 
     // ------------------------------------------------------------ layout
 
+    // Each face's live parts exist only while it's shown (they follow the
+    // decks many times a second).
     header: window.simple ? playerBar : topBar
-    PlayerBar { id: playerBar; visible: window.simple }
-    TopBar {
+    Loader {
+        id: playerBar
+        active: window.simple
+        visible: active
+        sourceComponent: PlayerBar {}
+    }
+    Loader {
         id: topBar
-        visible: !window.simple
-        onOpenProjector: (screen, fullscreen) => projector.showOn(screen, fullscreen)
-        onCloseProjector: projector.close()
+        active: !window.simple
+        visible: active
+        sourceComponent: TopBar {
+            onOpenProjector: (screen, fullscreen) => projector.showOn(screen, fullscreen)
+            onCloseProjector: projector.close()
+        }
     }
     footer: StatusBar {}
 
@@ -321,41 +331,14 @@ ApplicationWindow {
         spacing: 0
 
         // The decks, and the transport between them (below them when narrow).
-        GridLayout {
+        Loader {
+            active: !window.simple
             Layout.fillWidth: true
             // As tall as the decks need (the library gets the rest).
             Layout.fillHeight: false
             Layout.margins: Theme.spacing
             Layout.bottomMargin: 0
-            columns: window.wide ? 3 : window.single ? 1 : 2
-            columnSpacing: Theme.spacing
-            rowSpacing: Theme.spacing
-            Deck {
-                deck: 0
-                Layout.row: 0; Layout.column: 0
-                Layout.minimumWidth: Theme.deckMinimumWidth
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-            }
-            Transport {
-                compact: !window.wide
-                Layout.row: window.wide ? 0 : window.single ? 2 : 1
-                Layout.column: window.wide ? 1 : 0
-                Layout.columnSpan: window.wide || window.single ? 1 : 2
-                // A fixed width between the decks (its contents fit themselves to it).
-                Layout.preferredWidth: window.wide ? Theme.transportWidth : -1
-                Layout.minimumWidth: window.wide ? Theme.transportWidth : -1
-                Layout.maximumWidth: window.wide ? Theme.transportWidth : -1
-                Layout.fillWidth: !window.wide
-                Layout.fillHeight: true
-            }
-            Deck {
-                deck: 1
-                Layout.row: window.single ? 1 : 0; Layout.column: window.wide ? 2 : window.single ? 0 : 1
-                Layout.minimumWidth: Theme.deckMinimumWidth
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-            }
+            sourceComponent: decks
         }
 
         SplitView {
@@ -401,11 +384,46 @@ ApplicationWindow {
                         StackLayout {
                             anchors.fill: parent
                             currentIndex: Session.rightTab === "info" ? 1 : 0
-                            SetPanel { id: setPanel; onNewSetlist: newSetlistDialog.open() }
+                            SetPanel { id: setPanel; active: !window.simple; onNewSetlist: newSetlistDialog.open() }
                             Inspector {}
                         }
                     }
                 }
+            }
+        }
+    }
+
+    Component {
+        id: decks
+        GridLayout {
+            columns: window.wide ? 3 : window.single ? 1 : 2
+            columnSpacing: Theme.spacing
+            rowSpacing: Theme.spacing
+            Deck {
+                deck: 0
+                Layout.row: 0; Layout.column: 0
+                Layout.minimumWidth: Theme.deckMinimumWidth
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+            }
+            Transport {
+                compact: !window.wide
+                Layout.row: window.wide ? 0 : window.single ? 2 : 1
+                Layout.column: window.wide ? 1 : 0
+                Layout.columnSpan: window.wide || window.single ? 1 : 2
+                // A fixed width between the decks (its contents fit themselves to it).
+                Layout.preferredWidth: window.wide ? Theme.transportWidth : -1
+                Layout.minimumWidth: window.wide ? Theme.transportWidth : -1
+                Layout.maximumWidth: window.wide ? Theme.transportWidth : -1
+                Layout.fillWidth: !window.wide
+                Layout.fillHeight: true
+            }
+            Deck {
+                deck: 1
+                Layout.row: window.single ? 1 : 0; Layout.column: window.wide ? 2 : window.single ? 0 : 1
+                Layout.minimumWidth: Theme.deckMinimumWidth
+                Layout.fillWidth: true
+                Layout.fillHeight: true
             }
         }
     }

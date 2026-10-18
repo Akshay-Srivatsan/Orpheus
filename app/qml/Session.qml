@@ -44,6 +44,34 @@ QtObject {
     readonly property var myStyles: styles ? styles.styles : []
     readonly property var myTags: styles && styles.tags ? styles.tags : []
     readonly property int liveDeck: perform ? perform.liveDeck : 0
+    /// What's on the decks, for rows to show (changed only when it changes:
+    /// `decks` changes many times a second while a song plays, and every row
+    /// binding to it would be worked out again each time). versionId →
+    /// { deck, audible }.
+    property var deckVersions: ({})
+    /// The deck the room hears is playing.
+    property bool livePlaying: false
+    /// Each deck is heard; a set's song is heard.
+    property var audibleDecks: [false, false]
+    property bool setSongAudible: false
+    property string deckKey: ""
+    function updateDeckMaps() {
+        const key = decks.map(d => d && d.status !== "empty" ? d.versionId + ":" + d.audible + ":" + d.entryId : "").join("|");
+        if (key !== deckKey) {
+            deckKey = key;
+            const m = {};
+            decks.forEach((d, i) => {
+                if (!d || !d.versionId || d.status === "empty") return;
+                const had = m[d.versionId];
+                m[d.versionId] = { deck: had ? had.deck : i, audible: d.audible || (!!had && had.audible) };
+            });
+            deckVersions = m;
+            audibleDecks = decks.map(d => !!d && d.audible);
+            setSongAudible = decks.some(d => d && d.audible && !!d.entryId);
+        }
+        const lp = !!decks[liveDeck] && decks[liveDeck].status === "playing";
+        if (lp !== livePlaying) livePlaying = lp;
+    }
     /// Where songs load: the engine's choice (deck A at the start).
     readonly property int freeDeck: perform ? perform.freeDeck : 0
 
@@ -279,12 +307,22 @@ QtObject {
     property bool setMissed: false
     onDraggingChanged: if (!dragging && setMissed) refreshSet()
 
-    function refreshSet() {
+    /// One change sends several events (the set, the performance, the
+    /// library): they're gathered into one reload of the set.
+    function refreshSet() { setRefresh.restart(); }
+    readonly property Timer setRefresh: Timer { interval: Theme.setRefreshMs; onTriggered: session.loadSet() }
+    /// Replies to older loads are dropped (only the latest is shown).
+    property int setLoads: 0
+    function loadSet() {
         setMissed = false;
         const id = perform ? perform.setlistId : null;
         if (dragging) { setMissed = true; return; }
+        const n = ++setLoads;
         if (!id) { set = null; return; }
-        Backend.call("set_view", { id: id }).then(v => { if (dragging) setMissed = true; else set = v; }, () => set = null);
+        Backend.call("set_view", { id: id }).then(v => {
+            if (n !== setLoads) return;
+            if (dragging) setMissed = true; else set = v;
+        }, () => { if (n === setLoads) set = null; });
     }
     function refreshClub() { Backend.call("active_club").then(v => activeClub = v); }
     function refreshMidi() { Backend.call("midi_info").then(m => midiPorts = m.ports, () => {}); }
@@ -326,7 +364,7 @@ QtObject {
         target: Backend
         function onEvent(name, p) {
             switch (name) {
-            case "deck-state": session.decks = p; break;
+            case "deck-state": session.decks = p; session.updateDeckMaps(); break;
             case "levels": session.levels = p; break;
             case "perform-state": session.perform = p; session.refreshSet(); session.refreshClub(); break;
             case "library-changed": session.libraryChanged(p); session.refreshSet(); session.refreshStyles(); break;

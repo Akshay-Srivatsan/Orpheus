@@ -46,6 +46,7 @@ SplitView {
                 id: setPanel
                 anchors.fill: parent
                 simple: true
+                active: Session.simple
                 onNewSetlist: root.newSet()
             }
         }

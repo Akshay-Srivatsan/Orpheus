@@ -15,6 +15,31 @@ Pane {
     property bool simple: false
 
     readonly property var v: Session.set
+    /// This panel's interface is the one shown: only then does it make rows.
+    property bool active: true
+
+    // The list holds the entries' ids, changed in place as the set changes
+    // (rows keep their delegates, and the list where it's scrolled to); each
+    // row reads its data from `rowById`.
+    property var rowById: ({})
+    ListModel { id: rowKeys }
+    onVChanged: syncRows()
+    function syncRows() {
+        const rows = v ? v.rows : [];
+        const m = {};
+        for (const r of rows) m[r.entry.id] = r;
+        // Gone first (their rows still read the old data), then the new data, then order.
+        for (let i = rowKeys.count - 1; i >= 0; i--) if (!m[rowKeys.get(i).key]) rowKeys.remove(i);
+        rowById = m;
+        for (let i = 0; i < rows.length; i++) {
+            const k = rows[i].entry.id;
+            if (i < rowKeys.count && rowKeys.get(i).key === k) continue;
+            let j = -1;
+            for (let q = i + 1; q < rowKeys.count; q++) if (rowKeys.get(q).key === k) { j = q; break; }
+            if (j >= 0) rowKeys.move(j, i, 1);
+            else rowKeys.insert(i, { key: k });
+        }
+    }
     readonly property var set: v ? v.setlist : null
     readonly property var p: Session.perform
     property bool showCheck: false
@@ -341,23 +366,34 @@ Pane {
                 anchors.fill: parent
                 clip: true
                 focus: true
-                model: root.v ? root.v.rows : []
+                model: root.active ? rowKeys : null
                 ScrollBar.vertical: ScrollBar {}
                 property int dropIndex: -1
 
-                // Keep what's playing in view.
+                // Bring what's playing into view when it changes (not on every
+                // update: you may have scrolled away to plan).
+                property string shownPlaying: ""
                 Connections {
                     target: root
                     function onPChanged() {
-                        if (!root.p || !root.v) return;
+                        if (!root.p || !root.v || root.p.currentEntryId === entries.shownPlaying) return;
+                        entries.shownPlaying = root.p.currentEntryId || "";
                         const i = root.v.rows.findIndex(r => r.entry.id === root.p.currentEntryId);
                         if (i >= 0) entries.positionViewAtIndex(i, ListView.Contain);
                     }
                 }
 
                 delegate: SetEntry {
-                    required property var modelData
+                    required property string key
                     required property int index
+                    // Its data: updated as the set changes; a row being removed
+                    // keeps its last until it goes.
+                    property var modelData: root.rowById[key]
+                    Component.onCompleted: modelData = root.rowById[key]
+                    Connections {
+                        target: root
+                        function onRowByIdChanged() { const r = root.rowById[key]; if (r) modelData = r; }
+                    }
                     width: entries.width
                     row: modelData
                     rowIndex: index

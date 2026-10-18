@@ -74,6 +74,8 @@ QtObject {
     function icon(name) { return "qrc:/icons/" + name + ".svg"; }
 
     /// Toasts stay this long (ms): errors longer, and longer still with a button.
+    /// Events within this long (ms) of each other reload the set once.
+    readonly property int setRefreshMs: 15
     readonly property int toastMs: 3500
     readonly property int toastErrorMs: 6000
     readonly property int toastActionMs: 10000

@@ -1006,6 +1006,22 @@ impl Store {
         v
     }
 
+    /// The songs owning these versions (each once): what a set needs, without
+    /// making the whole library.
+    pub fn tracks_of_versions<'a>(&self, version_ids: impl IntoIterator<Item = &'a str>) -> Vec<Track> {
+        let inner = self.inner.read();
+        let stats = inner.play_stats();
+        let users = inner.recording_users();
+        let mut seen = std::collections::HashSet::new();
+        version_ids
+            .into_iter()
+            .filter_map(|v| inner.version_owner.get(v))
+            .filter(|tid| seen.insert(tid.as_str()))
+            .filter_map(|tid| inner.tracks.get(tid))
+            .map(|t| inner.to_track(t, &stats, &users))
+            .collect()
+    }
+
     pub fn track(&self, id: &str) -> Result<Track> {
         let inner = self.inner.read();
         let id = inner.canonical(id);

@@ -203,7 +203,7 @@ Pane {
                                     MenuSeparator {}
                                     MenuItem {
                                         text: qsTr("Delete Setlist…")
-                                        enabled: !(setRow.isOpen && Session.decks.some(d => d && d.audible && !!d.entryId))
+                                        enabled: !(setRow.isOpen && Session.setSongAudible)
                                         onTriggered: Session.confirm(qsTr("Delete the setlist “%1” (%2 entries)? The songs stay in your library.").arg(setRow.modelData.name).arg(setRow.modelData.entryCount), qsTr("Delete"),
                                             ok => {
                                                 if (!ok) return;

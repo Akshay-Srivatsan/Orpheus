@@ -21,6 +21,20 @@ Control {
     /// Paused partway through (the room heard it, and the pause hasn't started).
     readonly property bool pausedMidSong: !!d && d.loaded && d.status === "paused" && !!p && !p.gapStartedAt && d.elapsedMs > 0
     readonly property real lengthMs: song ? d.elapsedMs + d.remainingMs : 0
+    /// The song shown: the live one while the room hears it (or it's paused
+    /// partway); once it has faded or ended, the next one (from its deck if
+    /// it's loaded, else from the set).
+    readonly property bool showingLive: !!song && (audible || pausedMidSong)
+    readonly property var nextRow: plan.next && !plan.next.isPause && plan.next.trackId ? plan.next : null
+    readonly property var shown: {
+        const k = showingLive ? d : plan.nextDeck && plan.nextDeck.loaded && plan.nextDeck.song ? plan.nextDeck : null;
+        if (k) return { title: k.song.title, artist: k.song.artist, styles: k.song.styles, color: k.song.color, meter: k.song.meter, bpm: k.bpm,
+            recordingId: k.recordingId || "", trackId: k.trackId, entryId: k.entryId, elapsedMs: k.elapsedMs, remainingMs: k.remainingMs };
+        const r = nextRow;
+        if (r) return { title: r.title, artist: r.artist, styles: r.styles, color: r.styles.length ? r.styles[0].color : Theme.neutral, meter: r.meter, bpm: r.bpm,
+            recordingId: r.recordingId || "", trackId: r.trackId, entryId: r.entry.id, elapsedMs: 0, remainingMs: r.durationMs };
+        return null;
+    }
     /// Text goes white over the darkened artwork (else the window's own colours).
     readonly property bool overArt: art.status === Image.Ready
     readonly property color fg: overArt ? "white" : Theme.system.text
@@ -29,14 +43,11 @@ Control {
         if (audible || pausedMidSong) Session.run("deck_action", { deck: p.liveDeck, action: "toggle" });
         else plan.playNext();
     }
-    /// The song on air is protected from seeking (Settings → General), as on a deck.
+    /// Dragging the position is deliberate, so it seeks even the song on air
+    /// (the protection is against a stray jog wheel or cue button).
     function seek(fraction) {
-        if (!song) return;
-        if (d.protected) {
-            Session.toast(qsTr("The song is playing to the room: seeking is off while it plays (Settings → General → Protect the on-air deck)."), "info");
-            return;
-        }
-        Session.run("deck_scrub", { deck: p.liveDeck, ms: Math.round(fraction * lengthMs), force: false });
+        if (!showingLive) return;
+        Session.run("deck_seek", { deck: p.liveDeck, ms: Math.round(fraction * lengthMs), force: true });
     }
 
     contentItem: ColumnLayout {
@@ -50,7 +61,7 @@ Control {
 
             Rectangle {
                 anchors.fill: parent
-                color: root.song ? Qt.tint(Theme.system.window, Qt.alpha(root.song.color, 0.18)) : Theme.system.window
+                color: root.shown ? Qt.tint(Theme.system.window, Qt.alpha(root.shown.color, 0.18)) : Theme.system.window
             }
             Image {
                 id: art
@@ -58,7 +69,7 @@ Control {
                 visible: false
                 fillMode: Image.PreserveAspectCrop
                 property string forRecording: ""
-                readonly property string want: root.d && root.d.loaded ? root.d.recordingId || "" : ""
+                readonly property string want: root.shown ? root.shown.recordingId : ""
                 onWantChanged: {
                     if (want === forRecording) return;
                     forRecording = want;
@@ -89,7 +100,7 @@ Control {
                     Layout.preferredWidth: Theme.nowPlayingArtSize
                     Layout.preferredHeight: Theme.nowPlayingArtSize
                     radius: 4
-                    color: root.song ? Qt.alpha(root.song.color, 0.3) : Theme.system.alternateBase
+                    color: root.shown ? Qt.alpha(root.shown.color, 0.3) : Theme.system.alternateBase
                     border.color: Theme.system.mid
                     Image {
                         anchors.fill: parent
@@ -110,14 +121,23 @@ Control {
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 2
+                    // Whether it's playing, paused, or the one to come.
+                    Label {
+                        visible: !!root.shown
+                        text: !root.showingLive ? qsTr("Up next") : root.audible ? qsTr("Now playing") : qsTr("Paused")
+                        font.pointSize: Theme.smallPointSize
+                        font.capitalization: Font.AllUppercase
+                        color: root.fg
+                        opacity: Theme.dim
+                    }
                     Label {
                         Layout.fillWidth: true
                         elide: Text.ElideRight
                         font.pointSize: Theme.nowPlayingTitlePointSize
                         font.bold: true
                         color: root.fg
-                        text: root.song ? root.song.title : qsTr("Nothing playing")
-                        opacity: root.song ? 1 : Theme.dim
+                        text: root.shown ? root.shown.title : qsTr("Nothing playing")
+                        opacity: root.shown ? 1 : Theme.dim
                     }
                     Label {
                         Layout.fillWidth: true
@@ -126,17 +146,17 @@ Control {
                         visible: !!text
                         color: root.fg
                         opacity: Theme.dim
-                        text: root.song ? root.song.artist : Session.set ? qsTr("Press ▶ to start “%1”").arg(Session.set.setlist.name) : qsTr("Open or make a set to play it")
+                        text: root.shown ? root.shown.artist : Session.set ? qsTr("Press ▶ to start “%1”").arg(Session.set.setlist.name) : qsTr("Open or make a set to play it")
                     }
                     // Its dance, tempo and meter.
                     Label {
                         Layout.fillWidth: true
-                        visible: !!root.song
+                        visible: !!root.shown
                         elide: Text.ElideRight
                         textFormat: Text.StyledText
                         color: root.fg
-                        text: !root.song ? "" : [root.song.styles.map(s => "<font color='" + Theme.readable(s.color, root.overArt || undefined) + "'><b>" + s.name + "</b></font>").join(" / "),
-                            root.d.bpm ? Session.fmtBpm(root.d.bpm) + " BPM" : "", Session.meterName(root.song.meter)].filter(x => x).join("  ·  ")
+                        text: !root.shown ? "" : [root.shown.styles.map(s => "<font color='" + Theme.readable(s.color, root.overArt || undefined) + "'><b>" + s.name + "</b></font>").join(" / "),
+                            root.shown.bpm ? Session.fmtBpm(root.shown.bpm) + " BPM" : "", Session.meterName(root.shown.meter)].filter(x => x).join("  ·  ")
                     }
                 }
                 // What happens next: auto mode's steps (else what's up next), and warnings.
@@ -147,6 +167,7 @@ Control {
                     Layout.alignment: Qt.AlignTop
                     spacing: 2
                     Label {
+                        visible: plan.steps.length > 0 || root.showingLive
                         text: plan.steps.length ? qsTr("Next") : qsTr("Up next")
                         font.pointSize: Theme.smallPointSize
                         font.capitalization: Font.AllUppercase
@@ -155,6 +176,8 @@ Control {
                     }
                     Label {
                         Layout.fillWidth: true
+                        // The song shown is the next one: not again here.
+                        visible: plan.steps.length > 0 || root.showingLive
                         elide: Text.ElideRight
                         textFormat: Text.StyledText
                         color: root.fg
@@ -216,17 +239,17 @@ Control {
                     ToolTip.text: qsTr("Fade the song out")
                     onClicked: Session.run("deck_action", { deck: root.p.liveDeck, action: "fadeOut" })
                 }
-                Label { text: Session.fmtTime(root.song ? root.d.elapsedMs : 0); opacity: Theme.dim; font.features: { "tnum": 1 } }
+                Label { text: Session.fmtTime(root.shown ? root.shown.elapsedMs : 0); opacity: Theme.dim; font.features: { "tnum": 1 } }
                 Slider {
                     id: position
                     Layout.fillWidth: true
-                    enabled: !!root.song
+                    enabled: root.showingLive
                     from: 0; to: 1
                     // Follows the song, except while you drag it.
-                    Binding on value { when: !position.pressed; value: root.lengthMs > 0 ? root.d.elapsedMs / root.lengthMs : 0; restoreMode: Binding.RestoreNone }
+                    Binding on value { when: !position.pressed; value: root.showingLive && root.lengthMs > 0 ? root.d.elapsedMs / root.lengthMs : 0; restoreMode: Binding.RestoreNone }
                     onPressedChanged: if (!pressed) root.seek(value)
                 }
-                Label { text: root.song ? "−" + Session.fmtTime(root.d.remainingMs) : Session.fmtTime(0); opacity: Theme.dim; font.features: { "tnum": 1 } }
+                Label { text: root.shown ? "−" + Session.fmtTime(root.shown.remainingMs) : Session.fmtTime(0); opacity: Theme.dim; font.features: { "tnum": 1 } }
                 ToolSeparator {}
                 ToolButton {
                     icon.color: palette.buttonText
@@ -243,10 +266,10 @@ Control {
                 ToolButton {
                     icon.color: palette.buttonText
                     icon.source: Theme.icon("info")
-                    enabled: !!root.song && !!root.d.trackId
+                    enabled: !!root.shown && !!root.shown.trackId
                     ToolTip.visible: hovered
-                    ToolTip.text: qsTr("Song Info (the song playing)")
-                    onClicked: Session.showInfo(root.d.trackId, root.d.entryId)
+                    ToolTip.text: qsTr("Song Info (the song shown)")
+                    onClicked: Session.showInfo(root.shown.trackId, root.shown.entryId)
                 }
                 ToolSeparator {}
                 // The room volume (slider positions are square roots of the gain).

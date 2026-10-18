@@ -79,8 +79,8 @@ FitMenu {
         model: Session.simple ? 0 : 1
         delegate: FitMenu {
             title: qsTr("Load onto")
-            MenuItem { text: qsTr("Deck A"); enabled: !(Session.decks[0] && Session.decks[0].audible); onTriggered: Session.loadDeck(0, root.ids[0], null) }
-            MenuItem { text: qsTr("Deck B"); enabled: !(Session.decks[1] && Session.decks[1].audible); onTriggered: Session.loadDeck(1, root.ids[0], null) }
+            MenuItem { text: qsTr("Deck A"); enabled: !Session.audibleDecks[0]; onTriggered: Session.loadDeck(0, root.ids[0], null) }
+            MenuItem { text: qsTr("Deck B"); enabled: !Session.audibleDecks[1]; onTriggered: Session.loadDeck(1, root.ids[0], null) }
         }
         // Just after Preview (the items before it can change in number).
         onObjectAdded: (i, o) => {

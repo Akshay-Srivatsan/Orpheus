@@ -1806,7 +1806,8 @@ pub fn library_view(app: &Arc<App>, query: crate::views::LibraryQuery) -> Res<cr
 pub fn set_view(app: &Arc<App>, id: Id) -> Res<crate::views::SetView> {
     let set = app.store.setlist(&id).map_err(ae)?;
     let ctx = app.view_context(set.club.clone());
-    let mut view = crate::views::set_view(&ctx, &set, &app.store.all_tracks(), app.gap_seconds_for(Some(&set)));
+    let tracks = app.store.tracks_of_versions(set.entries.iter().filter_map(|e| e.version_id.as_deref()));
+    let mut view = crate::views::set_view(&ctx, &set, &tracks, app.gap_seconds_for(Some(&set)));
     view.club = set.club.as_ref().and_then(|r| club_summary_of(app, r));
     view.default_pause_secs = app.gap_seconds_for(Some(&Setlist { pause_secs: None, ..set.clone() }));
     Ok(view)

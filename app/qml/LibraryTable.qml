@@ -427,8 +427,8 @@ FocusScope {
                     required property int column
                     readonly property string key: root.keys[column]
                     readonly property var r: model.display !== undefined ? root.flat[model.display] : null
-                    readonly property bool onDeck: !!r && Session.decks.some(d => d && d.versionId === r.versionId)
-                    readonly property bool audible: !!r && Session.decks.some(d => d && d.versionId === r.versionId && d.audible)
+                    readonly property bool onDeck: !!r && !!Session.deckVersions[r.versionId]
+                    readonly property bool audible: onDeck && Session.deckVersions[r.versionId].audible
                     /// Dimmed: played in the open set, suggested by tempo, missing, or hidden from the library.
                     readonly property bool dim: !!r && (r.playedInSet || r.suggested || r.availability === "missing" || r.unlisted)
                     // Selected rows only (TreeViewDelegate also highlights the current
@@ -573,18 +573,26 @@ FocusScope {
                         acceptedButtons: Qt.RightButton
                         onTapped: root.openMenu(cell.row, cell.r, null)
                     }
-                    // Drag the selected songs (or this one) to the set, a deck, a crate or a style.
-                    DragHandler { id: dragging; target: null }
-                    DragLabel {
-                        readonly property var ids: cell.r && Session.selectedSet[cell.r.versionId] ? Session.selected : cell.r ? [cell.r.versionId] : []
-                        handler: dragging
-                        text: ids.length > 1 ? qsTr("%n songs", "", ids.length) : cell.r ? cell.r.title : ""
-                        payload: ({ "application/x-orpheus-versions": JSON.stringify(ids) })
+                    // Drag the selected songs (or this one) to the set, a deck, a crate or
+                    // a style (with the table's one label: not one made for every cell).
+                    DragHandler {
+                        id: dragging
+                        target: null
+                        onActiveChanged: {
+                            if (!active || !cell.r) return;
+                            const ids = Session.selectedSet[cell.r.versionId] ? Session.selected : [cell.r.versionId];
+                            songDrag.text = ids.length > 1 ? qsTr("%n songs", "", ids.length) : cell.r.title;
+                            songDrag.payload = { "application/x-orpheus-versions": JSON.stringify(ids) };
+                            songDrag.handler = dragging;
+                            songDrag.start();
+                        }
                     }
                 }
             }
         }
     }
+
+    DragLabel { id: songDrag }
 
     // When nothing's here, why.
     ColumnLayout {
