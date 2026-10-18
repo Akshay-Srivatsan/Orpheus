@@ -24,9 +24,32 @@ Frame {
     readonly property real gapMs: inGap ? now - p.gapStartedAt : 0
     /// Expected pause: the general pause, or with announcements both pauses and the speech.
     readonly property real gapTarget: p && p.autoAdvanceAt && p.gapStartedAt ? Math.max(1000, p.autoAdvanceAt - p.gapStartedAt) : (p ? p.gapSeconds : 8) * 1000
-    readonly property var autoIn: p && p.autoAdvanceAt && inGap ? Math.max(0, p.autoAdvanceAt - now) : null
 
-    Timer { interval: 200; running: root.inGap; repeat: true; onTriggered: root.now = Date.now() }
+    /// The deck the room hears (its song's time left starts the steps while it plays).
+    readonly property var liveDeck: p ? Session.decks[p.liveDeck] : null
+    /// Auto mode's way to the next song, in order: { kind, from, to, estimated }
+    /// (epoch ms), the song playing first (see the engine's `AutoStep`).
+    readonly property var steps: {
+        if (!p || !p.autoSteps || !p.autoSteps.length) return [];
+        if (!p.stepsAfterSong) return p.autoSteps;
+        const end = now + (liveDeck && liveDeck.audible ? liveDeck.remainingMs : 0);
+        return [{ kind: "song", from: now, to: end, estimated: false }]
+            .concat(p.autoSteps.map(s => Object.assign({}, s, { from: s.from + end, to: s.to + end })));
+    }
+    readonly property real nextAt: steps.length ? steps[steps.length - 1].to : 0
+    readonly property bool estimated: steps.some(s => s.estimated)
+    function stepName(kind) {
+        return { song: qsTr("This song"), pause: qsTr("Pause"), chime: qsTr("Chime"), announcement: qsTr("Announcement"), pauseAfter: qsTr("Pause") }[kind] || kind;
+    }
+    function secs(ms) { return ms < 60000 ? qsTr("%1 s").arg(Math.max(0, Math.ceil(ms / 1000))) : Session.fmtTime(ms); }
+    /// A step's time: done, left (the current one), or how long (estimated: about).
+    function stepTime(st) {
+        if (st.to <= now) return "✓";
+        if (st.from <= now) return qsTr("%1 left").arg(secs(st.to - now));
+        return (st.estimated ? qsTr("about %1") : "%1").arg(secs(st.to - st.from));
+    }
+
+    Timer { interval: 200; running: root.inGap || root.steps.length > 0; repeat: true; onTriggered: root.now = Date.now() }
 
     function playNext() {
         Session.run("perform_play_next").then(r => {
@@ -103,27 +126,73 @@ Frame {
             Layout.alignment: Qt.AlignTop
             spacing: 2
 
+            // The pause, without auto mode's steps (Play Next starts the next song,
+            // or auto mode waits for it).
             RowLayout {
-                visible: root.inGap
+                visible: root.inGap && !root.steps.length
                 Label { text: Session.fmtTime(root.gapMs); font.bold: true; color: root.gapMs > root.gapTarget ? Theme.warn : Theme.system.text; font.features: { "tnum": 1 } }
                 Label {
                     Layout.fillWidth: true
                     elide: Text.ElideRight
-                    color: root.p && root.p.autoPhase === "held" ? Theme.warn : root.autoIn !== null || (root.p && root.p.autoPhase === "announcing") ? Theme.ok : Theme.system.text
-                    text: !root.p ? "" : root.p.autoPhase === "announcing" ? qsTr("announcing…")
-                        : root.p.autoPhase === "held" ? qsTr("waits for Play Next")
-                        : root.autoIn !== null ? qsTr("next song in %1 s").arg(Math.ceil(root.autoIn / 1000))
-                        : qsTr("pause · target %1 s").arg(Math.round(root.gapTarget / 1000))
+                    color: root.p && root.p.autoPhase === "held" ? Theme.warn : Theme.system.text
+                    text: root.p && root.p.autoPhase === "held" ? qsTr("waits for Play Next") : qsTr("pause · target %1 s").arg(Math.round(root.gapTarget / 1000))
                 }
             }
-            ProgressBar { visible: root.inGap; Layout.fillWidth: true; from: 0; to: 1; value: Math.min(1, root.gapMs / root.gapTarget) }
+            ProgressBar {
+                visible: root.inGap
+                Layout.fillWidth: true
+                from: 0; to: 1
+                value: root.steps.length ? Math.min(1, root.gapMs / Math.max(1, root.nextAt - root.p.gapStartedAt)) : Math.min(1, root.gapMs / root.gapTarget)
+            }
             Label {
-                visible: root.playing && !root.inGap && !root.compact
+                visible: root.playing && !root.inGap && !root.compact && !root.steps.length
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 opacity: Theme.dim
                 text: !root.p ? "" : root.p.autoAdvance ? (root.p.autoPhase === "held" ? qsTr("Auto mode stops before the next song.") : qsTr("Auto mode starts the next song after the pause."))
                     : qsTr("The next song starts when you press Play Next.")
+            }
+
+            // Auto mode's steps to the next song: each with its time (done, left,
+            // or how long), then when the next song starts.
+            ColumnLayout {
+                visible: root.steps.length > 0 && !root.compact
+                Layout.fillWidth: true
+                spacing: 0
+                Repeater {
+                    model: root.steps
+                    delegate: RowLayout {
+                        id: step
+                        required property var modelData
+                        readonly property bool done: modelData.to <= root.now
+                        readonly property bool current: !done && modelData.from <= root.now
+                        Layout.fillWidth: true
+                        opacity: done ? Theme.dim : 1
+                        Label { Layout.fillWidth: true; elide: Text.ElideRight; text: root.stepName(step.modelData.kind); font.bold: step.current }
+                        Label { text: root.stepTime(step.modelData); font.bold: step.current; font.features: { "tnum": 1 } }
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label { Layout.fillWidth: true; elide: Text.ElideRight; text: qsTr("Next song"); color: Theme.ok; font.bold: true }
+                    Label {
+                        color: Theme.ok
+                        font.bold: true
+                        font.features: { "tnum": 1 }
+                        text: (root.estimated ? qsTr("in about %1") : qsTr("in %1")).arg(root.secs(root.nextAt - root.now))
+                    }
+                }
+            }
+            // The same on one line (below the decks).
+            Label {
+                visible: root.steps.length > 0 && root.compact
+                Layout.fillWidth: true
+                elide: Text.ElideRight
+                textFormat: Text.StyledText
+                text: root.steps.filter(st => st.to > root.now).map(st => {
+                    const t = root.stepName(st.kind) + " " + root.stepTime(st);
+                    return st.from <= root.now ? "<b>" + t + "</b>" : t;
+                }).concat(["<font color='" + Theme.ok + "'>" + qsTr("next song") + "</font>"]).join(" → ")
             }
 
             Label { text: qsTr("Up next"); opacity: Theme.dim }

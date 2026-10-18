@@ -29,8 +29,32 @@ pub enum PendingNext {
     Deck(usize),
 }
 
-/// A synthesized announcement: samples and rate, or the error.
-pub type Clip = std::result::Result<(Arc<Vec<f32>>, u32), String>;
+/// A synthesized announcement: its samples (the chime first) and rate, and
+/// how long its chime is (with the silence after it).
+pub struct Prepared {
+    pub samples: Arc<Vec<f32>>,
+    pub rate: u32,
+    pub chime_frames: usize,
+}
+
+impl Prepared {
+    fn ms(&self, frames: usize) -> i64 {
+        (frames as f64 * 1000.0 / self.rate.max(1) as f64) as i64
+    }
+    pub fn chime_ms(&self) -> i64 {
+        self.ms(self.chime_frames)
+    }
+    pub fn speech_ms(&self) -> i64 {
+        self.ms(self.samples.len() - self.chime_frames)
+    }
+}
+
+/// A prepared announcement, or why there is none.
+pub type Clip = std::result::Result<Prepared, String>;
+
+/// Speech, roughly (characters per second at normal speed): to estimate an
+/// announcement's length until it's synthesized.
+const SPEECH_CHARS_PER_SEC: f64 = 14.0;
 
 /// Crossfader position where the room hears both decks fully.
 pub const CENTER: f64 = 0.5;
@@ -51,10 +75,12 @@ pub const ERROR_FLASH: Duration = Duration::from_millis(1200);
 pub enum AutoPhase {
     #[default]
     Idle,
-    /// Synthesizing the announcement for `entry` (started when the pause begins).
-    Preparing { entry: Id, clip: Arc<Mutex<Option<Clip>>> },
-    /// Speaking until the given time (epoch ms).
-    Speaking { entry: Id, until: i64 },
+    /// Synthesizing the announcement for `entry` (started when the pause
+    /// begins); how long its chime and speech will be, roughly (ms).
+    Preparing { entry: Id, clip: Arc<Mutex<Option<Clip>>>, estimate: (i64, i64) },
+    /// Chiming and speaking from `started` until `until` (epoch ms); the
+    /// first `chime_ms` are the chime.
+    Speaking { entry: Id, started: i64, chime_ms: i64, until: i64 },
     /// The announcement finished (or failed) at the given time.
     Announced { entry: Id, at: i64 },
 }
@@ -122,6 +148,24 @@ pub struct PerformState {
     pub free_deck: usize,
     /// The chime the next entry would have (whether or not it's on).
     pub next_chime: Option<Id>,
+    /// Auto mode's steps to the next entry, in order (none unless it's on
+    /// its way there).
+    pub auto_steps: Vec<AutoStep>,
+    /// The steps' times are from the end of the song playing (ms after it).
+    pub steps_after_song: bool,
+}
+
+/// A step of the pause before the next entry in auto mode: `pause`, `chime`,
+/// `announcement` or `pauseAfter`, from and to when (epoch ms); a chime's or
+/// announcement's length is `estimated` until it's ready (and so are the
+/// times of the steps after it).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoStep {
+    pub kind: String,
+    pub from: i64,
+    pub to: i64,
+    pub estimated: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -837,8 +881,9 @@ impl App {
         log::info!("announcement: {text}");
         move || {
             let (speech, rate) = tts.synthesize(&cfg, &text, &prons).map_err(|e| format!("{e:#}"))?;
-            let Some(samples) = chime.and_then(|x| Self::chime_samples(&handle, &x, rate)) else { return Ok((speech, rate)) };
-            Ok((Arc::new(crate::chime::before(samples, &speech, rate)), rate))
+            let Some(chime) = chime.and_then(|x| Self::chime_samples(&handle, &x, rate)) else { return Ok(Prepared { samples: speech, rate, chime_frames: 0 }) };
+            let samples = crate::chime::before(chime, &speech, rate);
+            Ok(Prepared { chime_frames: samples.len() - speech.len(), samples: Arc::new(samples), rate })
         }
     }
 
@@ -849,8 +894,8 @@ impl App {
         let handle = self.handle.clone();
         let job = self.clip_job(text, chime);
         std::thread::spawn(move || match job() {
-            Ok((samples, rate)) => {
-                announcer.play(&samples, rate, volume);
+            Ok(p) => {
+                announcer.play(&p.samples, p.rate, volume);
             }
             Err(e) => emit(&handle, "toast", format!("Announcement: {e}")),
         });
@@ -926,7 +971,9 @@ impl App {
             AutoPhase::Idle => {
                 // Prepare the announcement while the first pause runs.
                 let clip = Arc::new(Mutex::new(None));
-                match self.announcement_for(&next) {
+                let text = self.announcement_for(&next);
+                let estimate = self.announcement_estimate(&next, text.as_deref());
+                match text {
                     Some(text) => {
                         let (job, slot) = (self.clip_job(text, self.chime_for(&next)), clip.clone());
                         std::thread::spawn(move || *slot.lock() = Some(job()));
@@ -934,10 +981,18 @@ impl App {
                     // Nothing to say (or no dance to name): just pause.
                     None => *clip.lock() = Some(Err(String::new())),
                 }
-                self.perform.lock().auto = AutoPhase::Preparing { entry: next.id.clone(), clip };
+                self.perform.lock().auto = AutoPhase::Preparing { entry: next.id.clone(), clip, estimate };
                 self.emit_perform();
             }
-            AutoPhase::Preparing { entry, clip } => {
+            AutoPhase::Preparing { entry, clip, estimate } => {
+                // Ready: the panel learns how long it really is (once).
+                let ready = clip.lock().as_ref().map(|r| r.as_ref().map_or((0, 0), |p| (p.chime_ms(), p.speech_ms())));
+                if let Some(len) = ready.filter(|l| *l != estimate) {
+                    if let AutoPhase::Preparing { estimate: e, .. } = &mut self.perform.lock().auto {
+                        *e = len;
+                    }
+                    self.emit_perform();
+                }
                 if now - g < (before * 1000.0) as i64 {
                     return;
                 }
@@ -949,10 +1004,10 @@ impl App {
                     }
                 }
                 let phase = match result {
-                    Ok((samples, rate)) => {
+                    Ok(p) => {
                         let volume = self.settings.read().announce.volume as f32;
-                        let len = self.announcer.play(&samples, rate, volume);
-                        AutoPhase::Speaking { entry, until: now + len.as_millis() as i64 }
+                        let len = self.announcer.play(&p.samples, p.rate, volume);
+                        AutoPhase::Speaking { entry, started: now, chime_ms: p.chime_ms(), until: now + len.as_millis() as i64 }
                     }
                     Err(e) => {
                         if !e.is_empty() {
@@ -964,7 +1019,7 @@ impl App {
                 self.perform.lock().auto = phase;
                 self.emit_perform();
             }
-            AutoPhase::Speaking { entry, until } => {
+            AutoPhase::Speaking { entry, until, .. } => {
                 if now >= until && !self.announcer.speaking() {
                     self.perform.lock().auto = AutoPhase::Announced { entry, at: now };
                     self.emit_perform();
@@ -1014,22 +1069,17 @@ impl App {
         let next_chime = next.as_ref().and_then(|e| self.chime_version_for(e));
         let next_ready = next.as_ref().map(|e| e.version_id.is_some() || e.kind == EntryKind::Pause).unwrap_or(false);
         let next_held = next.as_ref().is_some_and(|e| e.hold);
-        let (before, after, speaks) = match &next {
-            Some(e) => {
-                let (b, a) = self.entry_pauses(e);
-                (b, a, self.has_announcement(e))
-            }
-            None => (gap_secs, 0.0, false),
+        // In the pause: its steps, when. While a song plays: those after it,
+        // from its end (`steps_after_song`: the panel knows when that is).
+        let playing = (0..2).any(|d| self.audible(d));
+        let steps_after_song = gap.is_none() && playing;
+        let steps = match (&next, gap) {
+            (Some(e), Some(g)) if auto && next_ready && !next_held => self.auto_steps(e, g, &auto_phase_now),
+            (Some(e), None) if auto && next_ready && !next_held && playing => self.auto_steps(e, 0, &AutoPhase::Idle),
+            _ => vec![],
         };
-        // When the next entry starts (estimated while its announcement is pending).
-        let auto_at = gap.map(|g| {
-            let after = (after * 1000.0) as i64;
-            match &auto_phase_now {
-                AutoPhase::Speaking { until, .. } => until + after,
-                AutoPhase::Announced { at, .. } => at + after,
-                _ => g + (before * 1000.0) as i64 + if speaks { 2500 } else { 0 } + after,
-            }
-        });
+        // When the next entry starts (estimated until its announcement is ready).
+        let auto_at = steps.last().filter(|_| !steps_after_song).map(|s| s.to);
         let auto_phase = match (&auto_phase_now, gap) {
             _ if !auto || next.is_none() => None,
             _ if next_held => Some("held".to_string()),
@@ -1055,7 +1105,78 @@ impl App {
             live_deck,
             free_deck: self.free_deck(),
             next_chime,
+            auto_steps: steps,
+            steps_after_song,
         }
+    }
+
+    /// Roughly how long `entry`'s chime and announcement (`text`, or a
+    /// pattern) will take (ms), until they're ready.
+    fn announcement_estimate(&self, entry: &SetlistEntry, text: Option<&str>) -> (i64, i64) {
+        // Nothing is said without the voice (and the chime comes only with words).
+        if !self.has_announcement(entry) || !self.tts.installed(&self.settings.read().announce.tts_config()) {
+            return (0, 0);
+        }
+        let (speed, pattern) = {
+            let a = &self.settings.read().announce;
+            (a.speed, a.patterns.iter().find(|p| !p.trim().is_empty()).cloned().unwrap_or_default())
+        };
+        let chars = text.map_or(pattern.len(), str::len) as f64;
+        let speech = chars / (SPEECH_CHARS_PER_SEC * if speed > 0.0 { speed } else { 1.0 }) * 1000.0;
+        (self.chime_estimate_ms(entry), speech as i64)
+    }
+
+    /// How long `entry`'s chime takes (ms; none if it has none or can't play).
+    fn chime_estimate_ms(&self, entry: &SetlistEntry) -> i64 {
+        let Some(vid) = self.chime_for(entry) else { return 0 };
+        let Ok(x) = self.chime_excerpt(&vid) else { return 0 };
+        let file_secs = self.store.version(&vid).ok().and_then(|(v, _)| self.store.recording(&v.recording).ok()).map_or(0.0, |r| r.rec.duration_ms as f64 / 1000.0);
+        let end = x.end_secs.unwrap_or_else(|| file_secs.min(x.start_secs + crate::chime::MAX_OPEN_SECS * x.rate));
+        (((end - x.start_secs).max(0.0) / x.rate.max(0.01) + crate::chime::GAP_SECS as f64) * 1000.0) as i64
+    }
+
+    /// Auto mode's steps to `entry`, the pause having started at `g`: the
+    /// pause, its chime and announcement, the pause after, each with when it
+    /// starts and ends (estimated until the announcement is ready).
+    fn auto_steps(&self, entry: &SetlistEntry, g: i64, phase: &AutoPhase) -> Vec<AutoStep> {
+        let (before, after) = self.entry_pauses(entry);
+        let (before, after) = ((before * 1000.0) as i64, (after * 1000.0) as i64);
+        let now = now_ms();
+        let pause_end = g + before;
+        let mut steps = vec![AutoStep { kind: "pause".into(), from: g, to: pause_end, estimated: false }];
+        // When the chime and speech start, how long they are, and whether that's known.
+        let (start, chime, speech, estimated, done) = match phase {
+            AutoPhase::Speaking { started, chime_ms, until, entry: e } if *e == entry.id => (*started, *chime_ms, until - started - chime_ms, false, None),
+            AutoPhase::Announced { at, entry: e } if *e == entry.id => (*at, 0, 0, false, Some(*at)),
+            AutoPhase::Preparing { clip, estimate, entry: e } if *e == entry.id => {
+                // It starts once the pause is over and it's ready.
+                let start = pause_end.max(now);
+                match clip.lock().as_ref() {
+                    Some(Ok(p)) => (start, p.chime_ms(), p.speech_ms(), false, None),
+                    Some(Err(_)) => (start, 0, 0, false, None),
+                    None => (start, estimate.0, estimate.1, true, None),
+                }
+            }
+            _ => {
+                let (c, s) = self.announcement_estimate(entry, None);
+                (pause_end, c, s, true, None)
+            }
+        };
+        if chime > 0 {
+            steps.push(AutoStep { kind: "chime".into(), from: start, to: start + chime, estimated });
+        }
+        if speech > 0 {
+            steps.push(AutoStep { kind: "announcement".into(), from: start + chime, to: start + chime + speech, estimated });
+        }
+        let end = done.unwrap_or(start + chime + speech);
+        if steps.len() == 1 {
+            // Nothing said: one pause, to the end of both.
+            steps[0].to = steps[0].to.max(end) + after;
+        } else if after > 0 {
+            // Its length is known; only when it starts may not be.
+            steps.push(AutoStep { kind: "pauseAfter".into(), from: end, to: end + after, estimated: false });
+        }
+        steps
     }
 
     pub fn emit_perform(&self) {

@@ -172,7 +172,7 @@ impl Tts {
         self.dir.join("voices")
     }
 
-    fn installed(&self, cfg: &TtsConfig) -> bool {
+    pub fn installed(&self, cfg: &TtsConfig) -> bool {
         self.dir.join(cfg.model_file()).exists()
             && self.dir.join("tokenizer.json").exists()
             && self.voices_dir().join(format!("{}.bin", cfg.voice)).exists()

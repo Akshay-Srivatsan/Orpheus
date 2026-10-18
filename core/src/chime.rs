@@ -7,7 +7,7 @@ use crate::settings::AnnounceSettings;
 use anyhow::{anyhow, Result};
 
 /// Silence between the chime and the announcement (seconds).
-const GAP_SECS: f32 = 0.3;
+pub const GAP_SECS: f32 = 0.3;
 /// Rate a chime is previewed at.
 pub const PREVIEW_RATE: u32 = 48_000;
 /// A chime with no end of its own (a version with no end or fade set) is cut off after this long (seconds): it's a chime, not a song.
