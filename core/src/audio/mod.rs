@@ -12,6 +12,7 @@ pub mod announcer;
 pub mod deck;
 pub mod output;
 pub mod priority;
+pub mod compressor;
 pub mod stretch;
 pub mod source;
 

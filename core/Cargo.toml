@@ -45,6 +45,8 @@ futures-util = "0.3"
 rayon = "1"
 rustfft = "6"
 hound = "3"
+# Loudness (EBU R128, LUFS) and true peak, for levelling songs.
+ebur128 = "0.1"
 thread-priority = "3"
 stem-splitter-core = { version = "1.2", default-features = false }
 base64 = "0.22"

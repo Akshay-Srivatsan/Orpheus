@@ -225,7 +225,24 @@ impl LocalDecoder {
     }
 }
 
-/// Decodes a whole file to mono at the native rate (for analysis).
+/// Decodes a whole file to mono at the native rate, measuring its level on
+/// the stereo audio (for analysis).
+pub fn decode_for_analysis(path: &Path) -> Result<(Vec<f32>, u32, Option<crate::level::Level>)> {
+    let mut dec = LocalDecoder::open(path)?;
+    let mut meter = crate::level::Meter::new(dec.sample_rate);
+    let mut stereo = Vec::new();
+    let mut mono = Vec::with_capacity(dec.duration_secs.map(|d| (d * dec.sample_rate as f64) as usize).unwrap_or(0));
+    while dec.read(&mut stereo)? {
+        meter.add_stereo(&stereo);
+        for fr in stereo.chunks_exact(2) {
+            mono.push((fr[0] + fr[1]) * 0.5);
+        }
+        stereo.clear();
+    }
+    Ok((mono, dec.sample_rate, meter.finish()))
+}
+
+/// Decodes a whole file to mono at the native rate.
 pub fn decode_mono(path: &Path) -> Result<(Vec<f32>, u32)> {
     let mut dec = LocalDecoder::open(path)?;
     let mut stereo = Vec::new();

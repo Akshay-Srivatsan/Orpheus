@@ -11,6 +11,7 @@ pub mod audio;
 pub mod controls;
 pub mod store;
 pub mod decode;
+pub mod level;
 pub mod library;
 pub mod matching;
 pub mod midi;

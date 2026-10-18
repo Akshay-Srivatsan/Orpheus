@@ -48,7 +48,9 @@ pub struct Analysis {
     pub bpm: Option<f64>,
     /// Detected beats per bar (3 or 4), if clear.
     pub meter: Option<u8>,
+    /// Integrated loudness (LUFS) and true peak (dBTP).
     pub loudness_db: Option<f64>,
+    pub peak_db: Option<f64>,
     pub audio_start_ms: Option<i64>,
     pub audio_end_ms: Option<i64>,
     pub waveform: Vec<u8>,
@@ -1666,6 +1668,7 @@ impl Store {
             t.analyzed = true;
             t.analysis_version = crate::analysis::VERSION;
             t.loudness_db = a.loudness_db.map(|l| (l * 10.0).round() / 10.0);
+            t.peak_db = a.peak_db.map(|l| (l * 10.0).round() / 10.0);
             t.audio_start_ms = a.audio_start_ms;
             t.audio_end_ms = a.audio_end_ms;
             if a.fingerprint.is_some() {

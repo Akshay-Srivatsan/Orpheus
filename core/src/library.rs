@@ -279,8 +279,8 @@ pub fn resolve_path(db: &Store, rec_id: &str) -> Option<PathBuf> {
 
 pub fn analyze_recording(db: &Store, rec_id: &str) -> Result<()> {
     let path = resolve_path(db, rec_id).ok_or_else(|| anyhow::anyhow!("file missing"))?;
-    let (mono, sr) = decode::decode_mono(&path)?;
-    let a = crate::analysis::analyze(&mono, sr, db.known_bpm(rec_id));
+    let (mono, sr, level) = decode::decode_for_analysis(&path)?;
+    let a = crate::analysis::analyze(&mono, sr, db.known_bpm(rec_id), level);
     db.set_analysis(rec_id, &a)?;
     Ok(())
 }

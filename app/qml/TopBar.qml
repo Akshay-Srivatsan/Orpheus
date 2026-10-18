@@ -147,6 +147,27 @@ ToolBar {
             ToolTip.text: qsTr("Room volume")
         }
         Level { value: Session.levels ? Math.min(1, Math.sqrt(Session.levels.master)) : 0 }
+        // Levelling songs to one loudness (Settings → General has the target).
+        ToolButton {
+            icon.color: palette.buttonText
+            icon.source: Theme.icon("levels")
+            checkable: true
+            checked: !!Session.settings && Session.settings.autoGain
+            ToolTip.visible: hovered
+            ToolTip.text: Session.settings ? (checked ? qsTr("Songs are levelled to %1 LUFS (their peaks kept clear): click to play them as they are") : qsTr("Level songs to %1 LUFS (their peaks kept clear)")).arg(Session.settings.targetLoudnessDb) + qsTr(" — the target is in Settings → General") : ""
+            onToggled: Session.saveSettings({ autoGain: checked })
+        }
+        // Evening out dynamics (Settings → General has how strongly).
+        ToolButton {
+            icon.color: palette.buttonText
+            icon.source: Theme.icon("compress")
+            checkable: true
+            checked: !!Session.settings && Session.settings.compress
+            ToolTip.visible: hovered
+            ToolTip.text: checked ? qsTr("Songs' dynamics are evened out (quiet passages brought up): click to play them as they are")
+                : qsTr("Even out songs' dynamics: bring quiet passages up towards the song's main level") + qsTr(" — how strongly is in Settings → General")
+            onToggled: Session.saveSettings({ compress: checked })
+        }
         Icon { Layout.leftMargin: Theme.spacing; glyph: "headphones"; ToolTip.visible: cueHover.hovered; ToolTip.text: qsTr("Headphone volume"); HoverHandler { id: cueHover } }
         Slider {
             Layout.fillWidth: true

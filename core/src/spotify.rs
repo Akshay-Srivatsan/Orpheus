@@ -825,7 +825,7 @@ impl Spotify {
 
     /// Decodes a Spotify track as fast as the network allows (not in real
     /// time) for BPM/waveform analysis. Audio is analysed in memory only.
-    pub fn decode_for_analysis(&self, uri: &str) -> Result<(Vec<f32>, u32)> {
+    pub fn decode_for_analysis(&self, uri: &str) -> Result<(Vec<f32>, u32, Option<crate::level::Level>)> {
         let session = self.live_session()?;
         let id = SpotifyUri::from_uri(uri).map_err(|e| anyhow!("{e}"))?;
         let (tx, rx) = bounded::<Msg>(64);
@@ -859,9 +859,13 @@ impl Spotify {
         drop(tx);
         dp.load(id, true, 0);
         let mut mono = vec![];
+        let mut meter = crate::level::Meter::new(SAMPLE_RATE);
         loop {
             match rx.recv_timeout(Duration::from_secs(30)) {
-                Ok(Msg::Audio(_, s)) => mono.extend(s.chunks_exact(2).map(|f| (f[0] + f[1]) * 0.5)),
+                Ok(Msg::Audio(_, s)) => {
+                    meter.add_stereo(&s);
+                    mono.extend(s.chunks_exact(2).map(|f| (f[0] + f[1]) * 0.5));
+                }
                 Ok(Msg::Eof(_)) => break,
                 Ok(Msg::Unavailable(_)) => return Err(anyhow!("track unavailable")),
                 Err(_) => return Err(anyhow!("timed out decoding Spotify track")),
@@ -869,7 +873,7 @@ impl Spotify {
         }
         gen.fetch_add(1, Ordering::SeqCst);
         dp.stop();
-        Ok((mono, SAMPLE_RATE))
+        Ok((mono, SAMPLE_RATE, meter.finish()))
     }
 }
 

@@ -192,6 +192,10 @@ pub struct Settings {
     /// Range of the tempo sliders / MIDI pitch faders in percent.
     pub tempo_range_pct: f64,
     pub auto_gain: bool,
+    /// Evening out songs' dynamics (`audio::compressor`), and how strongly:
+    /// `light`, `medium` or `strong`.
+    pub compress: bool,
+    pub compression: String,
     pub target_loudness_db: f64,
     /// Skip leading/trailing silence detected during analysis.
     pub trim_silence: bool,
@@ -229,6 +233,8 @@ impl Default for Settings {
             stretch_engine: "signalsmith".into(),
             tempo_range_pct: 10.0,
             auto_gain: false,
+            compress: false,
+            compression: "medium".into(),
             target_loudness_db: -14.0,
             trim_silence: true,
             confirm_next_while_playing: true,

@@ -128,6 +128,31 @@ SettingsPage {
                 SpinBox { from: -40; to: 0; value: s ? Math.round(s.targetLoudnessDb) : -14; onValueModified: set({ targetLoudnessDb: value }) }
                 Label { text: "LUFS" }
             }
+            RowLayout {
+                CheckBox { text: qsTr("Even out songs' dynamics"); checked: !!s && s.compress; onToggled: set({ compress: checked }) }
+                ComboBox {
+                    readonly property var values: ["light", "medium", "strong"]
+                    implicitContentWidthPolicy: ComboBox.WidestText
+                    enabled: !!s && s.compress
+                    model: [qsTr("Light"), qsTr("Medium"), qsTr("Strong")]
+                    currentIndex: s ? Math.max(0, values.indexOf(s.compression)) : 1
+                    onActivated: index => set({ compression: values[index] })
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                font.pointSize: Theme.smallPointSize
+                opacity: 0.7
+                text: qsTr("Evening out dynamics (a slow compressor) brings a song's quiet passages up towards its main level, so an orchestral waltz stays audible; a song that stays at one level is barely changed. It needs the song's loudness (from analysis). Its button is beside the room volume too.")
+            }
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                font.pointSize: Theme.smallPointSize
+                opacity: 0.7
+                text: qsTr("Each song is turned up or down to this loudness (EBU R128), but never boosted past its true peak's room below −1 dBTP. Songs on decks follow at once; one playing moves smoothly. A Spotify song is measured when it's next; if it isn't by the time it starts, it plays as it is. The button beside the room volume turns this on and off.")
+            }
             CheckBox { text: qsTr("Skip silence at the start and end of songs"); checked: !!s && s.trimSilence; onToggled: set({ trimSilence: checked }) }
         }
     }

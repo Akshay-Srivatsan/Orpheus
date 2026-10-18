@@ -12,6 +12,8 @@ ToolBar {
     readonly property int count: Session.toasts.count
     // The newest message (the model changes as messages come and go).
     readonly property var latest: count > 0 ? Session.toasts.get(count - 1) : null
+    /// The recordings being analysed (BPM, meter, loudness, …).
+    readonly property var analyzing: Session.analysis ? Session.analysis.current : []
 
     RowLayout {
         anchors.fill: parent
@@ -29,6 +31,8 @@ ToolBar {
             elide: Text.ElideRight
             text: root.latest ? root.latest.text
                 : Session.scan && Session.scan.running ? Session.scan.phase + (Session.scan.total ? " " + Session.scan.done + "/" + Session.scan.total : "")
+                : root.analyzing.length ? qsTr("Analyzing %1…").arg(root.analyzing.map(c => "“" + c.title + "”").join(", "))
+                    + (Session.analysis.waiting ? " " + qsTr("(%n more waiting)", "", Session.analysis.waiting) : "")
                 : Session.summary ? qsTr("%n song(s) in the library", "", Session.summary.songs) : ""
             color: root.latest && root.latest.kind === "error" ? Theme.error : Theme.system.text
             opacity: root.latest ? 1 : Theme.dim

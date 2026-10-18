@@ -532,10 +532,33 @@ impl App {
 
     /// Already loaded on the other deck (e.g. the DJ loaded it by hand)? Use that deck.
     fn deck_for_entry(&self, entry: &SetlistEntry, deck: usize) -> usize {
-        if self.decks[1 - deck].entry_id().as_deref() == Some(&entry.id) && !self.audible(1 - deck) {
+        if self.holds(1 - deck, entry) && !self.audible(1 - deck) {
             1 - deck
         } else {
             deck
+        }
+    }
+
+    /// `deck` holds `entry` as it is now (that entry, and the version it plays).
+    fn holds(&self, deck: usize, entry: &SetlistEntry) -> bool {
+        let d = &self.decks[deck];
+        d.entry_id().as_deref() == Some(&entry.id) && d.version_id() == entry.version_id
+    }
+
+    /// An entry now plays another version: a deck holding it that the room
+    /// isn't hearing loads that one instead (cued, as it was).
+    pub fn entry_version_changed(&self, entry: &SetlistEntry) {
+        for i in 0..2 {
+            let d = &self.decks[i];
+            if d.entry_id().as_deref() != Some(&entry.id) || self.holds(i, entry) || self.audible(i) {
+                continue;
+            }
+            let found = entry.version_id.as_ref().and_then(|v| self.store.version(v).ok()).and_then(|(v, tid)| Some((v, self.store.track(&tid).ok()?)));
+            match found.map(|(v, t)| self.load_request(i, &t, &v, Some(entry), false)) {
+                Some(Ok(req)) => d.load(req),
+                Some(Err(e)) => emit(&self.handle, "toast", format!("{e:#}")),
+                None => {}
+            }
         }
     }
 
@@ -561,8 +584,8 @@ impl App {
         let d = &self.decks[deck];
         let same = d.loaded()
             && d.status() != "loading"
-            && (d.entry_id().as_deref() == Some(&entry.id)
-                || (d.entry_id().is_none() && d.version_id().as_deref() == Some(&version_id)));
+            && d.version_id().as_deref() == Some(&version_id)
+            && (d.entry_id().as_deref() == Some(&entry.id) || d.entry_id().is_none());
         self.went_live(deck);
         if same {
             d.set_entry_id(Some(entry.id.clone()));
@@ -665,13 +688,19 @@ impl App {
     /// Loads the up-next song onto the free deck (paused at its start) so it
     /// can be cued in headphones. Never replaces something the DJ loaded by hand.
     pub fn auto_load(&self) {
+        let Some(next) = self.next_entry() else { return };
+        // A Spotify song coming up is measured early, for levelling. (Nothing
+        // waits for it: one not measured by the time it starts plays as it
+        // is, and isn't re-levelled while it plays.)
+        if let Some(rid) = self.spotify_recording_to_measure(&next) {
+            self.analyse_spotify_once(&rid);
+        }
         if !self.settings.read().auto_load_next {
             return;
         }
-        let Some(next) = self.next_entry() else { return };
         let Some(version_id) = next.version_id.clone() else { return };
-        // Already loaded on either deck?
-        if self.decks.iter().any(|d| d.entry_id().as_deref() == Some(&next.id) && d.loaded()) {
+        // Already loaded on either deck (that version)?
+        if (0..2).any(|d| self.holds(d, &next) && self.decks[d].loaded()) {
             return;
         }
         let free = self.free_deck();
@@ -1176,6 +1205,20 @@ impl App {
             }
         }
         out
+    }
+
+    /// The recording of `entry` that plays from Spotify and hasn't had its
+    /// level measured (with Spotify connected, to measure it), if any.
+    fn spotify_recording_to_measure(&self, entry: &SetlistEntry) -> Option<Id> {
+        if entry.kind != EntryKind::Song || !self.spotify.is_connected() {
+            return None;
+        }
+        let (v, tid) = self.store.version(entry.version_id.as_deref()?).ok()?;
+        let t = self.store.track(&tid).ok()?;
+        let r = t.recording_of(&v.id)?;
+        let (kind, _) = self.choose_source(r, &t.rec.title).ok()?;
+        let measured = r.rec.loudness_db.is_some() && r.rec.analysis_version >= crate::analysis::VERSION;
+        (kind == "spotify" && !measured).then(|| r.rec.id.clone())
     }
 
     /// Roughly how long `entry`'s chime and announcement (`text`, or a

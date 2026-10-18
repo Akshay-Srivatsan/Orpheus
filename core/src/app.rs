@@ -88,6 +88,21 @@ pub struct UndoBook {
     done: std::collections::VecDeque<(u64, crate::store::UndoPoint)>,
 }
 
+/// What analysis is doing: the recordings being analysed, and how many wait.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisProgress {
+    pub current: Vec<AnalysisItem>,
+    pub waiting: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisItem {
+    pub id: Id,
+    pub title: String,
+}
+
 pub struct App {
     /// Where events go (the UI).
     pub handle: Events,
@@ -116,6 +131,8 @@ pub struct App {
     /// Spotify songs already queued for analysis this session (each is
     /// streamed once in the background for its waveform and BPM).
     spotify_analysed: Mutex<std::collections::HashSet<Id>>,
+    /// What analysis is doing, for the status bar.
+    analysis: Mutex<AnalysisProgress>,
     /// A Find on Spotify job is running (one at a time).
     spotify_finding: std::sync::atomic::AtomicBool,
     /// Undo points of recent actions (see `undo_begin`).
@@ -231,6 +248,7 @@ impl App {
             scan_progress: Mutex::new(Default::default()),
             analysis_tx,
             spotify_analysed: Mutex::new(Default::default()),
+            analysis: Mutex::new(Default::default()),
             spotify_finding: Default::default(),
             undo: Default::default(),
             deck_songs: Default::default(),
@@ -335,6 +353,9 @@ impl App {
             if new.announce.enabled {
                 self.tts.warm_up(new.announce.tts_config());
             }
+        }
+        if old.auto_gain != new.auto_gain || old.target_loudness_db != new.target_loudness_db || old.compress != new.compress || old.compression != new.compression {
+            self.relevel_decks(true);
         }
         if old.keylock != new.keylock {
             for d in &self.decks {
@@ -624,6 +645,50 @@ impl App {
         pick.ok_or_else(|| anyhow!("No playable source for \"{title}\": its file is missing. Rescan your library folders or link a Spotify track."))
     }
 
+    /// The gain a song plays at (dB): its own (the version's or set entry's,
+    /// else the recording's), plus, with levelling on, what brings it to your
+    /// loudness (its boost capped by its true peak).
+    /// The compressor's strength, and the loudness a song plays at (LUFS:
+    /// its own plus `gain`; none if unknown).
+    pub(crate) fn compression(s: &crate::settings::Settings, rec: &Recording, gain: f64) -> (u8, Option<f64>) {
+        let strength = if s.compress { crate::audio::compressor::Strength::index(&s.compression) } else { 0 };
+        (strength, rec.rec.loudness_db.map(|l| l + gain))
+    }
+
+    pub(crate) fn song_gain_db(s: &crate::settings::Settings, rec: &Recording, r: &Overrides) -> f64 {
+        let own = r.gain_db.unwrap_or(rec.rec.gain_db);
+        let level = match (s.auto_gain, rec.rec.loudness_db) {
+            (true, Some(l)) => crate::level::level_gain_db(s.target_loudness_db, l, rec.rec.peak_db),
+            _ => 0.0,
+        };
+        own + level
+    }
+
+    /// Sets each loaded deck's gain afresh (`song_gain_db`): after the
+    /// levelling setting or a song's gain changed (`playing` too: the deck
+    /// moves to it smoothly), or analysis measured a song (decks the room
+    /// isn't hearing only, so a song doesn't change level as it plays).
+    pub fn relevel_decks(&self, playing: bool) {
+        let s = self.settings.read().clone();
+        for (i, d) in self.decks.iter().enumerate() {
+            if !playing && self.audible(i) {
+                continue;
+            }
+            let Some(vid) = d.version_id() else { continue };
+            let Ok((v, tid)) = self.store.version(&vid) else { continue };
+            let Ok(track) = self.store.track(&tid) else { continue };
+            let Some(rec) = track.recording_of(&v.id) else { continue };
+            let entry = d.entry_id().and_then(|e| self.store.entry(&e).ok()).map(|(e, _)| e);
+            let gain = Self::song_gain_db(&s, rec, &Self::resolve_settings(&v, entry.as_ref()));
+            if (gain - d.gain_db()).abs() > 0.05 {
+                log::info!("deck {}: gain {:.1} dB → {gain:.1} dB", crate::perform::deck_name(i), d.gain_db());
+                d.set_gain_db(gain);
+            }
+            let (strength, loudness) = Self::compression(&s, rec, gain);
+            d.set_compression(strength, loudness);
+        }
+    }
+
     /// Builds a deck load request for a version of a song (optionally in the context of a setlist entry).
     pub fn load_request(&self, deck: usize, track: &Track, version: &Version, entry: Option<&SetlistEntry>, play: bool) -> Result<LoadRequest> {
         let s = self.settings.read().clone();
@@ -643,12 +708,7 @@ impl App {
             .or(if s.trim_silence { rec.rec.audio_start_ms.map(|v| (v - 50).max(0)) } else { None })
             .unwrap_or(0);
         let end_ms = r.cue_out_ms.or(if s.trim_silence { rec.rec.audio_end_ms.map(|v| v + 100) } else { None });
-        let mut gain = r.gain_db.unwrap_or(rec.rec.gain_db);
-        if s.auto_gain {
-            if let Some(l) = rec.rec.loudness_db {
-                gain += (s.target_loudness_db - l).clamp(-12.0, 12.0);
-            }
-        }
+        let gain = Self::song_gain_db(&s, rec, &r);
         let (kind, key) = self.choose_source(rec, &track.rec.title)?;
         if kind == "spotify" {
             self.analyse_spotify_once(&rec.rec.id);
@@ -701,6 +761,8 @@ impl App {
             fade_secs: self.fade_secs(),
             tempo,
             gain_db: gain,
+            compression: Self::compression(&s, rec, gain).0,
+            loudness_db: Self::compression(&s, rec, gain).1,
             play,
             cue_secs: None,
             has_stems,
@@ -721,6 +783,8 @@ impl App {
             fade_secs: 1.0,
             tempo: 1.0,
             gain_db: 0.0,
+            compression: 0,
+            loudness_db: None,
             play: true,
             cue_secs: None,
             has_stems: false,
@@ -830,7 +894,7 @@ impl App {
 
     /// Spotify songs aren't analysed on import (that would stream every
     /// song); a song without a waveform is analysed when first loaded.
-    fn analyse_spotify_once(&self, id: &Id) {
+    pub(crate) fn analyse_spotify_once(&self, id: &Id) {
         let current = self.store.recording(id).is_ok_and(|r| r.rec.analysis_version >= crate::analysis::VERSION);
         if (current && self.store.waveform(id).is_some()) || !self.spotify_analysed.lock().insert(id.clone()) {
             return;
@@ -878,7 +942,30 @@ impl App {
     }
 
     pub fn queue_analysis(&self, id: Id, priority: bool) {
-        let _ = self.analysis_tx.send((id, priority));
+        if self.analysis_tx.send((id, priority)).is_ok() {
+            self.analysis.lock().waiting += 1;
+            self.emit_analysis();
+        }
+    }
+
+    fn emit_analysis(&self) {
+        let p = self.analysis.lock().clone();
+        emit(&self.handle, "analysis", p);
+    }
+
+    /// A worker starts (`Some`: that recording) or finishes (`None`) one.
+    fn analysis_step(&self, id: &str, starting: bool) {
+        {
+            let mut p = self.analysis.lock();
+            if starting {
+                p.waiting = p.waiting.saturating_sub(1);
+                let title = self.store.recording(id).map(|r| r.rec.title).unwrap_or_default();
+                p.current.push(AnalysisItem { id: id.to_string(), title });
+            } else {
+                p.current.retain(|c| c.id != id);
+            }
+        }
+        self.emit_analysis();
     }
 
     fn start_threads(self: &Arc<Self>, deck_rx: Receiver<DeckEvent>, analysis_rx: Receiver<(Id, bool)>) {
@@ -976,7 +1063,9 @@ impl App {
                             },
                         };
                         let Some(app) = weak.upgrade() else { return };
+                        app.analysis_step(&id, true);
                         let r = app.analyze(&id);
+                        app.analysis_step(&id, false);
                         if let Err(e) = r {
                             log::warn!("analysis of recording {id} failed: {e:#}");
                         } else {
@@ -986,6 +1075,8 @@ impl App {
                                 emit(&app.handle, "reconnect-found", &found);
                             }
                         }
+                        // Measured: a song waiting on a deck gets its level.
+                        app.relevel_decks(false);
                         emit(&app.handle, "library-changed", app.store.songs_for_recording(&id));
                     }
                 })
@@ -1059,7 +1150,7 @@ impl App {
             if self.store.recording_for_source(&src).is_some() {
                 continue;
             }
-            let (mono, sr) = match self.spotify.decode_for_analysis(&t.uri) {
+            let (mono, sr, _) = match self.spotify.decode_for_analysis(&t.uri) {
                 Ok(a) => a,
                 Err(e) => {
                     log::info!("Find on Spotify: {} unavailable: {e:#}", t.uri);
@@ -1170,8 +1261,8 @@ impl App {
             .find(|s| s.kind == "spotify")
             .map(|s| s.key.clone())
             .ok_or_else(|| anyhow!("no playable source"))?;
-        let (mono, sr) = self.spotify.decode_for_analysis(&uri)?;
-        let a = crate::analysis::analyze(&mono, sr, self.store.known_bpm(id));
+        let (mono, sr, level) = self.spotify.decode_for_analysis(&uri)?;
+        let a = crate::analysis::analyze(&mono, sr, self.store.known_bpm(id), level);
         self.store.set_analysis(id, &a)?;
         Ok(())
     }

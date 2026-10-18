@@ -74,6 +74,9 @@ fn emit_recording_changed(app: &&Arc<App>, rec_id: &str) {
 pub fn recording_update(app: &Arc<App>, id: Id, patch: serde_json::Value) -> Res<Recording> {
     let patch: RecordingPatch = serde_json::from_value(patch).map_err(err)?;
     app.store.update_recording(&id, &patch).map_err(ae)?;
+    if patch.gain_db.is_some() {
+        app.relevel_decks(true);
+    }
     // The meter is detected on the beat grid of the BPM; follow a corrected BPM.
     if patch.bpm.is_some() && app.store.recording(&id).map_err(ae)?.rec.meter_source.as_deref() != Some("user") {
         app.queue_analysis(id.clone(), true);
@@ -490,6 +493,9 @@ pub fn version_add_audio(app: &Arc<App>, track_id: Id, audio: AudioPick) -> Res<
 pub fn version_update(app: &Arc<App>, id: Id, patch: serde_json::Value) -> Res<Version> {
     let patch: VersionPatch = serde_json::from_value(patch).map_err(err)?;
     let v = app.store.version_update(&id, &patch).map_err(ae)?;
+    if patch.gain_db.is_some() {
+        app.relevel_decks(true);
+    }
     let (_, tid) = app.store.version(&id).map_err(ae)?;
     crate::app::emit(&app.handle, "library-changed", vec![tid]);
     app.emit_perform();
@@ -675,6 +681,10 @@ pub fn entry_update(app: &Arc<App>, id: Id, patch: serde_json::Value) -> Res<Set
     }
     if replaced {
         app.prune();
+        app.entry_version_changed(&e);
+    }
+    if patch.overrides.is_some() {
+        app.relevel_decks(true);
     }
     let (_, sid) = app.store.entry(&id).map_err(ae)?;
     app.emit_setlist(&sid);

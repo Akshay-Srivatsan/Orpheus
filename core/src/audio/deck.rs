@@ -28,6 +28,10 @@ pub struct LoadRequest {
     pub fade_secs: f64,
     pub tempo: f64,
     pub gain_db: f64,
+    /// Evening out dynamics (`compressor::Strength::index`), and the song's
+    /// loudness as it plays (LUFS, after `gain_db`; none: unknown, not compressed).
+    pub compression: u8,
+    pub loudness_db: Option<f64>,
     pub play: bool,
     /// Main cue point (defaults to `start_secs`).
     pub cue_secs: Option<f64>,
@@ -112,6 +116,10 @@ pub struct DeckShared {
     pub stretch_engine: Mutex<String>,
     pub trim_db: AtomicF64,
     pub track_gain_db: AtomicF64,
+    /// The compressor's strength (`compressor::Strength::index`) and the song's
+    /// loudness as it plays (NaN: unknown, not compressed).
+    pub compression: std::sync::atomic::AtomicU8,
+    pub loudness_db: AtomicF64,
     pub pfl: AtomicBool,
     /// Set by the app: this deck is the one the room hears.
     pub on_air: AtomicBool,
@@ -154,6 +162,8 @@ impl Deck {
             stretch_engine: Mutex::new(String::new()),
             trim_db: AtomicF64::new(0.0),
             track_gain_db: AtomicF64::new(0.0),
+            compression: std::sync::atomic::AtomicU8::new(0),
+            loudness_db: AtomicF64::new(f64::NAN),
             pfl: AtomicBool::new(false),
             on_air: AtomicBool::new(false),
             clock_cue,
@@ -242,6 +252,22 @@ impl Deck {
 
     pub fn entry_id(&self) -> Option<String> {
         self.shared.info.lock().entry_id.clone()
+    }
+
+    /// The song's gain (dB), changed while loaded (levelling, or its Gain edited):
+    /// the deck moves to it smoothly.
+    pub fn set_gain_db(&self, db: f64) {
+        self.shared.track_gain_db.set(db);
+    }
+
+    pub fn gain_db(&self) -> f64 {
+        self.shared.track_gain_db.get()
+    }
+
+    /// Evening out dynamics: its strength, and the song's loudness as it plays (none: unknown).
+    pub fn set_compression(&self, strength: u8, loudness_db: Option<f64>) {
+        self.shared.compression.store(strength, Ordering::Relaxed);
+        self.shared.loudness_db.set(loudness_db.unwrap_or(f64::NAN));
     }
 
     pub fn set_entry_id(&self, id: Option<String>) {
@@ -446,6 +472,10 @@ struct Worker {
     fade_secs: f64,
     fade_step: Option<f32>,
     fade_gain: f32,
+    /// The song's gain as applied (it follows `track_gain_db` over a block).
+    gain_now: f32,
+    /// Evening out the song's dynamics (made when it's first needed).
+    compressor: Option<super::compressor::Compressor>,
     /// Source position of the next frame to enter the stretcher.
     written_pos: f64,
     track_id: Option<String>,
@@ -475,6 +505,8 @@ impl Worker {
             fade_secs: 5.0,
             fade_step: None,
             fade_gain: 1.0,
+            gain_now: 1.0,
+            compressor: None,
             written_pos: 0.0,
             track_id: None,
             gen: 0,
@@ -631,6 +663,10 @@ impl Worker {
         self.reset_stream_state();
         self.sh.tempo.set(req.tempo.clamp(0.5, 2.0));
         self.sh.track_gain_db.set(req.gain_db);
+        self.gain_now = db_to_gain(req.gain_db) as f32;
+        self.sh.compression.store(req.compression, Ordering::Relaxed);
+        self.sh.loudness_db.set(req.loudness_db.unwrap_or(f64::NAN));
+        self.compressor = None;
         self.sh.position.set(self.written_pos);
         self.make_rings();
         {
@@ -766,7 +802,24 @@ impl Worker {
     /// Applies gain/fade and writes to the rings.
     fn finish_block(&mut self, out: &mut [f32]) {
         // The deck volume (trim) is applied in the output callback.
-        let g = db_to_gain(self.sh.track_gain_db.get());
+        // A changed gain is reached over this block (no step in the level).
+        let target = db_to_gain(self.sh.track_gain_db.get()) as f32;
+        let (from, frames) = (self.gain_now, (out.len() / 2).max(1));
+        self.gain_now = target;
+        for (i, fr) in out.chunks_exact_mut(2).enumerate() {
+            let g = from + (target - from) * (i + 1) as f32 / frames as f32;
+            fr[0] *= g;
+            fr[1] *= g;
+        }
+        // Evening out dynamics, before the fade (which it mustn't undo).
+        let reference = self.sh.loudness_db.get() as f32;
+        match super::compressor::Strength::from_index(self.sh.compression.load(Ordering::Relaxed)) {
+            Some(s) if reference.is_finite() => {
+                let rate = self.sh.rate.load(Ordering::Relaxed) as f32;
+                self.compressor.get_or_insert_with(super::compressor::Compressor::new).process(out, rate, s, reference);
+            }
+            _ => self.compressor = None,
+        }
         let mut fade_done = false;
         for fr in out.chunks_exact_mut(2) {
             if let Some(step) = self.fade_step {
@@ -777,8 +830,8 @@ impl Worker {
             }
             // Equal-power-ish curve for the fade.
             let fg = self.fade_gain * self.fade_gain;
-            fr[0] = soft_clip(fr[0] * g * fg);
-            fr[1] = soft_clip(fr[1] * g * fg);
+            fr[0] = soft_clip(fr[0] * fg);
+            fr[1] = soft_clip(fr[1] * fg);
         }
         for (i, (p, clock)) in self.prods.iter_mut().enumerate() {
             let n = if *clock { out.len() } else { (p.slots() / 2 * 2).min(out.len()) };

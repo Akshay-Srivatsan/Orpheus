@@ -1,11 +1,13 @@
-//! Offline track analysis: BPM, meter, colored waveform overview, loudness, silence.
+//! Offline track analysis: BPM, meter, colored waveform overview, silence (and
+//! the level measured as it's decoded: `level.rs`).
 
 use crate::store::Analysis;
 use rustfft::{num_complex::Complex, FftPlanner};
 
 /// Bumped when analysis gains results (2: meter; 3: quieter silence
-/// threshold; 4: fingerprints); older tracks are re-analysed.
-pub const VERSION: u32 = 4;
+/// threshold; 4: fingerprints; 5: loudness in LUFS, and true peak); older
+/// tracks are re-analysed.
+pub const VERSION: u32 = 5;
 
 /// Number of waveform bins stored per track; each bin is 4 bytes:
 /// peak, low-band, mid-band, high-band (all 0..=255).
@@ -13,7 +15,8 @@ pub const WAVEFORM_BINS: usize = 1024;
 
 /// `known_bpm`: a tempo the DJ set (or from tags); the meter is detected on
 /// that beat grid rather than the detected one.
-pub fn analyze(mono: &[f32], sr: u32, known_bpm: Option<f64>) -> Analysis {
+/// `level`: its loudness and peak, measured on the stereo audio as it was decoded.
+pub fn analyze(mono: &[f32], sr: u32, known_bpm: Option<f64>, level: Option<crate::level::Level>) -> Analysis {
     let duration_ms = (mono.len() as f64 / sr as f64 * 1000.0) as i64;
     let (start, end) = silence_bounds(mono, sr);
     let detected = detect_bpm(mono, sr);
@@ -27,7 +30,8 @@ pub fn analyze(mono: &[f32], sr: u32, known_bpm: Option<f64>) -> Analysis {
         duration_ms,
         meter: meter.map(|m| m.beats_per_bar),
         bpm,
-        loudness_db: loudness(mono, sr),
+        loudness_db: level.map(|l| l.lufs),
+        peak_db: level.map(|l| l.true_peak_db),
         audio_start_ms: start,
         audio_end_ms: end,
         waveform: waveform(mono, sr),
@@ -86,35 +90,6 @@ pub fn waveform(mono: &[f32], sr: u32) -> Vec<u8> {
 
 fn one_pole_coeff(cutoff: f32, sr: u32) -> f32 {
     1.0 - (-2.0 * std::f32::consts::PI * cutoff / sr as f32).exp()
-}
-
-/// Approximate integrated loudness (LUFS-like, without K-weighting):
-/// 400 ms blocks, absolute gate at -70 dB, relative gate at -10 dB.
-pub fn loudness(mono: &[f32], sr: u32) -> Option<f64> {
-    let block = (sr as f64 * 0.4) as usize;
-    let hop = block / 4;
-    if mono.len() < block {
-        return None;
-    }
-    let mut powers = vec![];
-    let mut i = 0;
-    while i + block <= mono.len() {
-        let p: f64 = mono[i..i + block].iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>() / block as f64;
-        powers.push(p);
-        i += hop;
-    }
-    let to_db = |p: f64| -0.691 + 10.0 * p.max(1e-12).log10();
-    let abs: Vec<f64> = powers.into_iter().filter(|&p| to_db(p) > -70.0).collect();
-    if abs.is_empty() {
-        return None;
-    }
-    let mean = abs.iter().sum::<f64>() / abs.len() as f64;
-    let rel_gate = to_db(mean) - 10.0;
-    let gated: Vec<f64> = abs.into_iter().filter(|&p| to_db(p) > rel_gate).collect();
-    if gated.is_empty() {
-        return None;
-    }
-    Some(to_db(gated.iter().sum::<f64>() / gated.len() as f64))
 }
 
 /// Below this (RMS over 10 ms) counts as silence. Fade-outs are still audible
@@ -552,7 +527,6 @@ mod tests {
         assert!(e.unwrap() > 5500 && e.unwrap() < 6100, "end {e:?}");
         let w = waveform(&audio, sr);
         assert_eq!(w.len(), WAVEFORM_BINS * 4);
-        assert!(loudness(&audio, sr).unwrap() < 0.0);
     }
 
     /// A fade-out is music until it's really inaudible, not cut mid-fade.

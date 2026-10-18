@@ -328,7 +328,10 @@ pub struct RecordingRecord {
     pub detected_meter: Option<u8>,
     #[serde(skip_serializing_if = "is_zero")]
     pub gain_db: f64,
+    /// Integrated loudness (LUFS, EBU R128) and true peak (dBTP), from analysis.
     pub loudness_db: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peak_db: Option<f64>,
     pub audio_start_ms: Option<i64>,
     pub audio_end_ms: Option<i64>,
     /// Chromaprint fingerprint (text form): identifies this recording in any
@@ -517,6 +520,7 @@ impl TrackRecord {
             detected_meter: l.detected_meter,
             gain_db: l.gain_db,
             loudness_db: l.loudness_db,
+            peak_db: None,
             audio_start_ms: l.audio_start_ms,
             audio_end_ms: l.audio_end_ms,
             fingerprint: l.fingerprint,

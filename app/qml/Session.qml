@@ -18,6 +18,8 @@ QtObject {
     property var levels: null
     property var spotify: null
     property var scan: null
+    /// What analysis is doing: { current: [{ id, title }], waiting }.
+    property var analysis: null
     property var outputs: null
     property var stems: null
     property var tts: null
@@ -252,6 +254,7 @@ QtObject {
             case "styles-changed": session.refreshStyles(); session.libraryChanged([]); break;
             case "settings-changed": session.settings = p; session.refreshClub(); break;
             case "scan-progress": session.scan = p; break;
+            case "analysis": session.analysis = p; break;
             case "spotify-status": session.spotify = p; break;
             case "output-status": session.outputs = p; break;
             case "stems-status": session.stems = p; break;
