@@ -11,10 +11,29 @@ ColumnLayout {
     property bool compact: false
     /// Which tracks are in the library (by index).
     property var inLibrary: []
+    /// The selected tracks (by URI), and the row a Shift-click extends from.
+    property var selectedUris: []
+    property int anchor: -1
 
     spacing: 0
 
-    onTracksChanged: refreshKnown()
+    onTracksChanged: { refreshKnown(); selectedUris = selectedUris.filter(u => tracks.some(t => t.uri === u)); }
+
+    /// A click on a row: selects it; with Ctrl (⌘ on a Mac) adds or removes
+    /// it; with Shift, selects from the last row clicked to it.
+    function click(index, modifiers) {
+        const uri = tracks[index].uri;
+        if ((modifiers & Qt.ShiftModifier) && anchor >= 0 && anchor < tracks.length) {
+            const range = tracks.slice(Math.min(anchor, index), Math.max(anchor, index) + 1).map(t => t.uri);
+            selectedUris = (modifiers & Qt.ControlModifier) ? [...new Set(selectedUris.concat(range))] : range;
+            return;
+        }
+        if (modifiers & Qt.ControlModifier) selectedUris = selectedUris.includes(uri) ? selectedUris.filter(u => u !== uri) : selectedUris.concat([uri]);
+        else selectedUris = [uri];
+        anchor = index;
+    }
+    /// What a row's menu or drag acts on: the selection, if the row is in it, else the row.
+    function picked(t) { return selectedUris.includes(t.uri) ? tracks.filter(x => selectedUris.includes(x.uri)) : [t]; }
     Connections { target: Session; function onLibraryChanged() { root.refreshKnown(); } }
     function refreshKnown() {
         if (!tracks.length) { inLibrary = []; return; }
@@ -25,9 +44,13 @@ ColumnLayout {
     function versions(list, library) { return Session.run("spotify_versions", { tracks: list, inLibrary: library }); }
     function preview(t) { versions([t], false).then(v => { if (v && v[0]) Session.preview(v[0], null); }); }
     function load(t) { versions([t], false).then(v => { if (v && v[0]) Session.loadDeck(null, v[0], null); }); }
-    function toSet(t, where) { versions([t], false).then(v => { if (v && v.length) Session.addToSet(v, where); }); }
-    function toLibrary(t) { versions([t], true).then(v => { if (v) Session.toast(qsTr("Added “%1” to your library").arg(t.title), "info"); }); }
-    function tagStyle(t, style) { versions([t], true).then(v => { if (v && v.length) Session.run("style_add", { style: style, versionIds: v }); }); }
+    function toSet(list, where) { versions(list, false).then(v => { if (v && v.length) Session.addToSet(v, where); }); }
+    function toLibrary(list) {
+        versions(list, true).then(v => {
+            if (v) Session.toast(list.length === 1 ? qsTr("Added “%1” to your library").arg(list[0].title) : qsTr("Added %n song(s) to your library", "", list.length), "info");
+        });
+    }
+    function tagStyle(list, style) { versions(list, true).then(v => { if (v && v.length) Session.run("style_add", { style: style, versionIds: v }); }); }
 
     Repeater {
         model: root.tracks
@@ -36,7 +59,13 @@ ColumnLayout {
             required property var modelData
             required property int index
             Layout.fillWidth: true
+            highlighted: root.selectedUris.includes(modelData.uri)
             onDoubleClicked: root.load(modelData)
+            TapHandler {
+                id: tap
+                acceptedButtons: Qt.LeftButton
+                onTapped: root.click(item.index, tap.point.modifiers)
+            }
 
             contentItem: RowLayout {
                 spacing: Theme.spacing
@@ -60,8 +89,8 @@ ColumnLayout {
                 }
                 Label { text: Session.fmtTime(item.modelData.durationMs); opacity: 0.7 }
                 ToolButton { icon.color: palette.buttonText; icon.source: Theme.icon("headphones"); ToolTip.visible: hovered; ToolTip.text: qsTr("Preview in headphones"); onClicked: root.preview(item.modelData) }
-                Button { text: qsTr("Next"); ToolTip.visible: hovered; ToolTip.text: qsTr("Play next (not added to your library)"); onClicked: root.toSet(item.modelData, "next") }
-                Button { text: qsTr("End"); ToolTip.visible: hovered; ToolTip.text: qsTr("Add to the end of the set (not added to your library)"); onClicked: root.toSet(item.modelData, "end") }
+                Button { text: qsTr("Next"); ToolTip.visible: hovered; ToolTip.text: qsTr("Play next (not added to your library)"); onClicked: root.toSet([item.modelData], "next") }
+                Button { text: qsTr("End"); ToolTip.visible: hovered; ToolTip.text: qsTr("Add to the end of the set (not added to your library)"); onClicked: root.toSet([item.modelData], "end") }
                 // In the library (a check), or a button to add it: one slot, so rows line up.
                 Item {
                     implicitWidth: addButton.implicitWidth
@@ -82,28 +111,40 @@ ColumnLayout {
                         enabled: !root.inLibrary[item.index]
                         icon.source: Theme.icon("plus")
                         ToolTip.visible: hovered; ToolTip.text: qsTr("Add to library")
-                        onClicked: root.toLibrary(item.modelData)
+                        onClicked: root.toLibrary([item.modelData])
                     }
                 }
             }
 
-            TapHandler { acceptedButtons: Qt.RightButton; onTapped: trackMenu.popup() }
+            TapHandler {
+                acceptedButtons: Qt.RightButton
+                onTapped: {
+                    if (!root.selectedUris.includes(item.modelData.uri)) root.click(item.index, 0);
+                    trackMenu.popup();
+                }
+            }
             // Drag it to the set, a deck or a style.
             DragHandler { id: dragging; target: null }
             Item {
                 Drag.active: dragging.active
                 Drag.dragType: Drag.Automatic
                 Drag.supportedActions: Qt.CopyAction
-                Drag.mimeData: ({ "application/x-orpheus-spotify": JSON.stringify([item.modelData]) })
+                Drag.mimeData: ({ "application/x-orpheus-spotify": JSON.stringify(root.picked(item.modelData)) })
             }
             Menu {
                 id: trackMenu
                 MenuItem { text: qsTr("Load onto the Off-Air Deck"); onTriggered: root.load(item.modelData) }
                 MenuItem { text: qsTr("Preview in Headphones"); onTriggered: root.preview(item.modelData) }
-                MenuItem { text: qsTr("Play Next"); onTriggered: root.toSet(item.modelData, "next") }
-                MenuItem { text: qsTr("Add to End of Set"); onTriggered: root.toSet(item.modelData, "end") }
+                MenuItem { text: qsTr("Play Next"); onTriggered: root.toSet(root.picked(item.modelData), "next") }
+                MenuItem { text: qsTr("Add to End of Set"); onTriggered: root.toSet(root.picked(item.modelData), "end") }
                 MenuSeparator {}
-                MenuItem { visible: !root.inLibrary[item.index]; height: visible ? implicitHeight : 0; text: qsTr("Add to Library"); onTriggered: root.toLibrary(item.modelData) }
+                MenuItem {
+                    // Those not in the library yet.
+                    readonly property var adding: root.picked(item.modelData).filter(t => !root.inLibrary[root.tracks.indexOf(t)])
+                    enabled: adding.length > 0
+                    text: adding.length > 1 ? qsTr("Add %1 to Library").arg(adding.length) : qsTr("Add to Library")
+                    onTriggered: root.toLibrary(adding)
+                }
                 Menu {
                     id: asStyle
                     title: qsTr("Add to Library as")
@@ -113,7 +154,7 @@ ColumnLayout {
                         delegate: MenuItem {
                             required property var modelData
                             text: modelData.name
-                            onTriggered: root.tagStyle(item.modelData, modelData.key)
+                            onTriggered: root.tagStyle(root.picked(item.modelData), modelData.key)
                         }
                         onObjectAdded: (i, o) => asStyle.insertItem(i, o)
                         onObjectRemoved: (i, o) => asStyle.removeItem(o)
