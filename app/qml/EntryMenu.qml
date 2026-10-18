@@ -18,20 +18,33 @@ Menu {
     signal remove()
     signal moveNext()
 
-    function update(patch) { return Session.run("entry_update", { id: e.id, patch: patch }); }
+    /// The entries it acts on (the selection, if it's part of it), as the set shows them.
+    readonly property var rows: Session.set ? ids.map(id => Session.set.rows.find(r => r.entry.id === id)).filter(r => !!r) : (row ? [row] : [])
 
-    /// Shows or stops showing one style: any of the club's in a club's set,
-    /// else one of the version's own (all of them, or none chosen: as it is).
+    /// Changes each entry it acts on: `patch` is the change, or makes it from a row.
+    function update(patch) {
+        for (const r of rows) {
+            const p = typeof patch === "function" ? patch(r) : patch;
+            if (p) Session.run("entry_update", { id: r.entry.id, patch: p });
+        }
+    }
+
+    /// Shows or stops showing one style (on all of them, as it is on the one
+    /// clicked): any of the club's in a club's set, else one of the version's
+    /// own (all of them, or none chosen: as it is).
     function toggleStyle(key) {
         const on = shownKeys.includes(key);
-        if (club) {
-            const next = on ? shownKeys.filter(k => k !== key) : shownKeys.concat([key]);
-            update({ clubStyles: next.length ? next : null });
-        } else {
-            const all = row.showAs.map(x => x.key);
-            const next = all.filter(k => k === key ? !on : shownKeys.includes(k));
-            update({ styles: next.length === all.length || !next.length ? null : next });
-        }
+        update(r => {
+            const shown = r.showAs.filter(x => x.on).map(x => x.key);
+            if (club) {
+                const next = on ? shown.filter(k => k !== key) : shown.includes(key) ? shown : shown.concat([key]);
+                return { clubStyles: next.length ? next : null };
+            }
+            const all = r.showAs.map(x => x.key);
+            if (!all.includes(key)) return null;
+            const next = all.filter(k => k === key ? !on : shown.includes(k));
+            return { styles: next.length === all.length || !next.length ? null : next };
+        });
     }
 
     MenuItem {
@@ -75,7 +88,8 @@ Menu {
         height: visible ? implicitHeight : 0
         text: qsTr("Skip")
         enabled: !root.current
-        onTriggered: root.ids.forEach(id => Session.run("entry_update", { id: id, patch: { status: "skipped" } }))
+        // (Not the one playing.)
+        onTriggered: root.update(r => Session.perform && r.entry.id === Session.perform.currentEntryId ? null : { status: "skipped" })
     }
     MenuItem {
         visible: !!root.e && root.e.status === "played"
@@ -119,8 +133,12 @@ Menu {
                 checkable: true
                 checked: !!root.e && (root.e.tags || []).includes(modelData.key)
                 onTriggered: {
-                    const tags = root.e.tags || [];
-                    root.update({ tags: tags.includes(modelData.key) ? tags.filter(t => t !== modelData.key) : tags.concat([modelData.key]) });
+                    // On all of them, as it is on the one clicked.
+                    const on = (root.e.tags || []).includes(modelData.key);
+                    root.update(r => {
+                        const tags = r.entry.tags || [];
+                        return { tags: on ? tags.filter(t => t !== modelData.key) : tags.includes(modelData.key) ? tags : tags.concat([modelData.key]) };
+                    });
                 }
             }
             onObjectAdded: (i, o) => tagMenu.insertItem(i, o)

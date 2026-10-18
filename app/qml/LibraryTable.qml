@@ -197,6 +197,25 @@ FocusScope {
         restoring = false;
     }
 
+    /// The row a Shift-click extends the selection from (the last clicked).
+    property int anchorRow: -1
+    /// A click on a row: selects it; with Ctrl (⌘ on a Mac) adds or removes
+    /// it; with Shift, selects from the last row clicked to it. (The rows
+    /// handle their clicks, for double-clicks and dragging, so the view's own
+    /// click selection is off.)
+    function clickRow(row, modifiers) {
+        const index = tree.index(row, 0);
+        if ((modifiers & Qt.ShiftModifier) && anchorRow >= 0 && anchorRow < tree.rows) {
+            if (!(modifiers & Qt.ControlModifier)) selection.clearSelection();
+            for (let r = Math.min(anchorRow, row); r <= Math.max(anchorRow, row); r++)
+                selection.select(tree.index(r, 0), ItemSelectionModel.Select | ItemSelectionModel.Rows);
+            selection.setCurrentIndex(index, ItemSelectionModel.NoUpdate);
+            return;
+        }
+        selection.setCurrentIndex(index, ((modifiers & Qt.ControlModifier) ? ItemSelectionModel.Toggle : ItemSelectionModel.ClearAndSelect) | ItemSelectionModel.Rows);
+        anchorRow = row;
+    }
+
     function rowAt(r) { return r >= 0 && r < tree.rows ? flat[songs.data(tree.index(r, 0), Qt.DisplayRole)] : null; }
 
     ItemSelectionModel {
@@ -347,6 +366,7 @@ FocusScope {
                 selectionModel: selection
                 selectionBehavior: TableView.SelectRows
                 selectionMode: TableView.ExtendedSelection
+                pointerNavigationEnabled: false
                 alternatingRows: true
                 boundsBehavior: Flickable.StopAtBounds
                 columnWidthProvider: c => root.columnWidth(c)
@@ -375,6 +395,9 @@ FocusScope {
                     readonly property bool audible: !!r && Session.decks.some(d => d && d.versionId === r.versionId && d.audible)
                     /// Dimmed: played in the open set, suggested by tempo, missing, or hidden from the library.
                     readonly property bool dim: !!r && (r.playedInSet || r.suggested || r.availability === "missing" || r.unlisted)
+                    // Selected rows only (TreeViewDelegate also highlights the current
+                    // row: a row Ctrl-clicked out of the selection looked still in it).
+                    highlighted: selected
                     readonly property color fg: highlighted ? palette.highlightedText : palette.text
 
                     contentItem: Loader {
@@ -499,7 +522,9 @@ FocusScope {
                     }
 
                     TapHandler {
+                        id: tap
                         acceptedButtons: Qt.LeftButton
+                        onTapped: root.clickRow(cell.row, tap.point.modifiers)
                         onDoubleTapped: root.choose(cell.r)
                     }
                     TapHandler {
