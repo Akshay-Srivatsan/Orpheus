@@ -65,7 +65,7 @@ FitMenu {
         text: unlisted ? qsTr("Show in the Library") : qsTr("Hide from the Library")
         onTriggered: Session.setUnlisted(root.ids, !unlisted)
     }
-    MenuItem { text: qsTr("Add to End of Set"); onTriggered: Session.addToSet(root.ids, "end") }
+    MenuItem { text: qsTr("Add to the End of the Set"); onTriggered: Session.addToSet(root.ids, "end") }
     MenuItem { text: qsTr("Preview in Headphones (free deck)"); onTriggered: Session.preview(root.ids[0], null) }
     FitMenu {
         title: qsTr("Load onto")

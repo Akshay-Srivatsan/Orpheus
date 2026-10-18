@@ -90,7 +90,7 @@ ColumnLayout {
                 Label { text: Session.fmtTime(item.modelData.durationMs); opacity: 0.7 }
                 ToolButton { icon.color: palette.buttonText; icon.source: Theme.icon("headphones"); ToolTip.visible: hovered; ToolTip.text: qsTr("Preview in headphones"); onClicked: root.preview(item.modelData) }
                 Button { text: qsTr("Next"); ToolTip.visible: hovered; ToolTip.text: Session.addAfterText + qsTr(" (not to your library)"); onClicked: root.toSet([item.modelData], "next") }
-                Button { text: qsTr("End"); ToolTip.visible: hovered; ToolTip.text: qsTr("Add to the end of the set (not added to your library)"); onClicked: root.toSet([item.modelData], "end") }
+                Button { text: qsTr("End"); ToolTip.visible: hovered; ToolTip.text: qsTr("Add to the End of the Set") + qsTr(" (not to your library)"); onClicked: root.toSet([item.modelData], "end") }
                 // In the library (a check), or a button to add it: one slot, so rows line up.
                 Item {
                     implicitWidth: addButton.implicitWidth
@@ -136,7 +136,7 @@ ColumnLayout {
                 MenuItem { text: qsTr("Load onto the Off-Air Deck"); onTriggered: root.load(item.modelData) }
                 MenuItem { text: qsTr("Preview in Headphones"); onTriggered: root.preview(item.modelData) }
                 MenuItem { text: Session.addAfterText; onTriggered: root.toSet(root.picked(item.modelData), "next") }
-                MenuItem { text: qsTr("Add to End of Set"); onTriggered: root.toSet(root.picked(item.modelData), "end") }
+                MenuItem { text: qsTr("Add to the End of the Set"); onTriggered: root.toSet(root.picked(item.modelData), "end") }
                 MenuSeparator {}
                 MenuItem {
                     // Those not in the library yet.

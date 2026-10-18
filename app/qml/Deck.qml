@@ -150,7 +150,7 @@ Frame {
                     }
                     MenuItem { text: qsTr("Reset Tempo"); enabled: root.loaded; onTriggered: root.call("deck_tempo_reset") }
                     MenuItem {
-                        text: Session.insertAfterRow ? qsTr("Add to the Set After “%1”").arg(Session.insertAfterName) : qsTr("Add at the Start of the Set")
+                        text: Session.addAfterText
                         enabled: !!root.d && !!root.d.versionId && !root.d.entryId
                         onTriggered: Session.addToSet([root.d.versionId], "next")
                     }

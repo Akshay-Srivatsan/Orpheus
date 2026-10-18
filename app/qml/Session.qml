@@ -106,7 +106,7 @@ QtObject {
     readonly property var insertAfterRow: set && perform && perform.insertAfter ? set.rows.find(r => r.entry.id === perform.insertAfter) || null : null
     readonly property string insertAfterName: !insertAfterRow ? "" : insertAfterRow.isPause ? qsTr("the pause") : insertAfterRow.title || insertAfterRow.label || qsTr("the slot")
     /// How the menus say where songs go (after that entry, else the start).
-    readonly property string addAfterText: insertAfterRow ? qsTr("Add After “%1”").arg(insertAfterName) : qsTr("Add at the Start of the Set")
+    readonly property string addAfterText: insertAfterRow ? qsTr("Add After “%1”").arg(insertAfterName) : qsTr("Add to the Start of the Set")
     readonly property string moveAfterText: insertAfterRow ? qsTr("Move After “%1”").arg(insertAfterName) : qsTr("Move to the Start of the Set")
     readonly property var selectedSet: { const m = {}; for (const id of selected) m[id] = true; return m; }
     readonly property var selectedEntriesSet: { const m = {}; for (const id of selectedEntries) m[id] = true; return m; }

@@ -101,7 +101,7 @@ ApplicationWindow {
         FitMenu {
             title: qsTr("&Library")
             Action { text: Session.addAfterText; enabled: Session.selected.length > 0; onTriggered: Session.addToSet(Session.selected, "next") }
-            Action { text: qsTr("Add to &End of Set"); enabled: Session.selected.length > 0; onTriggered: Session.addToSet(Session.selected, "end") }
+            Action { text: qsTr("Add to the &End of the Set"); enabled: Session.selected.length > 0; onTriggered: Session.addToSet(Session.selected, "end") }
             Action { text: qsTr("&Preview in Headphones"); enabled: Session.selected.length > 0; onTriggered: Session.preview(Session.selected[0], null) }
             MenuSeparator {}
             Action { text: qsTr("&Combine…"); enabled: Session.selected.length > 1; onTriggered: library.table.combineSelected() }
