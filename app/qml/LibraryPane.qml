@@ -46,6 +46,7 @@ Pane {
             suggestByTempo: Session.suggestByTempo,
             // A chime is often a version kept out of the lists.
             showUnlisted: Session.showUnlisted || !!Session.chimePick,
+            rules: Session.filterConditions.length ? { match: "all", conditions: Session.filterConditions } : null,
         };
     }
     /// Club songs: how many of the club's suggested songs are here.
@@ -87,6 +88,7 @@ Pane {
         function onDescendingChanged() { later.restart(); }
         function onSuggestByTempoChanged() { later.restart(); }
         function onShowUnlistedChanged() { later.restart(); }
+        function onFilterConditionsChanged() { later.restart(); }
         function onDraggingChanged() { if (!Session.dragging && root.missed) later.restart(); }
         function onChimePickChanged() { later.restart(); }
         function onLibraryChanged() { later.restart(); }

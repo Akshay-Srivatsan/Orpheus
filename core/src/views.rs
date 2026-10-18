@@ -431,6 +431,8 @@ pub struct LibraryQuery {
     pub suggest_by_tempo: bool,
     /// Versions you hid from the library are listed too.
     pub show_unlisted: bool,
+    /// Only songs these rules match (the filters; none: all).
+    pub rules: Option<crate::smart::Rules>,
 }
 
 /// Where a song plays from.
@@ -751,6 +753,13 @@ pub fn library_view(ctx: &ViewContext, data: &LibraryData, q: &LibraryQuery) -> 
             .to_lowercase();
             words.iter().all(|w| hay.contains(w))
         });
+    }
+
+    // The filters: what their rules match (a song's rules may test crates).
+    if let Some(rules) = q.rules.as_ref().filter(|r| !r.conditions.is_empty()) {
+        let candidates: Vec<crate::smart::Candidate> = library_items().map(|(track, version)| crate::smart::Candidate { track, version }).collect();
+        let ev = crate::smart::Evaluator { ctx, crates: data.crates, library: &candidates, now: data.now };
+        items.retain(|it| ev.matches(rules, &crate::smart::Candidate { track: it.track, version: it.version }, 0));
     }
 
     // Sort: crates and setlists default to their own order; history to when.

@@ -40,6 +40,38 @@ QtObject {
     // ------------------------------------------------------------ what's shown
     property var view: ({ kind: "all" })
     property var styleFilter: []
+    /// The library's other filters: tags (any of these), the meter (`duple`,
+    /// `triple`, `isEmpty`; empty: any), a tempo range (BPM; null: open) and
+    /// more rules (smart-crate conditions). All of them apply at once.
+    property var filterTags: []
+    property string filterMeter: ""
+    property var filterBpmMin: null
+    property var filterBpmMax: null
+    property var filterMore: []
+    readonly property var filterConditions: {
+        const c = [];
+        if (filterTags.length) c.push({ field: "tag", op: "hasAny", value: filterTags });
+        if (filterMeter) c.push({ field: "meter", op: filterMeter });
+        const lo = filterBpmMin, hi = filterBpmMax;
+        if (lo !== null && hi !== null) c.push({ field: "bpm", op: "between", value: [Math.min(lo, hi), Math.max(lo, hi)] });
+        else if (lo !== null) c.push({ field: "bpm", op: "atLeast", value: lo });
+        else if (hi !== null) c.push({ field: "bpm", op: "atMost", value: hi });
+        return c.concat(filterMore);
+    }
+    readonly property bool filtering: styleFilter.length > 0 || filterConditions.length > 0
+    function clearFilters() {
+        styleFilter = []; filterTags = []; filterMeter = ""; filterBpmMin = null; filterBpmMax = null; filterMore = [];
+    }
+    /// All the filters as one set of smart-crate rules (the styles too).
+    function filterRules() {
+        const styles = styleFilter.filter(k => k !== "__none");
+        const c = styles.length ? [{ field: "style", op: "isAny", value: styles }]
+            : styleFilter.includes("__none") ? [{ field: "style", op: "isEmpty" }] : [];
+        return { match: "all", conditions: c.concat(filterConditions) };
+    }
+    /// The more-filters editor, or a new smart crate from the filters (Main opens them).
+    signal filtersEditRequested()
+    signal saveFiltersRequested()
     property string search: ""
     /// Sort column ("" = the view's own order) and direction.
     property string sort: ""

@@ -16,13 +16,15 @@ pub enum Match {
 }
 
 /// A condition's value: a style key, number, `[min, max]`, text, source
-/// kind, crate id or tag key, depending on the operator.
+/// kind, crate id or tag key, or several style or tag keys, depending on
+/// the operator.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum Value {
     Range([f64; 2]),
     Number(f64),
     Text(String),
+    List(Vec<String>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -47,6 +49,14 @@ impl Value {
             Value::Text(s) => s.clone(),
             Value::Number(n) => n.to_string(),
             Value::Range([a, b]) => format!("{a}–{b}"),
+            Value::List(l) => l.join(", "),
+        }
+    }
+    /// Its keys (one, or a list).
+    fn keys(&self) -> Vec<String> {
+        match self {
+            Value::List(l) => l.clone(),
+            other => vec![other.text()],
         }
     }
     fn number(&self) -> Option<f64> {
@@ -72,6 +82,9 @@ pub enum Input {
     Crate,
     Tag,
     Days,
+    /// Several of your styles, or tags.
+    Styles,
+    Tags,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -97,7 +110,11 @@ pub fn fields() -> Vec<FieldDef> {
     use Input::*;
     let f = |field, label, ops| FieldDef { field, label, ops };
     vec![
-        f("style", "Dance style", vec![op("is", "is", Style), op("isNot", "is not", Style), op("isSet", "is set", None), op("isEmpty", "is not set", None)]),
+        f(
+            "style",
+            "Dance style",
+            vec![op("is", "is", Style), op("isAny", "is any of", Styles), op("isNot", "is not", Style), op("isSet", "is set", None), op("isEmpty", "is not set", None)],
+        ),
         f(
             "bpm",
             "Tempo",
@@ -130,7 +147,7 @@ pub fn fields() -> Vec<FieldDef> {
         ),
         f("added", "Added", vec![op("withinDays", "in the last (days)", Days)]),
         f("crate", "Crate", vec![op("in", "contains it", Crate), op("notIn", "doesn't contain it", Crate)]),
-        f("tag", "Tag", vec![op("has", "includes", Tag), op("lacks", "doesn't include", Tag)]),
+        f("tag", "Tag", vec![op("has", "includes", Tag), op("hasAny", "includes any of", Tags), op("lacks", "doesn't include", Tag)]),
     ]
 }
 
@@ -144,6 +161,7 @@ pub fn default_condition(field: &str) -> Condition {
         Input::Range => Some(Value::Range(DEFAULT_RANGE)),
         Input::Number | Input::Days => Some(Value::Number(if def.field == "duration" { DEFAULT_LENGTH_SECS } else { DEFAULT_COUNT })),
         Input::Source => Some(Value::Text("file".into())),
+        Input::Styles | Input::Tags => Some(Value::List(vec![])),
         _ => None,
     };
     Condition { field: def.field.to_string(), op: first.op.to_string(), value }
@@ -164,6 +182,7 @@ pub fn describe(c: &Condition, styles: &StyleLibrary, crates: &[Crate]) -> Strin
     let val = match (op.map(|o| o.input), &c.value) {
         (Some(Input::None), _) | (_, None) => String::new(),
         (Some(Input::Style), Some(v)) => views::style_name(styles, &v.text()),
+        (Some(Input::Styles), Some(v)) => v.keys().iter().map(|k| views::style_name(styles, k)).collect::<Vec<_>>().join(" or "),
         (Some(Input::Crate), Some(v)) => crates.iter().find(|x| x.id == v.text()).map_or("?".into(), |x| x.name.clone()),
         (_, Some(v)) => v.text(),
     };
@@ -246,6 +265,7 @@ impl Evaluator<'_> {
         match cond.field.as_str() {
             "style" => match cond.op.as_str() {
                 "is" => value.is_some_and(|x| own.contains(&x.text())),
+                "isAny" => value.is_some_and(|x| x.keys().iter().any(|k| own.contains(k))),
                 "isNot" => !value.is_some_and(|x| own.contains(&x.text())),
                 "isSet" => !own.is_empty(),
                 "isEmpty" => own.is_empty(),
@@ -332,6 +352,9 @@ impl Evaluator<'_> {
                 }
             }
             "tag" => {
+                if cond.op == "hasAny" {
+                    return value.is_some_and(|x| x.keys().iter().any(|k| v.tags.contains(k)));
+                }
                 let has = value.is_some_and(|x| v.tags.contains(&x.text()));
                 if cond.op == "lacks" {
                     !has
@@ -467,6 +490,21 @@ mod tests {
         assert_eq!(run(any, &[]), ["v1", "v5"]);
         assert_eq!(run(one("lastPlayed", "never", serde_json::Value::Null), &[]).len(), 5);
         assert!(run(serde_json::json!({ "match": "all", "conditions": [] }), &[]).is_empty());
+    }
+
+    #[test]
+    fn any_of_several_styles_or_tags() {
+        assert_eq!(run(one("style", "isAny", serde_json::json!(["rotary-waltz", "cross-step-waltz"])), &[]), ["v1", "v2"]);
+        assert_eq!(run(one("tag", "hasAny", serde_json::json!(["classic", "nope"])), &[]), ["v4"]);
+        // The library's filters together: a tag, a meter and a tempo range all at once.
+        let filters = serde_json::json!({ "match": "all", "conditions": [
+            { "field": "tag", "op": "hasAny", "value": ["classic"] },
+            { "field": "meter", "op": "triple" },
+            { "field": "bpm", "op": "between", "value": [100, 115] },
+        ]});
+        assert_eq!(run(filters, &[]), ["v4"]);
+        let lib = StyleLibrary::default();
+        assert!(describe(&serde_json::from_value(serde_json::json!({ "field": "style", "op": "isAny", "value": ["a", "b"] })).unwrap(), &lib, &[]).contains(" or "));
     }
 
     #[test]

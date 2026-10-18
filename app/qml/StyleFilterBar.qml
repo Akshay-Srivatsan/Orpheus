@@ -26,17 +26,81 @@ ColumnLayout {
         return { key: st.key, name: qsTr("%1 (%2)").arg(st.name).arg(c ? c.songs : 0), on: Session.styleFilter.includes(st.key) };
     }).concat([{ key: "__none", name: qsTr("No style (%1)").arg(view.noStyleSongs), on: Session.styleFilter.includes("__none") }])
 
-    RowLayout {
-        Label { text: qsTr("Styles:") }
-        CheckListBox {
-            Layout.preferredWidth: 260
-            items: root.items
-            emptyText: qsTr("All styles")
-            actionText: qsTr("All styles")
-            actionEnabled: Session.styleFilter.length > 0
-            onToggled: key => root.toggle(key, true)
-            onAction: { Session.styleFilter = []; Session.selected = []; }
-            ToolTip.text: qsTr("Show only songs of these styles (Dance Styles in a song's menu labels them)")
+    // Each narrows what's shown; together, songs must match all of them.
+    Flow {
+        Layout.fillWidth: true
+        spacing: Theme.spacing
+        RowLayout {
+            Label { text: qsTr("Styles:") }
+            CheckListBox {
+                Layout.preferredWidth: 220
+                items: root.items
+                emptyText: qsTr("All styles")
+                actionText: qsTr("All styles")
+                actionEnabled: Session.styleFilter.length > 0
+                onToggled: key => root.toggle(key, true)
+                onAction: { Session.styleFilter = []; Session.selected = []; }
+            }
+        }
+        RowLayout {
+            Label { text: qsTr("Tags:") }
+            CheckListBox {
+                Layout.preferredWidth: 160
+                enabled: Session.myTags.length > 0
+                items: Session.myTags.map(t => ({ key: t.key, name: t.name, on: Session.filterTags.includes(t.key) }))
+                emptyText: Session.myTags.length ? qsTr("Any") : qsTr("No tags yet")
+                actionText: qsTr("Any tags")
+                actionEnabled: Session.filterTags.length > 0
+                onToggled: key => Session.filterTags = Session.filterTags.includes(key) ? Session.filterTags.filter(k => k !== key) : Session.filterTags.concat([key])
+                onAction: Session.filterTags = []
+            }
+        }
+        RowLayout {
+            Label { text: qsTr("Meter:") }
+            ComboBox {
+                readonly property var values: ["", "duple", "triple", "isEmpty"]
+                implicitContentWidthPolicy: ComboBox.WidestText
+                model: [qsTr("Any"), qsTr("Duple (2/4, 4/4)"), qsTr("Triple (3/4, 6/8)"), qsTr("Unknown")]
+                currentIndex: Math.max(0, values.indexOf(Session.filterMeter))
+                onActivated: index => Session.filterMeter = values[index]
+            }
+        }
+        RowLayout {
+            Label { text: qsTr("Tempo:") }
+            NumberField {
+                implicitWidth: 64
+                minimum: 0
+                value: Session.filterBpmMin
+                placeholderText: qsTr("from")
+                onCommitted: v => Session.filterBpmMin = v
+            }
+            Label { text: "–" }
+            NumberField {
+                implicitWidth: 64
+                minimum: 0
+                value: Session.filterBpmMax
+                placeholderText: qsTr("to")
+                onCommitted: v => Session.filterBpmMax = v
+            }
+            Label { text: "BPM" }
+        }
+        Button {
+            text: Session.filterMore.length ? qsTr("More Filters (%1)…").arg(Session.filterMore.length) : qsTr("More Filters…")
+            ToolTip.visible: hovered
+            ToolTip.text: qsTr("Length, plays, last played, source, crate, text… (the rules smart crates use)")
+            onClicked: Session.filtersEditRequested()
+        }
+        Button {
+            text: qsTr("Save as Smart Crate…")
+            enabled: Session.filtering
+            ToolTip.visible: hovered
+            ToolTip.text: qsTr("A smart crate of the songs these filters show (it follows the library)")
+            onClicked: Session.saveFiltersRequested()
+        }
+        Button {
+            text: qsTr("Clear Filters")
+            enabled: Session.filtering
+            onClicked: { Session.clearFilters(); Session.selected = []; }
         }
     }
 

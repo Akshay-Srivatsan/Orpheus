@@ -338,6 +338,8 @@ ApplicationWindow {
             confirm.callback = callback;
             confirm.open();
         }
+        function onFiltersEditRequested() { smartCrate.editFilters(); }
+        function onSaveFiltersRequested() { smartCrate.saveFilters(); }
         function onFileRequested(options, callback) {
             if (options.folder) {
                 folders.title = options.title || "";

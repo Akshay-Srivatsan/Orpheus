@@ -5,18 +5,21 @@ import Orpheus
 
 // Creates or edits a smart crate: a crate whose songs are whatever in the
 // library matches its rules (e.g. "in Waltzes and tempo fits Rotary Waltz").
+// With `forFilters`, it edits the library's further filters instead.
 AppDialog {
     id: root
     width: 720
-    title: editing ? qsTr("Edit Smart Crate") : qsTr("New Smart Crate")
+    title: forFilters ? qsTr("More Filters") : editing ? qsTr("Edit Smart Crate") : qsTr("New Smart Crate")
 
     property var editing: null
+    property bool forFilters: false
     property var rules: ({ match: "all", conditions: [] })
     property var fields: []
     property var preview: null
 
     /// Opens it for crate `id` ("new": a new one).
     function edit(id) {
+        forFilters = false;
         editing = id === "new" ? null : Session.crates.find(c => c.id === id) || null;
         const style = Session.styleFilter.length === 1 && Session.styleFilter[0] !== "__none" ? Session.styleFilter[0] : null;
         nameField.text = editing ? editing.name : style ? qsTr("%1 (smart)").arg(Session.styleName(style)) : qsTr("New smart crate");
@@ -26,6 +29,26 @@ AppDialog {
             else if (style) rules = { match: "all", conditions: [{ field: "style", op: "is", value: style }] };
             else Backend.call("smart_default_condition", { field: "style" }).then(c => rules = { match: "all", conditions: [c] });
         });
+        open();
+    }
+
+    /// Opens it on the library's further filters (rules besides those in the filter bar).
+    function editFilters() {
+        forFilters = true;
+        editing = null;
+        Backend.call("smart_fields").then(f => {
+            fields = f;
+            if (Session.filterMore.length) rules = { match: "all", conditions: JSON.parse(JSON.stringify(Session.filterMore)) };
+            else Backend.call("smart_default_condition", { field: "duration" }).then(c => rules = { match: "all", conditions: [c] });
+        });
+        open();
+    }
+    /// A new smart crate holding what the library's filters show now.
+    function saveFilters() {
+        forFilters = false;
+        editing = null;
+        nameField.text = qsTr("Filtered songs");
+        Backend.call("smart_fields").then(f => { fields = f; rules = Session.filterRules(); });
         open();
     }
 
@@ -63,6 +86,7 @@ AppDialog {
             if ((def.input === "number" || def.input === "days") && typeof c.value !== "number") c.value = c.field === "duration" ? 210 : 30;
             if (def.input === "style" && typeof c.value !== "string") c.value = firstValue("style");
             if (def.input === "source" && c.value !== "file" && c.value !== "spotify") c.value = "file";
+            if ((def.input === "styles" || def.input === "tags") && !Array.isArray(c.value)) c.value = typeof c.value === "string" ? [c.value] : [];
             if (def.input === "none") c.value = null;
         });
     }
@@ -74,9 +98,12 @@ AppDialog {
         onTriggered: if (root.rules.conditions.length) Backend.call("smart_preview", { rules: root.rules, editing: root.editing ? root.editing.id : null }).then(p => root.preview = p)
     }
 
-    standardButtons: Dialog.Cancel | Dialog.Save
+    standardButtons: Dialog.Cancel | (forFilters ? Dialog.Ok : Dialog.Save)
     onAccepted: {
-        if (editing) {
+        if (forFilters) {
+            // "All of these" joins the filter bar's; "any" can't (they all apply), so it's kept as all.
+            Session.filterMore = rules.conditions;
+        } else if (editing) {
             if (nameField.text.trim() && nameField.text !== editing.name) Session.run("crate_rename", { id: editing.id, name: nameField.text.trim() });
             Session.run("crate_set_smart", { id: editing.id, smart: rules });
         } else {
@@ -93,11 +120,19 @@ AppDialog {
         spacing: Theme.spacing
 
         RowLayout {
+            visible: !root.forFilters
             Layout.fillWidth: true
             Label { text: qsTr("Name") }
             TextField { id: nameField; Layout.fillWidth: true }
         }
+        Label {
+            visible: root.forFilters
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            text: qsTr("Songs shown must also match all of these (besides the filter bar's styles, tags, meter and tempo):")
+        }
         RowLayout {
+            visible: !root.forFilters
             Label { text: qsTr("Songs matching") }
             ComboBox {
                 implicitContentWidthPolicy: ComboBox.WidestText
@@ -145,6 +180,18 @@ AppDialog {
                         : qsTr("No other crates")
                     onActivated: i => root.setRules(r => r.conditions[cond.index].value = choices[i].id)
                 }
+                // Several styles or tags (any of them).
+                CheckListBox {
+                    visible: !!cond.op && (cond.op.input === "styles" || cond.op.input === "tags")
+                    Layout.fillWidth: true
+                    readonly property var picked: Array.isArray(cond.modelData.value) ? cond.modelData.value : []
+                    items: (cond.op && cond.op.input === "tags" ? Session.myTags : Session.myStyles).map(s => ({ key: s.key, name: s.name, on: picked.includes(s.key) }))
+                    emptyText: qsTr("Choose…")
+                    onToggled: key => root.setRules(r => {
+                        const v = Array.isArray(r.conditions[cond.index].value) ? r.conditions[cond.index].value : [];
+                        r.conditions[cond.index].value = v.includes(key) ? v.filter(k => k !== key) : v.concat([key]);
+                    })
+                }
                 TextField {
                     visible: !!cond.op && (cond.op.input === "number" || cond.op.input === "days")
                     implicitWidth: 80
@@ -180,7 +227,8 @@ AppDialog {
                 ToolButton {
                     icon.color: palette.buttonText
                     icon.source: Theme.icon("minus")
-                    enabled: root.rules.conditions.length > 1
+                    // (More filters can be emptied: none, then.)
+                    enabled: root.rules.conditions.length > 1 || root.forFilters
                     ToolTip.visible: hovered; ToolTip.text: qsTr("Remove rule")
                     onClicked: root.setRules(r => r.conditions.splice(cond.index, 1))
                 }
@@ -196,8 +244,13 @@ AppDialog {
                 }
             }
         }
+        Button {
+            text: qsTr("Add Rule")
+            icon.source: Theme.icon("plus")
+            onClicked: Backend.call("smart_default_condition", { field: "bpm" }).then(c => root.setRules(r => r.conditions.push(c)))
+        }
         Label {
-            visible: !!root.preview
+            visible: !!root.preview && !root.forFilters
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             opacity: 0.75
