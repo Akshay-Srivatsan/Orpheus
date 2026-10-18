@@ -42,6 +42,14 @@ Item {
         });
     }
     onRecordingIdChanged: load()
+    // Not analysed yet when it was loaded: it asks again once the library
+    // changes (analysis finishing says so), until it has one.
+    Connections {
+        target: Session
+        enabled: !!root.recordingId && root.bins.length === 0
+        function onLibraryChanged() { root.load(); }
+        function onRecordingsChanged() { root.load(); }
+    }
     onRevisionChanged: { if (recordingId) delete cache[recordingId]; load(); }
     onBinsChanged: canvas.requestPaint()
 
