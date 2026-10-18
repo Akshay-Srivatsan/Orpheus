@@ -201,8 +201,7 @@ FocusScope {
     property int anchorRow: -1
     /// A click on a row: selects it; with Ctrl (⌘ on a Mac) adds or removes
     /// it; with Shift, selects from the last row clicked to it. (The rows
-    /// handle their clicks, for double-clicks and dragging, so the view's own
-    /// click selection is off.)
+    /// handle their clicks, for double-clicks and dragging.)
     function clickRow(row, modifiers) {
         const index = tree.index(row, 0);
         if ((modifiers & Qt.ShiftModifier) && anchorRow >= 0 && anchorRow < tree.rows) {
@@ -366,7 +365,6 @@ FocusScope {
                 selectionModel: selection
                 selectionBehavior: TableView.SelectRows
                 selectionMode: TableView.ExtendedSelection
-                pointerNavigationEnabled: false
                 alternatingRows: true
                 boundsBehavior: Flickable.StopAtBounds
                 columnWidthProvider: c => root.columnWidth(c)
@@ -524,6 +522,10 @@ FocusScope {
                     TapHandler {
                         id: tap
                         acceptedButtons: Qt.LeftButton
+                        // It takes the press, so the view's own click selection (which
+                        // ignores Ctrl/Shift here) doesn't also act; the fold arrow, an
+                        // item above it, still gets its clicks. Dragging can take over.
+                        gesturePolicy: TapHandler.ReleaseWithinBounds
                         onTapped: root.clickRow(cell.row, tap.point.modifiers)
                         onDoubleTapped: root.choose(cell.r)
                     }
