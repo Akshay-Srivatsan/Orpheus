@@ -188,18 +188,13 @@ Pane {
                         }
                         Component {
                             id: actions
-                            RowLayout {
-                                Button {
-                                    enabled: !!cell.f && cell.f.out
-                                    icon.source: Theme.icon("plus")
-                                    text: qsTr("Add to Library")
-                                    onClicked: root.add([cell.f.path])
-                                }
-                                Button {
-                                    enabled: !!cell.f && !cell.f.out && !!cell.f.recording
-                                    text: qsTr("Remove…")
-                                    onClicked: root.remove(cell.f)
-                                }
+                            // One button, as the file is: out of the library, Add; in it, Remove….
+                            Button {
+                                readonly property bool out: !!cell.f && cell.f.out
+                                enabled: out || (!!cell.f && !!cell.f.recording)
+                                icon.source: out ? Theme.icon("plus") : ""
+                                text: out ? qsTr("Add to Library") : qsTr("Remove…")
+                                onClicked: out ? root.add([cell.f.path]) : root.remove(cell.f)
                             }
                         }
                     }

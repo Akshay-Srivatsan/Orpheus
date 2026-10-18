@@ -55,35 +55,32 @@ ColumnLayout {
                 onValueModified: root.patch({ bpm: value ? value / 10 : null })
                 implicitWidth: 110
             }
-            Button { text: qsTr("Tap"); onClicked: root.tap(); ToolTip.visible: hovered; ToolTip.text: qsTr("Tap along to the beat (4+ taps)") }
+            // (Sized to their text: the row fits the Info panel.)
+            Button { implicitWidth: implicitContentWidth + leftPadding + rightPadding; text: qsTr("Tap"); onClicked: root.tap(); ToolTip.visible: hovered; ToolTip.text: qsTr("Tap along to the beat (4+ taps)") }
             Button {
+                implicitWidth: implicitContentWidth + leftPadding + rightPadding
                 text: qsTr("Correct")
-                enabled: !!root.r.bpm
                 ToolTip.visible: hovered
-                ToolTip.text: qsTr("When the BPM counts the wrong beat: halve it, double it…")
+                ToolTip.text: qsTr("When the BPM counts the wrong beat: halve it, double it…; or go back to the analysed or file tag's BPM")
                 onClicked: correctMenu.popup()
                 Menu {
                     id: correctMenu
-                    MenuItem { text: qsTr("Halve (½)"); onTriggered: root.scaleBpm(0.5) }
-                    MenuItem { text: qsTr("Two Thirds (⅔)"); onTriggered: root.scaleBpm(2 / 3) }
-                    MenuItem { text: qsTr("One and a Half (1½)"); onTriggered: root.scaleBpm(1.5) }
-                    MenuItem { text: qsTr("Double (2×)"); onTriggered: root.scaleBpm(2) }
+                    MenuItem {
+                        enabled: root.r.bpmSource !== "detected" && root.r.detectedBpm != null
+                        text: root.r.detectedBpm != null ? qsTr("Use the Analysed BPM (%1)").arg(Session.fmtBpm(root.r.detectedBpm)) : qsTr("Use the Analysed BPM")
+                        onTriggered: Session.run("recording_reset_bpm", { id: root.r.id, from: "detected" })
+                    }
+                    MenuItem {
+                        enabled: root.r.bpmSource !== "tag" && (root.r.tagBpm != null || root.r.files.length > 0)
+                        text: root.r.tagBpm != null ? qsTr("Use the File Tag's BPM (%1)").arg(Session.fmtBpm(root.r.tagBpm)) : qsTr("Use the File Tag's BPM")
+                        onTriggered: Session.run("recording_reset_bpm", { id: root.r.id, from: "tag" })
+                    }
+                    MenuSeparator {}
+                    MenuItem { enabled: !!root.r.bpm; text: qsTr("Halve (½)"); onTriggered: root.scaleBpm(0.5) }
+                    MenuItem { enabled: !!root.r.bpm; text: qsTr("Two Thirds (⅔)"); onTriggered: root.scaleBpm(2 / 3) }
+                    MenuItem { enabled: !!root.r.bpm; text: qsTr("One and a Half (1½)"); onTriggered: root.scaleBpm(1.5) }
+                    MenuItem { enabled: !!root.r.bpm; text: qsTr("Double (2×)"); onTriggered: root.scaleBpm(2) }
                 }
-            }
-        }
-        Item { implicitWidth: 1 }
-        RowLayout {
-            Button {
-                enabled: root.r.bpmSource !== "detected"
-                icon.source: Theme.icon("reload")
-                text: qsTr("Analysed") + (root.r.detectedBpm != null ? " (" + Session.fmtBpm(root.r.detectedBpm) + ")" : "")
-                onClicked: Session.run("recording_reset_bpm", { id: root.r.id, from: "detected" })
-            }
-            Button {
-                enabled: root.r.bpmSource !== "tag" && (root.r.tagBpm != null || root.r.files.length > 0)
-                icon.source: Theme.icon("reload")
-                text: qsTr("File tag") + (root.r.tagBpm != null ? " (" + Session.fmtBpm(root.r.tagBpm) + ")" : "")
-                onClicked: Session.run("recording_reset_bpm", { id: root.r.id, from: "tag" })
             }
         }
         Item { implicitWidth: 1 }
@@ -200,16 +197,17 @@ ColumnLayout {
     }
     RowLayout {
         visible: root.r.files.length > 0
-        Label { visible: root.audio.stemsReady; text: qsTr("Stems ready") }
-        Button { enabled: root.audio.stemsReady; text: qsTr("Delete stems"); onClicked: Session.run("stems_delete", { recordingId: root.r.id }) }
         Label {
-            visible: !root.audio.stemsReady && !!root.job && root.job.state !== "failed"
-            text: root.job && root.job.state === "running" ? qsTr("Preparing stems… %1%").arg(Math.round(root.job.percent)) : qsTr("Preparing stems… (queued)")
+            readonly property bool working: !root.audio.stemsReady && !!root.job && root.job.state !== "failed"
+            text: root.audio.stemsReady ? qsTr("Stems ready")
+                : working ? (root.job.state === "running" ? qsTr("Preparing stems… %1%").arg(Math.round(root.job.percent)) : qsTr("Preparing stems… (queued)"))
+                : qsTr("No stems")
         }
+        // One button, as the stems are: ready, Delete; none, Prepare (not while preparing).
         Button {
-            enabled: !root.audio.stemsReady && !(root.job && root.job.state !== "failed")
-            text: qsTr("Prepare Stems")
-            onClicked: Session.run("stems_prepare", { recordingIds: [root.r.id] })
+            enabled: root.audio.stemsReady || !(root.job && root.job.state !== "failed")
+            text: root.audio.stemsReady ? qsTr("Delete Stems") : qsTr("Prepare Stems")
+            onClicked: root.audio.stemsReady ? Session.run("stems_delete", { recordingId: root.r.id }) : Session.run("stems_prepare", { recordingIds: [root.r.id] })
         }
         Label { visible: !!root.job && root.job.state === "failed"; text: root.job ? root.job.message || "" : ""; color: Theme.warn }
     }

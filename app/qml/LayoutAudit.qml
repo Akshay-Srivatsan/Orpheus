@@ -2,8 +2,9 @@ import QtQuick
 import QtQuick.Controls
 
 // A development aid (run with --audit-layout): lists visible items that stick
-// out of their parent, and items in a row that overlap the next, to find
-// controls spilling out of their containers at a given window size.
+// out of their parent, items in a row that overlap the next, and controls
+// too narrow for their text, to find controls spilling out of (or squeezed
+// in) their containers at a given window size.
 QtObject {
     id: audit
     /// Pixels of slack before something counts.
@@ -40,6 +41,9 @@ QtObject {
                 if (over > slack && !(k === item.background) && !/Ripple|Rectangle|DropArea|MouseArea|Canvas/.test(String(k)))
                     out.push("OVERFLOW " + Math.round(over) + "px: " + path(k, 5) + " (" + Math.round(k.width) + "×" + Math.round(k.height) + " in " + Math.round(item.width) + "×" + Math.round(item.height) + ")");
             }
+            // A button (or field) narrower than its content: its text is cut short.
+            if (k.availableWidth !== undefined && k.implicitContentWidth !== undefined && k.text && k.availableWidth + slack < k.implicitContentWidth)
+                out.push("SQUEEZED " + Math.round(k.implicitContentWidth - k.availableWidth) + "px: " + path(k, 4));
             if (row && prev && k.x < prev.x + prev.width - slack && Math.abs(k.y - prev.y) < k.height)
                 out.push("OVERLAP " + Math.round(prev.x + prev.width - k.x) + "px: " + path(prev, 4) + " / " + name(k));
             prev = k;

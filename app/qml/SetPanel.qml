@@ -176,6 +176,11 @@ Pane {
                     MenuItem { text: qsTr("Duplicate"); onTriggered: Session.run("setlist_duplicate", { id: root.set.id, name: qsTr("%1 (copy)").arg(root.set.name) }) }
                     MenuItem { text: qsTr("Settings for This Set…"); onTriggered: chimeDialog.open() }
                     MenuItem {
+                        text: qsTr("Use the Club's Newer Guidelines")
+                        enabled: !!root.v && !!root.v.club && !!root.v.club.newerVersion
+                        onTriggered: Session.run("setlist_update", { id: root.set.id, patch: { club: { id: root.v.club.id, version: root.v.club.newerVersion } } })
+                    }
+                    MenuItem {
                         text: qsTr("Fit All Tempos to Their Styles")
                         ToolTip.visible: hovered
                         ToolTip.text: qsTr("E.g. after changing the club: songs playing outside their style's tempo get the nearest that fits; the others stay as they are")
@@ -285,11 +290,6 @@ Pane {
                 onActivated: index => {
                     if (index < choices.length) Session.run("setlist_update", { id: root.set.id, patch: { club: choices[index].ref } });
                 }
-            }
-            Button {
-                enabled: !!root.v && !!root.v.club && !!root.v.club.newerVersion
-                text: qsTr("Use newer guidelines")
-                onClicked: Session.run("setlist_update", { id: root.set.id, patch: { club: { id: root.v.club.id, version: root.v.club.newerVersion } } })
             }
         }
 
@@ -428,10 +428,22 @@ Pane {
             }
         }
 
-        // Add slots and pauses; totals.
+        // Totals, on a line of their own (the buttons below take the width).
+        Label {
+            Layout.fillWidth: true
+            Layout.leftMargin: Theme.spacing
+            Layout.rightMargin: Theme.spacing
+            Layout.topMargin: 4
+            elide: Text.ElideRight
+            opacity: Theme.dim
+            text: !root.v ? "" : qsTr("%1 songs · %2").arg(root.v.rows.filter(r => r.number).length).arg(Session.fmtTime(root.v.totalMs))
+                + (root.v.remainingMs && root.p && root.p.startedAt ? " · " + qsTr("%1 left").arg(Session.fmtTime(root.v.remainingMs)) : "")
+        }
+        // Add slots and pauses; the club's guidelines.
         RowLayout {
             Layout.fillWidth: true
             Layout.margins: Theme.spacing
+            Layout.topMargin: 4
             Button {
                 icon.source: Theme.icon("plus"); text: qsTr("Style Slot")
                 ToolTip.visible: hovered
@@ -471,18 +483,11 @@ Pane {
                 onToggled: root.showCheck = checked
                 text: root.v && root.v.warnings ? qsTr("%1 to Check").arg(root.v.warnings) : qsTr("Guidelines")
                 icon.source: Theme.icon(root.v && root.v.warnings ? "warning" : "check")
-                icon.color: root.v && root.v.warnings ? Theme.warn : Theme.ok
+                icon.color: !enabled ? palette.buttonText : root.v && root.v.warnings ? Theme.warn : Theme.ok
                 ToolTip.visible: hovered
-                ToolTip.text: qsTr("How the set follows the club's guidelines")
+                ToolTip.text: enabled ? qsTr("How the set follows the club's guidelines") : qsTr("The set has no club (its guidelines would be checked here)")
             }
-            Label {
-                Layout.fillWidth: true
-                horizontalAlignment: Text.AlignRight
-                elide: Text.ElideRight
-                opacity: Theme.dim
-                text: !root.v ? "" : qsTr("%1 songs · %2").arg(root.v.rows.filter(r => r.number).length).arg(Session.fmtTime(root.v.totalMs))
-                    + (root.v.remainingMs && root.p && root.p.startedAt ? " · " + qsTr("%1 left").arg(Session.fmtTime(root.v.remainingMs)) : "")
-            }
+            Item { Layout.fillWidth: true }
         }
     }
 }

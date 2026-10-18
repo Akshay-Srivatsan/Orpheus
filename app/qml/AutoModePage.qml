@@ -156,16 +156,15 @@ SettingsPage {
                 }
                 Icon { visible: !!page.tts && page.tts.state === "ready"; glyph: "check"; color: Theme.ok }
                 Label { visible: !!page.tts && page.tts.state === "ready"; text: qsTr("Ready"); color: Theme.ok }
+                // One button, as the voice is: here, Remove…; not, Download (not while downloading).
                 Button {
-                    enabled: !!page.tts && page.tts.state === "ready"
-                    text: qsTr("Remove…")
-                    onClicked: Session.confirm(qsTr("Delete the announcer's model and voices from this computer?"), qsTr("Delete"), ok => { if (ok) Session.run("tts_remove"); })
-                }
-                Button {
-                    enabled: !page.tts || (page.tts.state !== "ready" && page.tts.state !== "installing")
-                    highlighted: true
-                    text: page.tts && page.tts.installedVoices.length ? qsTr("Download This Voice") : qsTr("Download the Voice (%1 MB)").arg(page.a && page.a.model === "fp32" ? 325 : 160)
-                    onClicked: Session.run("tts_install")
+                    readonly property bool ready: !!page.tts && page.tts.state === "ready"
+                    enabled: ready || !page.tts || page.tts.state !== "installing"
+                    highlighted: !ready
+                    text: ready ? qsTr("Remove…")
+                        : page.tts && page.tts.installedVoices.length ? qsTr("Download This Voice") : qsTr("Download the Voice (%1 MB)").arg(page.a && page.a.model === "fp32" ? 325 : 160)
+                    onClicked: ready ? Session.confirm(qsTr("Delete the announcer's model and voices from this computer?"), qsTr("Delete"), ok => { if (ok) Session.run("tts_remove"); })
+                        : Session.run("tts_install")
                 }
                 Label { visible: !!page.tts && page.tts.state === "error"; text: page.tts && page.tts.message ? page.tts.message : ""; color: Theme.error }
             }
