@@ -25,6 +25,14 @@ pub struct SetFile {
     pub notes: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub club: Option<SetClub>,
+    /// Its pause between songs (seconds), and those around announcements, if
+    /// it has its own.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pause: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub announce_pause_before: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub announce_pause_after: Option<f64>,
     #[serde(rename = "entry")]
     pub entries: Vec<SetFileEntry>,
 }
@@ -172,6 +180,9 @@ pub fn export(store: &Store, setlist_id: &str, club_name: Option<String>, club_r
         mode: set.mode,
         notes: set.notes,
         club: set.club.map(|c| SetClub { id: c.id, version: c.version, name: club_name.unwrap_or_default(), rules: club_rules }),
+        pause: set.pause_secs,
+        announce_pause_before: set.announce_pause_before,
+        announce_pause_after: set.announce_pause_after,
         entries,
     };
     let body = toml::to_string_pretty(&file)?;
@@ -200,6 +211,13 @@ pub fn import(store: &Store, text: &str, club: Option<ClubRef>) -> Result<Import
     let name = if file.name.trim().is_empty() { "Imported set".to_string() } else { file.name.clone() };
     let mode = if file.mode == "preset" { "preset" } else { "live" };
     let sid = store.setlist_create(&name, mode, club, file.date.clone())?;
+    let pauses = SetlistPatch {
+        pause_secs: Some(file.pause),
+        announce_pause_before: Some(file.announce_pause_before),
+        announce_pause_after: Some(file.announce_pause_after),
+        ..Default::default()
+    };
+    store.setlist_update(&sid, &pauses)?;
     let mut report = ImportReport { setlist_id: sid.clone(), ..Default::default() };
     for e in &file.entries {
         let version_id = match &e.song {
@@ -342,6 +360,8 @@ fn link_chime(store: &Store, c: &SetChime) -> Result<Id> {
             comment: String::new(),
             announcement: None,
             chime: ChimeChoice::default(),
+            announce_pause_before: None,
+            announce_pause_after: None,
             tags: vec![],
             hidden: false,
             unlisted: true,
@@ -528,11 +548,13 @@ mod tests {
         let sid = a.setlist_create("Chimes", "preset", None, None).unwrap();
         a.setlist_update(&sid, &SetlistPatch { chime: Some(ChimeChoice { enabled: Some(true), sound: Some(ding.id.clone()) }), ..Default::default() }).unwrap();
         a.entries_insert(&sid, None, &[NewEntry { version_id: Some(tune.clone()), ..Default::default() }]).unwrap();
+        a.setlist_update(&sid, &SetlistPatch { pause_secs: Some(Some(12.0)), ..Default::default() }).unwrap();
         let text = export(&a, &sid, None, None).unwrap();
         assert!(text.contains("Ding") && text.contains("h-bell") && !text.contains(&ding.id), "{text}");
 
         // Here: the same version.
         let r = import(&a, &text, None).unwrap();
+        assert_eq!(a.setlist(&r.setlist_id).unwrap().pause_secs, Some(12.0), "its pause comes along");
         let e = &a.setlist(&r.setlist_id).unwrap().entries[0];
         assert_eq!(e.chime, ChimeChoice { enabled: Some(true), sound: Some(ding.id.clone()) });
 

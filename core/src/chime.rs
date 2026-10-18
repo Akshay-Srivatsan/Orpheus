@@ -62,6 +62,18 @@ impl<'a> Layers<'a> {
         self.chimes().find_map(|c| c.sound.clone()).or_else(|| a.chime_sound.clone()).filter(|v| !v.is_empty())
     }
 
+    /// The pause before its announcement, and after it (seconds), unless the
+    /// entry has its own: its set's, else its version's, else its song's, else yours.
+    pub fn announce_pauses(&self, a: &AnnounceSettings) -> (f64, f64) {
+        let pick = |f: fn(&Setlist) -> Option<f64>, g: fn(&Version) -> Option<f64>, h: fn(&TrackRecord) -> Option<f64>, yours: f64| {
+            self.set.and_then(f).or_else(|| self.version.and_then(g)).or_else(|| self.song.and_then(h)).unwrap_or(yours)
+        };
+        (
+            pick(|s| s.announce_pause_before, |v| v.announce_pause_before, |t| t.announce_pause_before, a.pause_before_secs),
+            pick(|s| s.announce_pause_after, |v| v.announce_pause_after, |t| t.announce_pause_after, a.pause_after_secs),
+        )
+    }
+
     /// What the levels choose, without your settings.
     pub fn chosen_chime(&self) -> ChimeChoice {
         ChimeChoice { enabled: self.chimes().find_map(|c| c.enabled), sound: self.chimes().find_map(|c| c.sound.clone()) }
@@ -205,6 +217,21 @@ mod tests {
         assert_eq!(plain.chime(&a), None);
         assert_eq!(plain.chime(&AnnounceSettings { chime: true, ..a.clone() }), Some("mine".into()));
         assert_eq!(plain.chime(&AnnounceSettings { chime: true, chime_sound: None, ..a.clone() }), None);
+    }
+
+    #[test]
+    fn announcement_pauses_come_from_the_most_specific_level() {
+        let a = AnnounceSettings { pause_before_secs: 3.0, pause_after_secs: 4.0, ..Default::default() };
+        let song = TrackRecord { announce_pause_after: Some(6.0), ..Default::default() };
+        let mut version: Version = serde_json::from_str(r#"{"id":"v","name":"v"}"#).unwrap();
+        let mut set = Setlist::default();
+        let at = |set: &Setlist, version: &Version| Layers { entry: None, set: Some(set), version: Some(version), song: Some(&song) }.announce_pauses(&a);
+        assert_eq!(at(&set, &version), (3.0, 6.0), "yours, and the song's");
+        version.announce_pause_after = Some(5.0);
+        assert_eq!(at(&set, &version), (3.0, 5.0), "the version's over the song's");
+        set.announce_pause_before = Some(1.0);
+        set.announce_pause_after = Some(2.0);
+        assert_eq!(at(&set, &version), (1.0, 2.0), "the set's over both");
     }
 
     #[test]

@@ -1774,8 +1774,9 @@ pub fn library_view(app: &Arc<App>, query: crate::views::LibraryQuery) -> Res<cr
 pub fn set_view(app: &Arc<App>, id: Id) -> Res<crate::views::SetView> {
     let set = app.store.setlist(&id).map_err(ae)?;
     let ctx = app.view_context(set.club.clone());
-    let mut view = crate::views::set_view(&ctx, &set, &app.store.all_tracks(), app.gap_seconds());
+    let mut view = crate::views::set_view(&ctx, &set, &app.store.all_tracks(), app.gap_seconds_for(Some(&set)));
     view.club = set.club.as_ref().and_then(|r| club_summary_of(app, r));
+    view.default_pause_secs = app.gap_seconds_for(Some(&Setlist { pause_secs: None, ..set.clone() }));
     Ok(view)
 }
 
@@ -1808,7 +1809,7 @@ pub fn song_view(app: &Arc<App>, track_id: Option<Id>, entry_id: Option<Id>) -> 
     let ready = stems_ready(app)?;
     let is_ready = |r: &Recording| ready.contains(&r.rec.id);
     let announce = app.settings.read().announce.clone();
-    let sc = crate::views::SongContext { stems_ready: &is_ready, gap_secs: app.gap_seconds(), announce: &announce, set: set.as_ref() };
+    let sc = crate::views::SongContext { stems_ready: &is_ready, gap_secs: app.gap_seconds_for(set.as_ref()), announce: &announce, set: set.as_ref() };
     let all = app.store.all_tracks();
     let Some(track) = tid.and_then(|t| all.iter().find(|x| x.rec.id == t).cloned()) else {
         // A slot or a pause: only the entry.

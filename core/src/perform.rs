@@ -356,9 +356,26 @@ impl App {
         s.unwrap_or_else(|| self.active_club().and_then(|c| c.set.auto_advance).unwrap_or(false))
     }
 
+    /// The pause between songs in the open set (see `gap_seconds_for`).
     pub fn gap_seconds(&self) -> f64 {
-        let s = self.settings.read().gap_seconds;
-        s.unwrap_or_else(|| self.active_club().and_then(|c| c.set.pause.target).unwrap_or(DEFAULT_PAUSE_SECS))
+        let set = self.perform.lock().setlist_id.clone().and_then(|id| self.store.setlist(&id).ok());
+        self.gap_seconds_for(set.as_ref())
+    }
+
+    /// The pause between songs in `set` (seconds): its own, else its club's
+    /// (with no set, the club in effect), else yours, else `DEFAULT_PAUSE_SECS`
+    /// (a song's own pause is over all).
+    pub fn gap_seconds_for(&self, set: Option<&Setlist>) -> f64 {
+        if let Some(p) = set.and_then(|s| s.pause_secs) {
+            return p;
+        }
+        let club = match set {
+            Some(s) => s.club.as_ref().and_then(|r| self.club(r)),
+            None => self.active_club(),
+        };
+        club.and_then(|c| c.set.pause.target)
+            .or(self.settings.read().gap_seconds)
+            .unwrap_or(DEFAULT_PAUSE_SECS)
     }
 
     pub fn open_setlist(&self, id: Option<Id>) -> Result<()> {
@@ -846,8 +863,10 @@ impl App {
         let a = self.settings.read().announce.clone();
         let speaks = self.has_announcement(entry);
         let with_announcements = speaks || a.enabled;
-        let before = entry.pause_before.unwrap_or(if with_announcements { a.pause_before_secs } else { self.gap_seconds() });
-        let after = if with_announcements { entry.pause_after.unwrap_or(a.pause_after_secs) } else { 0.0 };
+        let gap = || self.gap_seconds_for(self.store.entry(&entry.id).ok().and_then(|(_, sid)| self.store.setlist(&sid).ok()).as_ref());
+        let (ann_before, ann_after) = self.with_layers(entry, |l| l.announce_pauses(&a));
+        let before = entry.pause_before.unwrap_or_else(|| if with_announcements { ann_before } else { gap() });
+        let after = if with_announcements { entry.pause_after.unwrap_or(ann_after) } else { 0.0 };
         (before, after)
     }
 

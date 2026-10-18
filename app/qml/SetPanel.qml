@@ -174,7 +174,7 @@ Pane {
                     id: setMenu
                     MenuItem { text: qsTr("Rename"); onTriggered: root.renaming = true }
                     MenuItem { text: qsTr("Duplicate"); onTriggered: Session.run("setlist_duplicate", { id: root.set.id, name: qsTr("%1 (copy)").arg(root.set.name) }) }
-                    MenuItem { text: qsTr("Announcement Chime…"); onTriggered: chimeDialog.open() }
+                    MenuItem { text: qsTr("Settings for This Set…"); onTriggered: chimeDialog.open() }
                     MenuItem {
                         text: qsTr("Reset Played / Skipped")
                         onTriggered: Session.confirm(qsTr("Mark every song in this set as not played?"), qsTr("Reset"), ok => { if (ok) Session.run("setlist_reset", { id: root.set.id }); })
@@ -196,21 +196,48 @@ Pane {
             }
         }
 
-        // The chime before announcements in this set.
+        // The set's own pauses and chime (over its songs', its club's and yours;
+        // a song's own choice in the set is over all).
         AppDialog {
             id: chimeDialog
-            title: qsTr("Announcement Chime")
+            title: qsTr("Settings for This Set")
             standardButtons: Dialog.Close
             readonly property var announce: Session.settings ? Session.settings.announce : null
-            ColumnLayout {
+            function update(patch) { Session.run("setlist_update", { id: root.set.id, patch: patch }); }
+            GridLayout {
                 anchors.fill: parent
-                spacing: Theme.spacing
+                columns: 2
+                columnSpacing: Theme.spacing
+                rowSpacing: Theme.spacing
                 Label {
+                    Layout.columnSpan: 2
                     Layout.fillWidth: true
-                    Layout.maximumWidth: 380
+                    Layout.maximumWidth: 420
                     wrapMode: Text.WordWrap
-                    text: qsTr("Whether a chime plays before each announcement in this set, and its sound. A song's own choice in this set comes first; by default, each song's (and version's) choice counts, else yours.")
+                    text: qsTr("For every song in this set, unless the song's own settings in the set say otherwise. Left empty, each takes its default: the club's or yours for the pause, each song's (and version's) or yours for announcements.")
                 }
+                FormLabel { text: qsTr("Pause between songs") }
+                SecondsField {
+                    value: root.set ? root.set.pauseSecs : null
+                    placeholder: root.v ? root.v.defaultPauseSecs : 0
+                    onEdited: v => chimeDialog.update({ pauseSecs: v })
+                }
+                FormLabel { text: qsTr("With announcements") }
+                RowLayout {
+                    Label { text: qsTr("Pause") }
+                    SecondsField {
+                        value: root.set ? root.set.announcePauseBefore : null
+                        placeholder: chimeDialog.announce ? chimeDialog.announce.pauseBeforeSecs : 0
+                        onEdited: v => chimeDialog.update({ announcePauseBefore: v })
+                    }
+                    Label { text: qsTr("announcement, pause") }
+                    SecondsField {
+                        value: root.set ? root.set.announcePauseAfter : null
+                        placeholder: chimeDialog.announce ? chimeDialog.announce.pauseAfterSecs : 0
+                        onEdited: v => chimeDialog.update({ announcePauseAfter: v })
+                    }
+                }
+                FormLabel { text: qsTr("Chime") }
                 ChimeField {
                     Layout.fillWidth: true
                     soundAlways: true
@@ -220,7 +247,7 @@ Pane {
                     title: root.set ? qsTr("the set “%1”").arg(root.set.name) : ""
                     beforePicking: () => chimeDialog.close()
                     afterPicking: () => chimeDialog.open()
-                    onEdited: v => Session.run("setlist_update", { id: root.set.id, patch: { chime: v } })
+                    onEdited: v => chimeDialog.update({ chime: v })
                 }
             }
         }

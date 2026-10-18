@@ -982,6 +982,8 @@ pub struct SetView {
     /// The set against its club's guidelines (none without a club).
     pub check: Option<crate::matching::SetCheck>,
     pub warnings: usize,
+    /// The pause between songs it would have without its own (yours, else its club's).
+    pub default_pause_secs: f64,
 }
 
 const NO_AUDIO_REMOVED: &str = "Its audio was removed from the library (Library → Files adds it again)";
@@ -1173,7 +1175,7 @@ pub fn set_view(ctx: &ViewContext, set: &Setlist, tracks: &[Track], gap_secs: f6
         result
     });
     let warnings = check.as_ref().map_or(0, |c| c.issues.iter().filter(|i| i.level == crate::matching::Level::Warn).count());
-    SetView { setlist: set.clone(), club: None, rows, total_ms, remaining_ms, check, warnings }
+    SetView { setlist: set.clone(), club: None, rows, total_ms, remaining_ms, check, warnings, default_pause_secs: gap_secs }
 }
 
 // ---------------------------------------------------------------- clubs
@@ -1272,10 +1274,14 @@ pub struct Inherited {
     pub chime: bool,
     /// The chime's version, and what it is.
     pub chime_sound: Option<crate::model::Id>,
+    /// The pauses before and after its announcement (seconds).
+    pub pause_before: f64,
+    pub pause_after: f64,
 }
 
 fn inherited(l: &crate::chime::Layers, a: &crate::settings::AnnounceSettings) -> Inherited {
-    Inherited { announcement: l.announcement().map(String::from), speaks: l.speaks(a), chime: l.chime_enabled(a), chime_sound: l.chime_sound(a) }
+    let (pause_before, pause_after) = l.announce_pauses(a);
+    Inherited { announcement: l.announcement().map(String::from), speaks: l.speaks(a), chime: l.chime_enabled(a), chime_sound: l.chime_sound(a), pause_before, pause_after }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1458,8 +1464,8 @@ pub fn song_view(ctx: &ViewContext, track: &Track, entry: Option<&SetlistEntry>,
             show_as,
             shown_names: shown.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(" / "),
             playback: ev.map(|v| playback(track.recording_of(&v.id), v, Some(e), st.as_ref())),
-            default_pause_before: if speaks || sc.announce.enabled { sc.announce.pause_before_secs } else { sc.gap_secs },
-            default_pause_after: sc.announce.pause_after_secs,
+            default_pause_before: if speaks || sc.announce.enabled { layers.announce_pauses(sc.announce).0 } else { sc.gap_secs },
+            default_pause_after: layers.announce_pauses(sc.announce).1,
             speaks,
             inherited: inherited(&layers.above_entry(), sc.announce),
             tags: club

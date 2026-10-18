@@ -151,6 +151,12 @@ pub struct Version {
     pub announcement: Option<String>,
     #[serde(default, skip_serializing_if = "ChimeChoice::is_default")]
     pub chime: ChimeChoice,
+    /// The pauses before and after its announcement (seconds), unless a set
+    /// says otherwise; absent: the song's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub announce_pause_before: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub announce_pause_after: Option<f64>,
     /// Your tags (keys into `styles.json`'s `tags`), e.g. "familiar".
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
@@ -191,6 +197,10 @@ pub struct VersionPatch {
     #[serde(default, with = "double_option")]
     pub announcement: Option<Option<String>>,
     pub chime: Option<ChimeChoice>,
+    #[serde(default, with = "double_option")]
+    pub announce_pause_before: Option<Option<f64>>,
+    #[serde(default, with = "double_option")]
+    pub announce_pause_after: Option<Option<f64>>,
     pub tags: Option<Vec<String>>,
     /// Shows it in the library again (`false`).
     pub hidden: Option<bool>,
@@ -452,6 +462,12 @@ pub struct TrackRecord {
     pub announcement: Option<String>,
     #[serde(skip_serializing_if = "ChimeChoice::is_default")]
     pub chime: ChimeChoice,
+    /// The pauses before and after its announcement (seconds), unless its
+    /// version or a set says otherwise; absent: yours.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub announce_pause_before: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub announce_pause_after: Option<f64>,
     pub added_at: i64,
     pub versions: Vec<Version>,
     /// The version that stands for the song (folded library rows, songs
@@ -572,6 +588,10 @@ pub struct TrackPatch {
     #[serde(default, with = "double_option")]
     pub announcement: Option<Option<String>>,
     pub chime: Option<ChimeChoice>,
+    #[serde(default, with = "double_option")]
+    pub announce_pause_before: Option<Option<f64>>,
+    #[serde(default, with = "double_option")]
+    pub announce_pause_after: Option<Option<f64>>,
     /// The primary version (`null`: the first).
     #[serde(default, with = "double_option")]
     pub primary: Option<Option<Id>>,
@@ -728,6 +748,15 @@ pub struct Setlist {
     /// The chime before announcements in this set, over its songs'.
     #[serde(skip_serializing_if = "ChimeChoice::is_default")]
     pub chime: ChimeChoice,
+    /// The pause between songs in this set (seconds), over its club's and yours.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pause_secs: Option<f64>,
+    /// With announcements: the pauses before and after them (seconds), over
+    /// its songs' and yours.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub announce_pause_before: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub announce_pause_after: Option<f64>,
     pub created_at: i64,
     pub updated_at: i64,
     pub entries: Vec<SetlistEntry>,
@@ -783,6 +812,12 @@ pub struct SetlistPatch {
     pub notes: Option<String>,
     pub mode: Option<String>,
     pub chime: Option<ChimeChoice>,
+    #[serde(default, with = "double_option")]
+    pub pause_secs: Option<Option<f64>>,
+    #[serde(default, with = "double_option")]
+    pub announce_pause_before: Option<Option<f64>>,
+    #[serde(default, with = "double_option")]
+    pub announce_pause_after: Option<Option<f64>>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

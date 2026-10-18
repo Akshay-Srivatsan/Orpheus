@@ -234,12 +234,12 @@ Frame {
                 StylePicker { Layout.fillWidth: true; tags: true; value: root.v.tags || []; onEdited: keys => root.patch({ tags: keys }) }
                 FormLabel { text: qsTr("Tempo") }
                 RowLayout {
-                    TextField {
+                    NumberField {
                         implicitWidth: 80
-                        text: root.v.targetBpm ? String(root.v.targetBpm) : ""
+                        minimum: 0
+                        value: root.v.targetBpm ? root.v.targetBpm : null
                         placeholderText: root.view.playback.base ? Session.fmtBpm(root.view.playback.base) : qsTr("orig.")
-                        validator: DoubleValidator { bottom: 0 }
-                        onEditingFinished: root.patch({ targetBpm: text ? Number(text) : null })
+                        onCommitted: v => root.patch({ targetBpm: v })
                     }
                     Label { text: "BPM" }
                     Label {
@@ -270,12 +270,11 @@ Frame {
                 }
                 FormLabel { text: qsTr("Gain") }
                 RowLayout {
-                    TextField {
+                    NumberField {
                         implicitWidth: 80
-                        text: root.v.gainDb != null ? String(root.v.gainDb) : ""
+                        value: root.v.gainDb != null ? root.v.gainDb : null
                         placeholderText: qsTr("recording")
-                        validator: DoubleValidator {}
-                        onEditingFinished: root.patch({ gainDb: text ? Number(text) : null })
+                        onCommitted: v => root.patch({ gainDb: v })
                     }
                     Label { text: "dB" }
                 }
@@ -296,6 +295,21 @@ Frame {
                     versions: root.song.versions.filter(x => x.version.id !== root.v.id).map(x => ({ id: x.version.id, label: x.version.name }))
                     title: qsTr("the version “%1”").arg(root.v.name)
                     onEdited: value => root.patch({ chime: value })
+                }
+                FormLabel { visible: root.speaks; text: qsTr("Pauses") }
+                RowLayout {
+                    visible: root.speaks
+                    SecondsField {
+                        value: root.v.announcePauseBefore === undefined ? null : root.v.announcePauseBefore
+                        placeholder: root.view.inherited.pauseBefore
+                        onEdited: v => root.patch({ announcePauseBefore: v })
+                    }
+                    Label { text: qsTr("announcement,") }
+                    SecondsField {
+                        value: root.v.announcePauseAfter === undefined ? null : root.v.announcePauseAfter
+                        placeholder: root.view.inherited.pauseAfter
+                        onEdited: v => root.patch({ announcePauseAfter: v })
+                    }
                 }
             }
 

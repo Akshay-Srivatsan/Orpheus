@@ -73,7 +73,7 @@ Pane {
                     const v = root.view.versions.find(x => x.version.id === root.view.entry.entry.versionId);
                     return v ? v.version.targetBpm || null : null;
                 }
-                view: root.view && root.view.entry ? root.view.entry : { entry: {}, showAs: [], versionChoices: [], tags: [], isPause: false, shownNames: "", playback: null, defaultPauseBefore: 0, defaultPauseAfter: 0, speaks: false, inherited: { announcement: null, speaks: false, chime: false, chimeSound: "" } }
+                view: root.view && root.view.entry ? root.view.entry : { entry: {}, showAs: [], versionChoices: [], tags: [], isPause: false, shownNames: "", playback: null, defaultPauseBefore: 0, defaultPauseAfter: 0, speaks: false, inherited: { announcement: null, speaks: false, chime: false, chimeSound: "", pauseBefore: 0, pauseAfter: 0 } }
             }
 
             Frame {
@@ -121,6 +121,7 @@ Pane {
                     }
                     // What auto mode says before it, unless a version or set says otherwise.
                     GridLayout {
+                        id: songAnnounce
                         Layout.fillWidth: true
                         columns: 2
                         columnSpacing: Theme.spacing
@@ -145,6 +146,21 @@ Pane {
                             versions: root.view ? root.view.versions.map(x => ({ id: x.version.id, label: x.version.name })) : []
                             title: root.t ? qsTr("“%1”").arg(root.t.title) : ""
                             onEdited: v => root.patchTrack({ chime: v })
+                        }
+                        FormLabel { visible: songAnnounce.speaks; text: qsTr("Pauses") }
+                        RowLayout {
+                            visible: songAnnounce.speaks
+                            SecondsField {
+                                value: root.t && root.t.announcePauseBefore !== undefined ? root.t.announcePauseBefore : null
+                                placeholder: songAnnounce.announce ? songAnnounce.announce.pauseBeforeSecs : 0
+                                onEdited: v => root.patchTrack({ announcePauseBefore: v })
+                            }
+                            Label { text: qsTr("announcement,") }
+                            SecondsField {
+                                value: root.t && root.t.announcePauseAfter !== undefined ? root.t.announcePauseAfter : null
+                                placeholder: songAnnounce.announce ? songAnnounce.announce.pauseAfterSecs : 0
+                                onEdited: v => root.patchTrack({ announcePauseAfter: v })
+                            }
                         }
                     }
                     Label {

@@ -135,12 +135,12 @@ GroupBox {
             FormLabel { visible: !root.pause; text: qsTr("Tempo") }
             RowLayout {
                 visible: !root.pause
-                TextField {
+                NumberField {
                     implicitWidth: 80
-                    text: root.e.overrides && root.e.overrides.targetBpm ? String(root.e.overrides.targetBpm) : ""
+                    minimum: 0
+                    value: root.e.overrides && root.e.overrides.targetBpm ? root.e.overrides.targetBpm : null
                     placeholderText: root.versionTargetBpm ? Session.fmtBpm(root.versionTargetBpm) : qsTr("orig.")
-                    validator: DoubleValidator { bottom: 0 }
-                    onEditingFinished: root.override({ targetBpm: text ? Number(text) : null })
+                    onCommitted: v => root.override({ targetBpm: v })
                 }
                 Label { text: "BPM" }
                 Label {
@@ -160,12 +160,11 @@ GroupBox {
             FormLabel { visible: !root.pause; text: qsTr("Gain") }
             RowLayout {
                 visible: !root.pause
-                TextField {
+                NumberField {
                     implicitWidth: 80
-                    text: root.e.overrides && root.e.overrides.gainDb != null ? String(root.e.overrides.gainDb) : ""
+                    value: root.e.overrides && root.e.overrides.gainDb != null ? root.e.overrides.gainDb : null
                     placeholderText: qsTr("inherit")
-                    validator: DoubleValidator {}
-                    onEditingFinished: root.override({ gainDb: text ? Number(text) : null })
+                    onCommitted: v => root.override({ gainDb: v })
                 }
                 Label { text: "dB" }
             }
@@ -210,12 +209,12 @@ GroupBox {
 
             FormLabel { text: root.pause ? qsTr("Length") : qsTr("Pause before") }
             RowLayout {
-                TextField {
+                NumberField {
                     implicitWidth: 70
-                    text: root.e.pauseBefore != null ? String(root.e.pauseBefore) : ""
+                    minimum: 0
+                    value: root.e.pauseBefore != null ? root.e.pauseBefore : null
                     placeholderText: String(root.view.defaultPauseBefore)
-                    validator: DoubleValidator { bottom: 0 }
-                    onEditingFinished: root.update({ pauseBefore: text === "" ? null : Number(text) })
+                    onCommitted: v => root.update({ pauseBefore: v })
                 }
                 Label { text: "s" }
             }
@@ -241,12 +240,12 @@ GroupBox {
             FormLabel { visible: root.view.speaks; text: qsTr("Then pause") }
             RowLayout {
                 visible: root.view.speaks
-                TextField {
+                NumberField {
                     implicitWidth: 70
-                    text: root.e.pauseAfter != null ? String(root.e.pauseAfter) : ""
+                    minimum: 0
+                    value: root.e.pauseAfter != null ? root.e.pauseAfter : null
                     placeholderText: String(root.view.defaultPauseAfter)
-                    validator: DoubleValidator { bottom: 0 }
-                    onEditingFinished: root.update({ pauseAfter: text === "" ? null : Number(text) })
+                    onCommitted: v => root.update({ pauseAfter: v })
                 }
                 Label { text: "s" }
             }

@@ -28,14 +28,14 @@ SettingsPage {
 
         FormLabel { text: qsTr("Pause between songs") }
         RowLayout {
-            TextField {
+            NumberField {
                 implicitWidth: 70
-                text: s && s.gapSeconds != null ? String(s.gapSeconds) : ""
+                minimum: 0
+                value: s && s.gapSeconds != null ? s.gapSeconds : null
                 placeholderText: "8"
-                validator: DoubleValidator { bottom: 0 }
-                onEditingFinished: set({ gapSeconds: text ? Number(text) : null })
+                onCommitted: v => set({ gapSeconds: v })
             }
-            Label { text: qsTr("seconds (empty = the club's)") ; opacity: 0.7 }
+            Label { text: qsTr("seconds, unless the set or its club says otherwise (a set's own: its ⋯ menu)"); opacity: 0.7 }
         }
 
         FormLabel { text: qsTr("Next song") }
@@ -84,12 +84,12 @@ SettingsPage {
 
         FormLabel { text: qsTr("Fade-out length") }
         RowLayout {
-            TextField {
+            NumberField {
                 implicitWidth: 60
-                text: s && s.fadeOutMs != null ? String(s.fadeOutMs / 1000) : ""
+                minimum: 0.5
+                value: s && s.fadeOutMs != null ? s.fadeOutMs / 1000 : null
                 placeholderText: "5"
-                validator: DoubleValidator { bottom: 0.5 }
-                onEditingFinished: set({ fadeOutMs: text ? Math.round(Number(text) * 1000) : null })
+                onCommitted: v => set({ fadeOutMs: v === null ? null : Math.round(v * 1000) })
             }
             Label { text: qsTr("seconds") }
         }
