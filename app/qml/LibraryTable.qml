@@ -122,9 +122,7 @@ FocusScope {
     /// A row's menu (selecting it, unless it's in the selection), at the pointer or
     /// below `button`. It starts with the row's values the table has no room for.
     function openMenu(row, r, button) {
-        const index = tree.index(row, 0);
-        if (!selection.isRowSelected(row, index.parent))
-            selection.setCurrentIndex(index, ItemSelectionModel.ClearAndSelect | ItemSelectionModel.Rows);
+        if (!r || !Session.selectedSet[r.versionId]) clickRow(row, 0);
         menu.rows = selectedRows();
         menu.historyRow = r;
         menu.details = overflow.map(k => ({ name: names[k], value: cellText(r, k) })).filter(d => d.value !== "");
@@ -173,10 +171,9 @@ FocusScope {
     // gives as its edit role), never through model indexes, which a reload
     // invalidates.
     property var flat: []
-    // A reload keeps the selection (and doesn't change what Info shows).
-    property bool restoring: false
+    /// The rows by version (for the selection, which is Session's by version).
+    property var byVersion: ({})
     onViewChanged: {
-        restoring = true;
         const all = [];
         const keyed = rows => rows.map(r => {
             const o = Object.assign({}, r, { k: all.length });
@@ -186,6 +183,12 @@ FocusScope {
         });
         const rows = keyed(view ? view.rows : []);
         flat = all;
+        const byV = {};
+        for (const r of all) if (!byV[r.versionId]) byV[r.versionId] = r;
+        byVersion = byV;
+        // The selection keeps what's still here (it follows the songs, not the rows).
+        const kept = Session.selected.filter(id => !!byV[id]);
+        if (kept.length !== Session.selected.length) Session.selected = kept;
         songs.rows = rows;
         if (Session.unfolded.length) {
             for (let r = 0; r < tree.rows; r++) {
@@ -193,28 +196,58 @@ FocusScope {
                 if (row && Session.unfolded.includes(row.trackId)) tree.expand(r);
             }
         }
-        restoreSelection();
-        restoring = false;
     }
 
-    /// The row a Shift-click extends the selection from (the last clicked).
+    /// The row a Shift-click (or Shift-arrow) extends the selection from.
     property int anchorRow: -1
+    /// The selection is Session's (versions); Qt's selection model only keeps
+    /// the current row (for the keyboard). Everything here takes one pass at
+    /// most (Qt's model got slower with each row selected: selecting a big
+    /// library hung the app).
+    ///
     /// A click on a row: selects it; with Ctrl (⌘ on a Mac) adds or removes
     /// it; with Shift, selects from the last row clicked to it. (The rows
     /// handle their clicks, for double-clicks and dragging.)
     function clickRow(row, modifiers) {
-        const index = tree.index(row, 0);
         // The table takes the keyboard (arrows, Ctrl+A, Delete).
         tree.forceActiveFocus();
+        const r = rowAt(row);
+        if (!r) return;
         if ((modifiers & Qt.ShiftModifier) && anchorRow >= 0 && anchorRow < tree.rows) {
-            if (!(modifiers & Qt.ControlModifier)) selection.clearSelection();
-            for (let r = Math.min(anchorRow, row); r <= Math.max(anchorRow, row); r++)
-                selection.select(tree.index(r, 0), ItemSelectionModel.Select | ItemSelectionModel.Rows);
-            selection.setCurrentIndex(index, ItemSelectionModel.NoUpdate);
-            return;
+            const range = rangeIds(anchorRow, row);
+            if (modifiers & Qt.ControlModifier) {
+                const add = range.filter(id => !Session.selectedSet[id]);
+                Session.selected = Session.selected.concat(add);
+            } else {
+                Session.selected = range;
+            }
+        } else {
+            if (modifiers & Qt.ControlModifier)
+                Session.selected = Session.selectedSet[r.versionId] ? Session.selected.filter(id => id !== r.versionId) : Session.selected.concat([r.versionId]);
+            else
+                Session.selected = [r.versionId];
+            anchorRow = row;
         }
-        selection.setCurrentIndex(index, ((modifiers & Qt.ControlModifier) ? ItemSelectionModel.Toggle : ItemSelectionModel.ClearAndSelect) | ItemSelectionModel.Rows);
-        anchorRow = row;
+        setCurrent(row);
+    }
+    /// The versions of rows `a` to `b` (shown rows, in order).
+    function rangeIds(a, b) {
+        const out = [];
+        for (let i = Math.min(a, b); i <= Math.max(a, b); i++) {
+            const x = rowAt(i);
+            if (x) out.push(x.versionId);
+        }
+        return out;
+    }
+    /// The keyboard's row; Info shows its song (not while choosing a chime: Info keeps what it's for).
+    function setCurrent(row) {
+        selection.setCurrentIndex(tree.index(row, 0), ItemSelectionModel.NoUpdate);
+        tree.positionViewAtRow(row, TableView.Contain);
+        const r = rowAt(row);
+        if (r && !Session.chimePick) {
+            Session.inspectTrack = r.trackId;
+            Session.inspectEntry = "";
+        }
     }
 
     function rowAt(r) { return r >= 0 && r < tree.rows ? flat[songs.data(tree.index(r, 0), Qt.DisplayRole)] : null; }
@@ -222,34 +255,10 @@ FocusScope {
     ItemSelectionModel {
         id: selection
         model: songs
-        onSelectionChanged: root.syncSelection()
-        onCurrentChanged: root.syncSelection()
     }
-    /// The selected songs (else the current row) are Session's; Info shows the
-    /// current row (the one clicked), else the last selected.
-    function syncSelection() {
-        if (restoring) return;
-        const rows = selectedRows();
-        const current = selection.currentIndex.valid ? flat[songs.data(selection.currentIndex, Qt.DisplayRole)] : null;
-        Session.selected = (rows.length ? rows : current ? [current] : []).map(r => r.versionId);
-        const shown = current || rows[rows.length - 1];
-        // While a chime is chosen, Info keeps showing what it's for.
-        if (shown && !Session.chimePick) {
-            Session.inspectTrack = shown.trackId;
-            Session.inspectEntry = "";
-        }
-    }
-    /// After a reload, the songs that were selected stay selected.
-    function restoreSelection() {
-        const keep = Session.selected;
-        if (!keep.length) return;
-        for (let r = 0; r < tree.rows; r++) {
-            const row = rowAt(r);
-            if (row && keep.includes(row.versionId)) selection.select(tree.index(r, 0), ItemSelectionModel.Select | ItemSelectionModel.Rows);
-        }
-    }
+    /// The selected rows (by the selection's order).
     function selectedRows() {
-        return selection.selectedIndexes.filter(i => i.column === 0).map(i => flat[songs.data(i, Qt.DisplayRole)]);
+        return Session.selected.map(id => byVersion[id]).filter(r => !!r);
     }
 
     /// Double-click / Enter: fill the slot being chosen, add the edit being
@@ -268,8 +277,9 @@ FocusScope {
         else { Session.sort = key; Session.descending = false; }
     }
 
+    /// Every shown row (Ctrl+A).
     function selectAll() {
-        for (let r = 0; r < tree.rows; r++) selection.select(tree.index(r, 0), ItemSelectionModel.Select | ItemSelectionModel.Rows);
+        if (tree.rows) Session.selected = rangeIds(0, tree.rows - 1);
     }
     function combineSelected() {
         const rows = selectedRows();
@@ -292,17 +302,35 @@ FocusScope {
             else if (p.action === "browse.queueEnd" && Session.selected.length) Session.addToSet(Session.selected, "end");
         }
     }
-    function move(delta) {
+    /// Moves the keyboard's row (and the selection) by `delta`; with `extend`
+    /// (Shift), the selection reaches from the anchor to it.
+    function move(delta, extend) {
         if (!tree.rows) return;
-        const r = Math.max(0, Math.min(tree.rows - 1, tree.currentRow + delta));
-        selection.setCurrentIndex(tree.index(r, 0), ItemSelectionModel.ClearAndSelect | ItemSelectionModel.Rows);
-        tree.positionViewAtRow(r, TableView.Contain);
+        const from = tree.currentRow >= 0 ? tree.currentRow : 0;
+        const r = Math.max(0, Math.min(tree.rows - 1, from + delta));
+        if (extend && anchorRow >= 0) {
+            Session.selected = rangeIds(anchorRow, r);
+        } else {
+            const x = rowAt(r);
+            Session.selected = x ? [x.versionId] : [];
+            anchorRow = r;
+        }
+        setCurrent(r);
     }
 
     // Delete or Backspace (the Mac's Delete key) removes songs from a crate;
     // Return or Enter loads (or fills the slot); Escape stops choosing.
     Keys.onPressed: event => {
-        if (event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace) {
+        const page = Math.max(1, Math.floor(tree.height / 24) - 1);
+        const step = { [Qt.Key_Up]: -1, [Qt.Key_Down]: 1, [Qt.Key_PageUp]: -page, [Qt.Key_PageDown]: page, [Qt.Key_Home]: -tree.rows, [Qt.Key_End]: tree.rows }[event.key];
+        if (step !== undefined) {
+            move(step, !!(event.modifiers & Qt.ShiftModifier));
+            event.accepted = true;
+        } else if ((event.key === Qt.Key_Left || event.key === Qt.Key_Right) && tree.currentRow >= 0) {
+            // Folds and unfolds the current song's versions.
+            if (event.key === Qt.Key_Right) tree.expand(tree.currentRow); else tree.collapse(tree.currentRow);
+            event.accepted = true;
+        } else if (event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace) {
             const c = Session.view.kind === "crate" ? Session.crates.find(x => x.id === Session.view.id) : null;
             if (c && !c.smart && Session.selected.length) Session.run("crate_remove", { id: c.id, versionIds: Session.selected });
             event.accepted = true;
@@ -364,9 +392,11 @@ FocusScope {
                 clip: true
                 focus: true
                 model: songs
+                // The current row only: the selection is Session's (see clickRow), and
+                // the table handles its keys itself.
                 selectionModel: selection
-                selectionBehavior: TableView.SelectRows
-                selectionMode: TableView.ExtendedSelection
+                selectionBehavior: TableView.SelectionDisabled
+                keyNavigationEnabled: false
                 alternatingRows: true
                 boundsBehavior: Flickable.StopAtBounds
                 columnWidthProvider: c => root.columnWidth(c)
@@ -397,7 +427,7 @@ FocusScope {
                     readonly property bool dim: !!r && (r.playedInSet || r.suggested || r.availability === "missing" || r.unlisted)
                     // Selected rows only (TreeViewDelegate also highlights the current
                     // row: a row Ctrl-clicked out of the selection looked still in it).
-                    highlighted: selected
+                    highlighted: !!r && !!Session.selectedSet[r.versionId]
                     readonly property color fg: highlighted ? palette.highlightedText : palette.text
 
                     contentItem: Loader {
@@ -538,7 +568,7 @@ FocusScope {
                     // Drag the selected songs (or this one) to the set, a deck, a crate or a style.
                     DragHandler { id: dragging; target: null }
                     DragLabel {
-                        readonly property var ids: Session.selected.length && cell.r && Session.selected.includes(cell.r.versionId) ? Session.selected : cell.r ? [cell.r.versionId] : []
+                        readonly property var ids: cell.r && Session.selectedSet[cell.r.versionId] ? Session.selected : cell.r ? [cell.r.versionId] : []
                         handler: dragging
                         text: ids.length > 1 ? qsTr("%n songs", "", ids.length) : cell.r ? cell.r.title : ""
                         payload: ({ "application/x-orpheus-versions": JSON.stringify(ids) })

@@ -354,7 +354,7 @@ Pane {
                     rowIndex: index
                     current: !!root.p && modelData.entry.id === root.p.currentEntryId
                     next: !!root.p && modelData.entry.id === root.p.nextEntryId
-                    selected: Session.selectedEntries.includes(modelData.entry.id)
+                    selected: !!Session.selectedEntriesSet[modelData.entry.id]
                     dropAbove: entries.dropIndex === index
                     onPicked: modifiers => { entries.forceActiveFocus(); root.select(modelData.entry, modifiers); }
                     onChosen: root.choose(modelData.entry)

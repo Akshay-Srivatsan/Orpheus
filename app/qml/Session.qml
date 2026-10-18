@@ -97,6 +97,9 @@ QtObject {
     /// Selected library rows (version ids) and set entries.
     property var selected: []
     property var selectedEntries: []
+    /// The same, as lookups (rows ask whether they're selected: once each).
+    readonly property var selectedSet: { const m = {}; for (const id of selected) m[id] = true; return m; }
+    readonly property var selectedEntriesSet: { const m = {}; for (const id of selectedEntries) m[id] = true; return m; }
     property string inspectTrack: ""
     property string inspectEntry: ""
     property string rightTab: "set"
