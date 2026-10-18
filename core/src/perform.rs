@@ -681,14 +681,10 @@ impl App {
         let entry_id = match d.entry_id().filter(|id| self.store.entry(id).map(|(_, s)| s == setlist_id).unwrap_or(false)) {
             Some(id) => id,
             None => {
-                // Played without being in the set: insert it after the current song.
+                // Played without being in the set: it goes where Add After puts
+                // songs (after the song the room heard, else the last played).
                 let entries = self.store.entries(&setlist_id);
-                let cur = self.decks[other].entry_id();
-                let at = cur
-                    .and_then(|c| entries.iter().position(|e| e.id == c))
-                    .or_else(|| entries.iter().rposition(|e| e.status != "pending"))
-                    .map(|i| i + 1)
-                    .unwrap_or(0);
+                let at = self.insert_after(&entries.iter().collect::<Vec<_>>()).map_or(0, |i| i + 1);
                 let ids = self.store.entries_insert(
                     &setlist_id,
                     Some(at),
