@@ -15,19 +15,37 @@ Control {
 
     AutoPlan { id: plan }
     readonly property var p: plan.p
-    readonly property var d: plan.liveDeck
+    /// The two decks as double buffering: the front one plays the song (or
+    /// holds it paused partway through), the other has the next one ready.
+    /// Worked out from the decks themselves (the engine's `liveDeck` moves
+    /// only once the room hears the new song). -1: none (the next is shown).
+    readonly property int front: {
+        const ds = Session.decks;
+        const playing = [0, 1].filter(i => ds[i] && ds[i].status === "playing");
+        // Both, while one fades out: the other.
+        if (playing.length === 2) {
+            const steady = playing.filter(i => !ds[i].fading);
+            return steady.length === 1 ? steady[0] : p ? p.liveDeck : playing[0];
+        }
+        if (playing.length === 1) return playing[0];
+        // Paused partway through the song the room heard last.
+        const paused = [0, 1].filter(i => ds[i] && ds[i].status === "paused" && ds[i].elapsedMs > 0 && ds[i].remainingMs > 0
+            && !!p && !!ds[i].entryId && ds[i].entryId === p.currentEntryId);
+        return paused.length ? paused[0] : -1;
+    }
+    readonly property var d: front >= 0 ? Session.decks[front] : null
     readonly property var song: d && d.loaded ? d.song : null
-    readonly property bool audible: !!d && d.audible
-    /// Paused partway through (the room heard it, and the pause hasn't started).
-    readonly property bool pausedMidSong: !!d && d.loaded && d.status === "paused" && !!p && !p.gapStartedAt && d.elapsedMs > 0
+    readonly property bool audible: !!d && d.status === "playing"
+    readonly property bool pausedMidSong: !!d && d.status === "paused"
     readonly property real lengthMs: song ? d.elapsedMs + d.remainingMs : 0
-    /// The song shown: the live one while the room hears it (or it's paused
-    /// partway); once it has faded or ended, the next one (from its deck if
-    /// it's loaded, else from the set).
-    readonly property bool showingLive: !!song && (audible || pausedMidSong)
+    /// The song shown: the front deck's; once it has faded or ended, the next
+    /// one (from its deck if it's loaded, else from the set).
+    readonly property bool showingLive: !!song
     readonly property var nextRow: plan.next && !plan.next.isPause && plan.next.trackId ? plan.next : null
     readonly property var shown: {
-        const k = showingLive ? d : plan.nextDeck && plan.nextDeck.loaded && plan.nextDeck.song ? plan.nextDeck : null;
+        // A song just started (still loading, or not yet past its start) counts as the one shown.
+        const starting = !p ? null : Session.decks.find(x => x && x.song && x.entryId && x.entryId === p.currentEntryId && (x.status === "loading" || (x.status === "paused" && x.elapsedMs === 0))) || null;
+        const k = showingLive ? d : starting || (plan.nextDeck && plan.nextDeck.loaded && plan.nextDeck.song ? plan.nextDeck : null);
         if (k) return { title: k.song.title, artist: k.song.artist, styles: k.song.styles, color: k.song.color, meter: k.song.meter, bpm: k.bpm,
             recordingId: k.recordingId || "", trackId: k.trackId, entryId: k.entryId, elapsedMs: k.elapsedMs, remainingMs: k.remainingMs };
         const r = nextRow;
@@ -40,14 +58,14 @@ Control {
     readonly property color fg: overArt ? "white" : Theme.system.text
 
     function playPause() {
-        if (audible || pausedMidSong) Session.run("deck_action", { deck: p.liveDeck, action: "toggle" });
+        if (front >= 0) Session.run("deck_action", { deck: front, action: "toggle" });
         else plan.playNext();
     }
     /// Dragging the position is deliberate, so it seeks even the song on air
     /// (the protection is against a stray jog wheel or cue button).
     function seek(fraction) {
         if (!showingLive) return;
-        Session.run("deck_seek", { deck: p.liveDeck, ms: Math.round(fraction * lengthMs), force: true });
+        Session.run("deck_seek", { deck: root.front, ms: Math.round(fraction * lengthMs), force: true });
     }
 
     contentItem: ColumnLayout {
@@ -237,7 +255,7 @@ Control {
                     enabled: root.audible && !(root.d && root.d.fading)
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("Fade the song out")
-                    onClicked: Session.run("deck_action", { deck: root.p.liveDeck, action: "fadeOut" })
+                    onClicked: Session.run("deck_action", { deck: root.front, action: "fadeOut" })
                 }
                 Label { text: Session.fmtTime(root.shown ? root.shown.elapsedMs : 0); opacity: Theme.dim; font.features: { "tnum": 1 } }
                 Slider {

@@ -321,6 +321,28 @@ impl App {
         d.is_on_air() && matches!(d.status().as_str(), "playing" | "loading")
     }
 
+    /// The front deck, with the two decks as double buffering (as the simple
+    /// interface and media keys play them): the one playing (while one fades
+    /// out under the other: the other), else one paused partway through the
+    /// song the room heard last. The other deck has the next song ready.
+    /// (`live_deck` moves only once the room hears the new song.)
+    pub fn front_deck(&self) -> Option<usize> {
+        let playing: Vec<usize> = (0..2).filter(|&i| self.decks[i].status() == "playing").collect();
+        match playing.as_slice() {
+            [one] => return Some(*one),
+            [_, _] => {
+                let steady: Vec<usize> = playing.iter().copied().filter(|&i| !self.decks[i].is_fading()).collect();
+                return Some(if let [one] = steady.as_slice() { *one } else { self.live_deck() });
+            }
+            _ => {}
+        }
+        let current = self.current_entry_id()?;
+        (0..2).find(|&i| {
+            let d = &self.decks[i];
+            d.status() == "paused" && d.entry_id().as_deref() == Some(current.as_str()) && d.position_secs() > d.cue_secs()
+        })
+    }
+
     pub fn live_deck(&self) -> usize {
         self.perform.lock().live_deck
     }

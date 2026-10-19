@@ -885,28 +885,23 @@ impl App {
     #[cfg(target_os = "linux")]
     fn media_key(&self, c: crate::mpris::Command) {
         use crate::mpris::Command;
-        let live = self.live_deck();
-        let d = &self.decks[live];
-        let heard = self.audible(live);
-        let (heard_any, in_gap) = {
-            let p = self.perform.lock();
-            (p.heard_any, p.gap_started.is_some())
-        };
-        let paused_mid_song = !heard && d.loaded() && d.status() == "paused" && heard_any && !in_gap;
-        let r = match c {
-            Command::PlayPause | Command::Play if paused_mid_song => {
-                self.deck_play_pause(live);
+        // The front deck (double buffering): the song playing, or paused partway.
+        let front = self.front_deck();
+        let playing = front.is_some_and(|f| self.decks[f].status() == "playing");
+        let r = match (c, front) {
+            (Command::PlayPause, Some(f)) | (Command::Play, Some(f)) if !playing => {
+                self.deck_play_pause(f);
                 Ok(())
             }
-            Command::PlayPause | Command::Pause if heard => {
-                d.pause();
+            (Command::PlayPause, Some(f)) | (Command::Pause, Some(f)) if playing => {
+                self.decks[f].pause();
                 self.emit_perform();
                 Ok(())
             }
-            Command::Play | Command::PlayPause => self.play_next().map(|_| ()),
-            Command::Pause => Ok(()),
-            Command::Next => self.play_next().map(|_| ()),
-            Command::Stop => {
+            (Command::Play | Command::PlayPause, _) => self.play_next().map(|_| ()),
+            (Command::Pause, _) => Ok(()),
+            (Command::Next, _) => self.play_next().map(|_| ()),
+            (Command::Stop, _) => {
                 self.fade_out_air();
                 Ok(())
             }

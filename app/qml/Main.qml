@@ -50,11 +50,11 @@ ApplicationWindow {
     function switchInterface(advanced) { Session.saveSettings({ interface: advanced ? "advanced" : "simple" }); }
     // The simple face has no crossfader: keep it centred, so either deck is heard.
     function centreForSimple() {
-        if (simple && Session.levels && Session.levels.crossfader !== 0.5)
+        if (simple && Session.perform && Session.perform.crossfader !== 0.5)
             Session.run("levels_set", { master: null, cue: null, crossfader: 0.5 });
     }
     onSimpleChanged: centreForSimple()
-    Connections { target: Session; function onLevelsChanged() { window.centreForSimple(); } }
+    Connections { target: Session; function onPerformChanged() { window.centreForSimple(); } }
 
     // ------------------------------------------------------------ menus
 
