@@ -738,6 +738,19 @@ impl App {
 
     /// Loads the up-next song onto the free deck (paused at its start) so it
     /// can be cued in headphones. Never replaces something the DJ loaded by hand.
+    /// Gives the free deck back to auto-load (after you previewed or loaded a
+    /// song there): it loads the set's next song now, as if it had loaded
+    /// what's there itself.
+    pub fn release_deck(&self, deck: usize) -> Result<()> {
+        if deck != self.free_deck() || self.audible(deck) {
+            return Err(anyhow!("Only the free deck goes back to the set's next song (deck {} is the room's).", deck_name(deck)));
+        }
+        self.perform.lock().auto_loaded[deck] = Some(self.decks[deck].load_generation());
+        self.auto_load();
+        self.emit_perform();
+        Ok(())
+    }
+
     pub fn auto_load(&self) {
         let Some(next) = self.next_entry() else { return };
         // A Spotify song coming up is measured early, for levelling. (Nothing
@@ -760,10 +773,10 @@ impl App {
         let replaceable = match status.as_str() {
             "empty" | "error" | "ended" => true,
             "loading" | "playing" => false,
-            // Paused: only replace a stale auto-load (its own, of a set entry that isn't next).
+            // Paused: only replace its own load (or one you released to it) that isn't next.
             _ => {
                 let own = self.perform.lock().auto_loaded[free] == Some(d.load_generation());
-                own && d.entry_id().is_some_and(|e| e != next.id) && !self.audible(free)
+                own && d.entry_id().map_or(true, |e| e != next.id) && !self.audible(free)
             }
         };
         if !replaceable || self.perform.lock().pending.is_some() {

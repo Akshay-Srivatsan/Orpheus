@@ -155,6 +155,15 @@ Frame {
                         onTriggered: Session.addToSet([root.d.versionId], "next")
                     }
                     MenuSeparator {}
+                    // A song you previewed or loaded here stays (auto-load leaves it):
+                    // give the deck back for the set's next song.
+                    MenuItem {
+                        readonly property var next: Session.upNextRow
+                        readonly property bool song: !!next && !next.isPause && !!next.trackId
+                        text: song ? qsTr("Release: Load “%1” Here").arg(next.title) : qsTr("Release to the Set's Next Song")
+                        enabled: root.loaded && song && !root.d.audible && !root.d.upNext && root.deck === Session.freeDeck
+                        onTriggered: root.call("deck_release")
+                    }
                     MenuItem { text: qsTr("Eject"); enabled: root.loaded && !root.d.audible; onTriggered: root.call("deck_action", { action: "unload" }) }
                 }
             }

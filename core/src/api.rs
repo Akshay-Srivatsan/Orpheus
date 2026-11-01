@@ -3392,6 +3392,15 @@ pub fn call(app: &Arc<App>, name: &str, args: serde_json::Value) -> Res<serde_js
         "spotify_cache_bytes" => json(spotify_cache_bytes(app)),
         "spotify_clear_cache" => json(spotify_clear_cache(app)),
         "stems_ready" => json(stems_ready(app)),
+        "deck_release" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                deck: usize,
+            }
+            let a: A = parse(args)?;
+            json(app.release_deck(a.deck.min(1)).map_err(ae))
+        }
         "deck_tempo_reset" => {
             #[derive(Deserialize)]
             #[serde(rename_all = "camelCase")]

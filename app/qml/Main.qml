@@ -65,6 +65,14 @@ ApplicationWindow {
         Action { text: qsTr("&Fade Out"); onTriggered: Session.run("deck_action", { deck: deck, action: "fadeOut" }) }
         Action { text: qsTr("Reset &Tempo"); onTriggered: Session.run("deck_tempo_reset", { deck: deck }) }
         MenuSeparator {}
+        Action {
+            readonly property var next: Session.upNextRow
+            readonly property bool song: !!next && !next.isPause && !!next.trackId
+            readonly property var d: Session.decks[deck]
+            text: song ? qsTr("&Release: Load “%1” Here").arg(next.title) : qsTr("&Release to the Set's Next Song")
+            enabled: song && !!d && d.loaded && !Session.audibleDecks[deck] && !d.upNext && deck === Session.freeDeck
+            onTriggered: Session.run("deck_release", { deck: deck })
+        }
         Action { text: qsTr("&Eject"); onTriggered: Session.run("deck_action", { deck: deck, action: "unload" }) }
     }
 
