@@ -122,6 +122,9 @@ pub struct Perform {
     /// The set entry auto-load last failed to load, when, and why (it waits
     /// `AUTO_LOAD_RETRY` before trying it again).
     pub auto_load_failed: Option<(Id, Instant, String)>,
+    /// Each deck's load that auto-load made (its load generation): it replaces
+    /// only its own, never a song you loaded or previewed there.
+    pub auto_loaded: [Option<u64>; 2],
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -757,8 +760,11 @@ impl App {
         let replaceable = match status.as_str() {
             "empty" | "error" | "ended" => true,
             "loading" | "playing" => false,
-            // Paused: only replace a stale auto-load (a set entry that isn't next).
-            _ => d.entry_id().map(|e| e != next.id).unwrap_or(false) && !self.audible(free),
+            // Paused: only replace a stale auto-load (its own, of a set entry that isn't next).
+            _ => {
+                let own = self.perform.lock().auto_loaded[free] == Some(d.load_generation());
+                own && d.entry_id().is_some_and(|e| e != next.id) && !self.audible(free)
+            }
         };
         if !replaceable || self.perform.lock().pending.is_some() {
             return;
@@ -773,6 +779,7 @@ impl App {
                 self.perform.lock().auto_load_failed = None;
                 self.untake(&[&format!("deck{free}.tempo")]);
                 d.load(req);
+                self.perform.lock().auto_loaded[free] = Some(d.load_generation());
             }
             Err(e) => {
                 log::warn!("auto-load: {e:#}");
